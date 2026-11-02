@@ -15,7 +15,7 @@ import {
   SectionCard,
   StatusPill,
 } from "@rsl/ui";
-import { SubmitButton } from "@/components/ios-feedback";
+import { ActionLink, SubmitButton } from "@/components/ios-feedback";
 import {
   staffSaveFeatureFlagAction,
   staffToggleFeatureFlagAction,
@@ -284,16 +284,66 @@ export default async function StaffRunbooksPage({
         </SectionCard>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        {runbooks.map((rb) => (
-          <SectionCard
-            key={rb.slug}
-            title={rb.title}
-            action={<StatusPill label="Staff Guide" tone="stone" />}
-          >
-            <FormattedGuideBody markdown={rb.body} linkMode="docs" />
-          </SectionCard>
-        ))}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[310px_1fr] lg:items-start">
+        <SectionCard title={`Staff SOP Runbooks (${runbooks.length})`} noPadding>
+          <ul className="divide-y divide-zinc-100 bg-white text-xs">
+            {runbooks.map((rb, idx) => {
+              const selectedDoc = sp.doc || runbooks[0]?.slug || "";
+              const isSelected = selectedDoc !== "all" && rb.slug === selectedDoc;
+              return (
+                <li
+                  key={rb.slug}
+                  className={isSelected ? "bg-emerald-50/75" : "transition hover:bg-zinc-50/80"}
+                >
+                  <ActionLink
+                    href={`/runbooks?doc=${encodeURIComponent(rb.slug)}`}
+                    variant="card"
+                    className="block px-4 py-3.5"
+                  >
+                    <div className="text-[10.5px] font-bold tracking-wider text-zinc-400 uppercase">
+                      SOP #{idx + 1}
+                    </div>
+                    <div
+                      className={`mt-0.5 font-semibold leading-snug ${
+                        isSelected ? "text-emerald-800" : "text-slate-900"
+                      }`}
+                    >
+                      {rb.title}
+                    </div>
+                  </ActionLink>
+                </li>
+              );
+            })}
+            <li className={sp.doc === "all" ? "bg-emerald-50/75" : "transition hover:bg-zinc-50/80"}>
+              <ActionLink
+                href="/runbooks?doc=all"
+                variant="card"
+                className="block px-4 py-3 text-center font-semibold text-emerald-700"
+              >
+                Show All {runbooks.length} Runbooks (Full Page) →
+              </ActionLink>
+            </li>
+          </ul>
+        </SectionCard>
+
+        <div className="space-y-6">
+          {(sp.doc === "all"
+            ? runbooks
+            : [runbooks.find((r) => r.slug === sp.doc) ?? runbooks[0]].filter(
+                (r): r is InternalRunbook => Boolean(r)
+              )
+          ).map((rb) => (
+            <SectionCard
+              key={rb.slug}
+              title={rb.title}
+              action={<StatusPill label="Staff SOP Guide" tone="emerald" showDot={false} />}
+            >
+              <div className="max-w-4xl">
+                <FormattedGuideBody markdown={rb.body} linkMode="docs" />
+              </div>
+            </SectionCard>
+          ))}
+        </div>
       </div>
     </div>
   );

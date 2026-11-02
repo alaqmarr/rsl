@@ -449,12 +449,40 @@ export interface DocsSearchHit {
   summary: string;
 }
 
+function isDocsSearchIndexStale(dbPath: string): boolean {
+  if (!fs.existsSync(dbPath)) return true;
+  try {
+    const dbMtime = fs.statSync(dbPath).mtimeMs;
+    const contentDir = findContentRoot();
+    if (!fs.existsSync(contentDir)) return false;
+    const files = fs
+      .readdirSync(contentDir)
+      .filter((f) => f.endsWith(".md") || f.endsWith(".mdx"));
+    for (const file of files) {
+      const st = fs.statSync(path.join(contentDir, file));
+      if (st.mtimeMs > dbMtime) return true;
+    }
+    const sqlite = new Database(dbPath, { readonly: true });
+    try {
+      const row = sqlite
+        .prepare(`SELECT COUNT(*) AS cnt FROM docs_fts WHERE kind = 'guide'`)
+        .get() as { cnt: number } | undefined;
+      if ((row?.cnt ?? 0) !== files.length) return true;
+    } finally {
+      sqlite.close();
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 export function searchDocs(query: string, surface: "public" | "help" | "admin" = "public"): DocsSearchHit[] {
   const cleaned = query.trim();
   if (!cleaned) return [];
 
   const dbPath = getDocsSearchDbPath();
-  if (!fs.existsSync(dbPath)) {
+  if (isDocsSearchIndexStale(dbPath)) {
     buildDocsSearchIndex();
   }
 

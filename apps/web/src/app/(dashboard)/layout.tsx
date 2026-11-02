@@ -17,6 +17,7 @@ import {
 } from "@rsl/rbac";
 import { BrandLogo, PlatformFooter } from "@rsl/ui";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
+import { PageWalkthroughBanner } from "@/components/page-walkthrough-banner";
 import { WorkspaceAccessProvider } from "@/components/workspace-access-context";
 import { SidebarNavLinks, TopWorkspaceBar } from "@/components/workspace-chrome";
 import { logoutAction, switchWorkspaceAction } from "@/lib/actions";
@@ -309,7 +310,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
               sidebarSlot={workspaceSwitcherCard}
             />
 
-            <main className="w-full flex-1 px-5 py-6 lg:px-8 xl:px-10">{children}</main>
+            <main className="w-full flex-1 px-5 py-6 lg:px-8 xl:px-10">
+              <PageWalkthroughBanner />
+              {children}
+            </main>
 
             <PlatformFooter
               suiteLabel="RapidShift Labs Marketing & Tally Suite"

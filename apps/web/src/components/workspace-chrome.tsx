@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { BrandLogo, IosSpinner } from "@rsl/ui";
 import { useWorkspaceAccess } from "@/components/workspace-access-context";
+import { resolveWebPageGuide } from "@/lib/page-guides";
 import {
   Activity,
   BarChart3,
@@ -74,7 +75,7 @@ const WORKSPACE_NAV_SECTIONS: Array<{
           "Review Channel-by-Channel Breakdown to see which channel brings real collections.",
           "Click Download CSV Report to open any period in Excel or Tally.",
         ],
-        guideSlug: "getting-started",
+        guideSlug: "analytics-cashflow-and-aging-reports",
       },
     ],
   },
@@ -93,7 +94,7 @@ const WORKSPACE_NAV_SECTIONS: Array<{
           "Reply directly inside the 24-hour customer service window, or select an approved template anytime.",
           "Leave private team notes that customers never see.",
         ],
-        guideSlug: "whatsapp-and-broadcasts",
+        guideSlug: "shared-inbox-and-customer-messages",
       },
       {
         href: "/tally",
@@ -135,7 +136,7 @@ const WORKSPACE_NAV_SECTIONS: Array<{
           "Record daily spend & linked sales to track Return per ₹1 Spent.",
           "Log Website Sales Events with unique order IDs so orders are never counted twice.",
         ],
-        guideSlug: "getting-started",
+        guideSlug: "ads-social-posts-and-website-conversions",
       },
       {
         href: "/reviews",
@@ -148,7 +149,7 @@ const WORKSPACE_NAV_SECTIONS: Array<{
           "Filter or review incoming star ratings.",
           "Publish direct owner responses to build local trust.",
         ],
-        guideSlug: "getting-started",
+        guideSlug: "google-reviews-and-smart-replies",
       },
     ],
   },
@@ -166,7 +167,7 @@ const WORKSPACE_NAV_SECTIONS: Array<{
           "Update your personal identity details and verify your work email.",
           "Review active device sessions and sign out unfamiliar browsers in 1 click.",
         ],
-        guideSlug: "getting-started",
+        guideSlug: "team-roles-security-and-business-settings",
       },
       {
         href: "/settings/business",
@@ -179,7 +180,7 @@ const WORKSPACE_NAV_SECTIONS: Array<{
           "Set your GST billing state and GSTIN so tax invoices reflect accurate CGST/SGST or IGST.",
           "Verify your dedicated Tally & API HTTPS subdomain SSL certificates.",
         ],
-        guideSlug: "plans-wallet-and-gst",
+        guideSlug: "team-roles-security-and-business-settings",
       },
       {
         href: "/settings/team",
@@ -192,7 +193,7 @@ const WORKSPACE_NAV_SECTIONS: Array<{
           "Invite colleagues by email and share their direct invitation link.",
           "Update member roles or revoke access whenever responsibilities change.",
         ],
-        guideSlug: "getting-started",
+        guideSlug: "team-roles-security-and-business-settings",
       },
       {
         href: "/connections",
@@ -205,7 +206,7 @@ const WORKSPACE_NAV_SECTIONS: Array<{
           "Complete the Meta / Google whitelisting checklist for your channel.",
           "Paste your Permanent System User token and click Test Live API to verify connectivity.",
         ],
-        guideSlug: "getting-started",
+        guideSlug: "connecting-channels-whatsapp-meta-google",
       },
       {
         href: "/settings/tokens",
@@ -679,91 +680,153 @@ export function TopWorkspaceBar({
       )}
 
       {/* Contextual Help Drawer */}
-      {helpOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div
-            className="fixed inset-0 bg-slate-900/30 backdrop-blur-xs"
-            onClick={() => setHelpOpen(false)}
-          />
-          <aside className="relative z-10 flex h-full w-full max-w-md flex-col justify-between overflow-y-auto border-l border-zinc-200 bg-white p-6 shadow-2xl">
-            <div className="space-y-5">
-              <div className="flex items-start justify-between gap-3 border-b border-zinc-100 pb-4">
+      {helpOpen && (() => {
+        const detailedGuide = resolveWebPageGuide(pathname || "/");
+        const activeSlug = detailedGuide?.guideSlug || currentItem.guideSlug;
+        return (
+          <div className="fixed inset-0 z-50 flex justify-end">
+            <div
+              className="fixed inset-0 bg-slate-900/30 backdrop-blur-xs"
+              onClick={() => setHelpOpen(false)}
+            />
+            <aside className="relative z-10 flex h-full w-full max-w-lg flex-col justify-between overflow-y-auto border-l border-zinc-200 bg-white p-6 shadow-2xl">
+              <div className="space-y-5">
+                <div className="flex items-start justify-between gap-3 border-b border-zinc-100 pb-4">
+                  <div>
+                    <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800 ring-1 ring-emerald-200/70">
+                      Step-by-Step Page Guide
+                    </span>
+                    <h2 className="mt-2 text-lg font-bold tracking-tight text-slate-900">
+                      {detailedGuide?.title || currentItem.helpTitle}
+                    </h2>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setHelpOpen(false)}
+                    className="rounded-lg border border-zinc-200 p-1.5 text-zinc-500 hover:bg-zinc-50"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <p className="text-xs leading-relaxed text-zinc-600">
+                  {detailedGuide?.summary || currentItem.helpSummary}
+                </p>
+
+                <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/70 p-4">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-slate-900">Workspace Setup Progress</span>
+                    <span className="font-bold text-emerald-700 tabular-nums">
+                      {setupDoneCount} / {setupTotalCount} steps complete
+                    </span>
+                  </div>
+                  <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-zinc-200/80">
+                    <div
+                      className="h-full rounded-full bg-emerald-600"
+                      style={{
+                        width: `${Math.round((setupDoneCount / Math.max(1, setupTotalCount)) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {detailedGuide && detailedGuide.prerequisites.length > 0 && (
+                  <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/75 p-3.5 text-xs">
+                    <div className="text-[11px] font-bold tracking-wider text-slate-800 uppercase">
+                      Before You Start
+                    </div>
+                    <ul className="mt-2 space-y-1.5 text-zinc-700">
+                      {detailedGuide.prerequisites.map((req, idx) => (
+                        <li key={idx} className="flex items-start gap-2 leading-relaxed">
+                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-600" />
+                          <span>{req}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
                 <div>
-                  <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800 ring-1 ring-emerald-200/70">
-                    Page Guide
-                  </span>
-                  <h2 className="mt-2 text-lg font-bold tracking-tight text-slate-900">
-                    {currentItem.helpTitle}
-                  </h2>
+                  <h3 className="text-[11px] font-bold tracking-wider text-zinc-500 uppercase">
+                    Minute-by-Minute Steps ({detailedGuide ? detailedGuide.steps.length : currentItem.helpSteps.length})
+                  </h3>
+                  {detailedGuide ? (
+                    <ol className="mt-3 space-y-2.5">
+                      {detailedGuide.steps.map((step, idx) => (
+                        <li
+                          key={idx}
+                          className="flex gap-3 rounded-xl border border-zinc-200/85 bg-zinc-50/50 p-3.5 text-xs text-slate-900"
+                        >
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-bold text-white tabular-nums">
+                            {idx + 1}
+                          </span>
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <div className="font-semibold text-slate-900">{step.title}</div>
+                            <p className="leading-relaxed text-zinc-600">{step.detail}</p>
+                            {step.tip && (
+                              <p className="rounded-lg border border-emerald-200/80 bg-emerald-50/70 px-2.5 py-1.5 text-[11px] font-medium text-emerald-900">
+                                Tip: {step.tip}
+                              </p>
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : (
+                    <ol className="mt-3 space-y-2.5">
+                      {currentItem.helpSteps.map((step, idx) => (
+                        <li
+                          key={idx}
+                          className="flex gap-3 rounded-xl border border-zinc-200/80 bg-zinc-50/50 p-3 text-xs text-slate-900"
+                        >
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-bold text-white">
+                            {idx + 1}
+                          </span>
+                          <span className="leading-relaxed">{step}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
                 </div>
-                <button
-                  type="button"
+
+                {detailedGuide && detailedGuide.commonMistakes.length > 0 && (
+                  <div className="rounded-xl border border-amber-200/85 bg-amber-50/60 p-3.5 text-xs">
+                    <div className="text-[11px] font-bold tracking-wider text-amber-900 uppercase">
+                      Common Mistakes to Avoid
+                    </div>
+                    <ul className="mt-2 space-y-1.5 text-amber-950/90">
+                      {detailedGuide.commonMistakes.map((m, idx) => (
+                        <li key={idx} className="flex items-start gap-2 leading-relaxed">
+                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-600" />
+                          <span>{m}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-6 space-y-2 border-t border-zinc-100 pt-4">
+                <Link
+                  href={`/help?slug=${encodeURIComponent(activeSlug)}`}
                   onClick={() => setHelpOpen(false)}
-                  className="rounded-lg border border-zinc-200 p-1.5 text-zinc-500 hover:bg-zinc-50"
+                  className="rsl-btn-primary w-full"
                 >
-                  <X className="h-4 w-4" />
-                </button>
+                  Open Full Guide Inside App
+                </Link>
+                <a
+                  href={`${docsBaseUrl}/guides/${activeSlug}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rsl-btn-secondary w-full"
+                >
+                  Open Help Center in New Tab ↗
+                </a>
               </div>
-
-              <p className="text-xs leading-relaxed text-zinc-600">{currentItem.helpSummary}</p>
-
-              <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/70 p-4">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-slate-900">Setup Progress</span>
-                  <span className="font-bold text-emerald-700 tabular-nums">
-                    {setupDoneCount} / {setupTotalCount} steps complete
-                  </span>
-                </div>
-                <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-zinc-200/80">
-                  <div
-                    className="h-full rounded-full bg-emerald-600"
-                    style={{
-                      width: `${Math.round((setupDoneCount / Math.max(1, setupTotalCount)) * 100)}%`,
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <h3 className="text-[11px] font-bold tracking-wider text-zinc-500 uppercase">
-                  How to use this screen
-                </h3>
-                <ol className="mt-3 space-y-2.5">
-                  {currentItem.helpSteps.map((step, idx) => (
-                    <li
-                      key={idx}
-                      className="flex gap-3 rounded-xl border border-zinc-200/80 bg-zinc-50/50 p-3 text-xs text-slate-900"
-                    >
-                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-bold text-white">
-                        {idx + 1}
-                      </span>
-                      <span className="leading-relaxed">{step}</span>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            </div>
-
-            <div className="mt-6 space-y-2 border-t border-zinc-100 pt-4">
-              <Link
-                href={`/help?slug=${encodeURIComponent(currentItem.guideSlug)}`}
-                onClick={() => setHelpOpen(false)}
-                className="rsl-btn-primary w-full"
-              >
-                Open Full Guide Inside App
-              </Link>
-              <a
-                href={`${docsBaseUrl}/guides/${currentItem.guideSlug}`}
-                target="_blank"
-                rel="noreferrer"
-                className="rsl-btn-secondary w-full"
-              >
-                Open Help Center in New Tab ↗
-              </a>
-            </div>
-          </aside>
-        </div>
-      )}
+            </aside>
+          </div>
+        );
+      })()}
     </>
   );
 }

@@ -1035,8 +1035,8 @@ export function FormattedGuideBody({
   let inCode = false;
   let codeLang = "";
   let codeLines: string[] = [];
-  let unorderedItems: string[] = [];
-  let orderedItems: string[] = [];
+  let unorderedItems: Array<{ text: string; subBullets: string[] }> = [];
+  let orderedItems: Array<{ num: number; text: string; subBullets: string[] }> = [];
   let quoteLines: string[] = [];
   let tableRows: string[][] = [];
   let blockIdx = 0;
@@ -1057,7 +1057,22 @@ export function FormattedGuideBody({
               className="mt-2.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-600"
             />
             <div className="min-w-0 flex-1">
-              {renderInlineGuideTokens(item, linkMode, `ul-${blockIdx}-${i}`)}
+              <div>{renderInlineGuideTokens(item.text, linkMode, `ul-${blockIdx}-${i}`)}</div>
+              {item.subBullets.length > 0 && (
+                <ul className="mt-1.5 space-y-1 pl-1">
+                  {item.subBullets.map((sub, si) => (
+                    <li
+                      key={si}
+                      className="flex items-start gap-2 text-[13px] leading-[1.6] text-zinc-600"
+                    >
+                      <span className="mt-2 inline-block h-1 w-1 shrink-0 rounded-full bg-zinc-400" />
+                      <span className="min-w-0 flex-1">
+                        {renderInlineGuideTokens(sub, linkMode, `ulsub-${blockIdx}-${i}-${si}`)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </li>
         ))}
@@ -1077,13 +1092,28 @@ export function FormattedGuideBody({
             className="flex items-start gap-3 rounded-xl border border-zinc-200/80 bg-zinc-50/70 px-4 py-3 text-[14px] leading-[1.65] text-zinc-700"
           >
             <span
-              style={{ width: 24, height: 24, flexShrink: 0 }}
-              className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200/80 tabular-nums"
+              style={{ minWidth: 24, height: 24, flexShrink: 0 }}
+              className="mt-0.5 inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-emerald-50 px-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200/80 tabular-nums"
             >
-              {i + 1}
+              {item.num}
             </span>
             <div className="min-w-0 flex-1">
-              {renderInlineGuideTokens(item, linkMode, `ol-${blockIdx}-${i}`)}
+              <div>{renderInlineGuideTokens(item.text, linkMode, `ol-${blockIdx}-${i}`)}</div>
+              {item.subBullets.length > 0 && (
+                <ul className="mt-2 space-y-1.5 border-t border-zinc-200/70 pt-2">
+                  {item.subBullets.map((sub, si) => (
+                    <li
+                      key={si}
+                      className="flex items-start gap-2 text-[13px] leading-[1.6] text-zinc-600"
+                    >
+                      <span className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+                      <span className="min-w-0 flex-1">
+                        {renderInlineGuideTokens(sub, linkMode, `olsub-${blockIdx}-${i}-${si}`)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </li>
         ))}
@@ -1251,16 +1281,53 @@ export function FormattedGuideBody({
       continue;
     }
 
-    if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-      flushOrdered();
-      unorderedItems.push(trimmed.slice(2).trim());
+    if (/^-{3,}$/.test(trimmed) || /^\*{3,}$/.test(trimmed)) {
+      flushAll();
+      blocks.push(<hr key={`hr-${blockIdx++}`} className="my-6 border-zinc-200/80" />);
       continue;
     }
 
-    const orderedMatch = /^\d+\.\s+(.+)$/.exec(trimmed);
+    if (trimmed.startsWith("#### ")) {
+      flushAll();
+      const headingText = trimmed.slice(5).trim();
+      blocks.push(
+        <h4
+          key={`h4-${blockIdx++}`}
+          className="mt-4 mb-1.5 text-[13.5px] font-semibold text-slate-900"
+        >
+          {renderInlineGuideTokens(headingText, linkMode, `h4-${blockIdx}`)}
+        </h4>
+      );
+      continue;
+    }
+
+    const indentedSubBullet = /^\s{2,}[-*]\s+(.+)$/.exec(rawLine);
+    if (indentedSubBullet) {
+      const subText = indentedSubBullet[1]!.trim();
+      if (orderedItems.length > 0) {
+        orderedItems[orderedItems.length - 1]!.subBullets.push(subText);
+        continue;
+      }
+      if (unorderedItems.length > 0) {
+        unorderedItems[unorderedItems.length - 1]!.subBullets.push(subText);
+        continue;
+      }
+    }
+
+    if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+      flushOrdered();
+      unorderedItems.push({ text: trimmed.slice(2).trim(), subBullets: [] });
+      continue;
+    }
+
+    const orderedMatch = /^(\d+)\.\s+(.+)$/.exec(trimmed);
     if (orderedMatch) {
       flushUnordered();
-      orderedItems.push(orderedMatch[1]!.trim());
+      orderedItems.push({
+        num: Number(orderedMatch[1]),
+        text: orderedMatch[2]!.trim(),
+        subBullets: [],
+      });
       continue;
     }
 

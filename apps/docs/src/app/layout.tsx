@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
+import { getEnv } from "@rsl/core";
 import { BrandLogo } from "@rsl/ui";
 import { ActionLink } from "@/components/ios-feedback";
 import "./globals.css";
@@ -31,7 +32,7 @@ export const metadata: Metadata = {
 };
 
 export default function DocsRootLayout({ children }: { children: React.ReactNode }) {
-  const appUrl = process.env.APP_URL || "http://localhost:4500";
+  const appUrl = getEnv().APP_URL;
   const year = new Date().getFullYear();
 
   return (

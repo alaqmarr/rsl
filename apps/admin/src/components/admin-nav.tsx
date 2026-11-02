@@ -4,11 +4,13 @@ import React, { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  AlertTriangle,
   BookOpen,
   Building2,
   ClipboardList,
   Command,
   FileText,
+  HelpCircle,
   IndianRupee,
   LayoutDashboard,
   MailCheck,
@@ -20,7 +22,11 @@ import {
   X,
 } from "lucide-react";
 import { BrandLogo, IosSpinner } from "@rsl/ui";
-import { ADMIN_NAV_SECTIONS_META, type AdminNavIconKey } from "@/lib/nav-routes";
+import {
+  ADMIN_NAV_SECTIONS_META,
+  resolveAdminPageGuide,
+  type AdminNavIconKey,
+} from "@/lib/nav-routes";
 
 export interface AdminClientQuickEntry {
   id: string;
@@ -206,8 +212,13 @@ export function AdminTopBar({
   const [isBarPending, startBarTransition] = useTransition();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [query, setQuery] = useState("");
   const totalPending = pendingPlanRequestsCount + pendingWalletRequestsCount;
+  const activePageGuide = useMemo(
+    () => resolveAdminPageGuide(pathname || "/"),
+    [pathname]
+  );
   const allowedSet = useMemo(
     () => (allowedHrefs ? new Set(allowedHrefs) : null),
     [allowedHrefs]
@@ -231,6 +242,7 @@ export function AdminTopBar({
       } else if (e.key === "Escape") {
         setPaletteOpen(false);
         setDrawerOpen(false);
+        setHelpOpen(false);
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -317,6 +329,16 @@ export function AdminTopBar({
                 </span>
               </Link>
             )}
+
+            <button
+              type="button"
+              onClick={() => setHelpOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50/70 px-2.5 py-1.5 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-100/80 sm:px-3"
+              title="Open step-by-step Staff SOP guide for this screen"
+            >
+              <HelpCircle className="h-3.5 w-3.5 text-emerald-600" />
+              <span className="hidden md:inline">Page Guide</span>
+            </button>
 
             <a
               href={appUrl}
@@ -474,6 +496,105 @@ export function AdminTopBar({
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Contextual Staff Page Guide Slide-Over Drawer */}
+      {helpOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div
+            className="fixed inset-0 bg-slate-950/35 backdrop-blur-xs"
+            onClick={() => setHelpOpen(false)}
+          />
+          <aside className="relative z-10 flex h-full w-full max-w-lg flex-col justify-between overflow-y-auto border-l border-zinc-200 bg-white p-6 shadow-2xl">
+            <div className="space-y-5">
+              <div className="flex items-start justify-between gap-3 border-b border-zinc-100 pb-4">
+                <div>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold tracking-wide text-emerald-800 uppercase ring-1 ring-emerald-200">
+                    Staff Screen SOP Guide
+                  </span>
+                  <h2 className="mt-2 text-base font-bold text-slate-900">
+                    {activePageGuide?.title ?? "Server Health Matrix & Staff SOP Runbooks"}
+                  </h2>
+                  <p className="mt-1 text-xs font-medium text-emerald-700">
+                    {activePageGuide?.roleNote ??
+                      "Available to all Staff roles — live port telemetry + complete Markdown SOP runbooks."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setHelpOpen(false)}
+                  aria-label="Close guide"
+                  className="rounded-xl border border-zinc-200 p-1.5 text-zinc-500 transition hover:bg-zinc-100 hover:text-slate-900"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <p className="text-xs leading-relaxed text-zinc-600">
+                {activePageGuide?.summary ??
+                  "Inspect live TCP/HTTP reachability of ports 4500–4503 at the top of this screen, and read the 4 complete Staff Standard Operating Procedure (SOP) runbooks below covering UTR verification, WhatsApp/Tally onboarding support, Oracle PM2/SSL deployment, and disaster recovery."}
+              </p>
+
+              {activePageGuide && activePageGuide.steps.length > 0 && (
+                <div className="space-y-2.5">
+                  <div className="text-[11px] font-bold tracking-wider text-zinc-400 uppercase">
+                    Step-by-Step Staff Procedure ({activePageGuide.steps.length} Steps)
+                  </div>
+                  <ol className="space-y-2.5">
+                    {activePageGuide.steps.map((step, idx) => (
+                      <li
+                        key={idx}
+                        className="flex gap-3 rounded-xl border border-zinc-200/85 bg-zinc-50/70 p-3.5 text-xs"
+                      >
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-bold text-white tabular-nums">
+                          {idx + 1}
+                        </span>
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="font-semibold text-slate-900">{step.title}</div>
+                          <p className="leading-relaxed text-zinc-600">{step.detail}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+
+              {activePageGuide && activePageGuide.cautions.length > 0 && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3.5 text-xs">
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold tracking-wider text-amber-900 uppercase">
+                    <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                    <span>Important Finance &amp; Security Check</span>
+                  </div>
+                  <ul className="mt-1.5 space-y-1 text-amber-950/90">
+                    {activePageGuide.cautions.map((c, idx) => (
+                      <li key={idx} className="leading-relaxed">
+                        • {c}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 flex flex-col gap-2 border-t border-zinc-100 pt-4 sm:flex-row">
+              <Link
+                href="/runbooks"
+                onClick={() => setHelpOpen(false)}
+                className="adm-btn-primary flex-1 justify-center text-center text-xs"
+              >
+                All Staff SOP Runbooks →
+              </Link>
+              <a
+                href={docsUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="adm-btn-secondary flex-1 justify-center text-center text-xs"
+              >
+                Customer Help Center ↗
+              </a>
+            </div>
+          </aside>
         </div>
       )}
     </>
