@@ -11,6 +11,7 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
+    console.error("[rsl-admin] GlobalError:", error);
     Sentry.captureException(error);
   }, [error]);
 
@@ -28,12 +29,18 @@ export default function GlobalError({
             This error has been logged automatically. Reload the view or return to Operations
             Overview.
           </p>
-          <div className="mt-5 flex items-center gap-3">
-            <button onClick={() => reset()} className="adm-btn-primary">
+          {error.digest && (
+            <p className="mt-2 font-mono text-[11px] text-zinc-400">Ref: {error.digest}</p>
+          )}
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <button type="button" onClick={() => reset()} className="adm-btn-primary">
               Reload View
             </button>
             <a href="/" className="adm-btn-secondary">
               Operations Overview
+            </a>
+            <a href="/login" className="text-xs font-medium text-zinc-500 hover:text-slate-900">
+              Sign In Page
             </a>
           </div>
         </div>

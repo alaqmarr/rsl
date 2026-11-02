@@ -41,7 +41,7 @@ export interface NavItemDef {
   guideSlug: string;
 }
 
-export const WORKSPACE_NAV_SECTIONS: Array<{
+const WORKSPACE_NAV_SECTIONS: Array<{
   heading: string;
   items: NavItemDef[];
 }> = [

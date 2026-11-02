@@ -16,9 +16,11 @@ import {
   MessageSquare,
   Search,
   ShieldCheck,
+  Wrench,
   X,
 } from "lucide-react";
 import { BrandLogo, IosSpinner } from "@rsl/ui";
+import { ADMIN_NAV_SECTIONS_META, type AdminNavIconKey } from "@/lib/nav-routes";
 
 export interface AdminClientQuickEntry {
   id: string;
@@ -39,82 +41,30 @@ interface AdminNavSection {
   }>;
 }
 
-export const ADMIN_SECTIONS: AdminNavSection[] = [
-  {
-    heading: "Approvals & Revenue",
-    items: [
-      {
-        href: "/",
-        label: "Overview & Requests",
-        keywords: "home approvals requests payments utr unlock revenue summary",
-        summary: "Verify client payments, unlock requested plans, and approve wallet top-ups.",
-        icon: LayoutDashboard,
-        showPendingBadge: true,
-      },
-      {
-        href: "/clients",
-        label: "Client Directory",
-        keywords: "clients businesses accounts onboard suspend custom price team password",
-        summary: "Search clients, onboard new businesses, pause accounts, or open full client controls.",
-        icon: Building2,
-      },
-      {
-        href: "/invoices",
-        label: "GST Invoices & Ledger",
-        keywords: "invoices gst tax ledger finance csv export void custom invoice",
-        summary: "Search all GST invoices, issue manual invoices, mark paid/void, or download CSV.",
-        icon: FileText,
-      },
-      {
-        href: "/pricing",
-        label: "Plan Prices & Bank Info",
-        keywords: "pricing catalog rates upi bank ifsc payment details",
-        summary: "Edit monthly & per-unit plan prices and update UPI / Bank receiving details.",
-        icon: IndianRupee,
-      },
-    ],
-  },
-  {
-    heading: "Platform Operations",
-    items: [
-      {
-        href: "/templates",
-        label: "WhatsApp & Tally",
-        keywords: "whatsapp templates approve tally rules bills starter",
-        summary: "Approve client WhatsApp templates, push starter packs, and inspect Tally links.",
-        icon: MessageSquare,
-      },
-      {
-        href: "/queues",
-        label: "Tasks & Emails",
-        keywords: "queues tasks failed retry emails notifications feedback",
-        summary: "Retry failed tasks, send client account notifications, and review sent emails.",
-        icon: MailCheck,
-      },
-      {
-        href: "/staff",
-        label: "Staff Team & Roles",
-        keywords: "staff admins roles finance support password access",
-        summary: "Add staff members, manage Super Admin / Finance / Support roles, and reset passwords.",
-        icon: ShieldCheck,
-      },
-      {
-        href: "/inspector",
-        label: "Support Check & Log",
-        keywords: "inspector support check audit log history",
-        summary: "Run read-only client record checks and search the permanent staff activity log.",
-        icon: ClipboardList,
-      },
-      {
-        href: "/runbooks",
-        label: "Server Health & Guides",
-        keywords: "runbooks health ports services guides",
-        summary: "Live port health checks and step-by-step operational guides.",
-        icon: BookOpen,
-      },
-    ],
-  },
-];
+const ADMIN_ICONS: Record<AdminNavIconKey, React.ComponentType<{ className?: string }>> = {
+  dashboard: LayoutDashboard,
+  clients: Building2,
+  invoices: FileText,
+  pricing: IndianRupee,
+  templates: MessageSquare,
+  queues: MailCheck,
+  staff: ShieldCheck,
+  inspector: ClipboardList,
+  runbooks: BookOpen,
+  setup: Wrench,
+};
+
+const ADMIN_SECTIONS: AdminNavSection[] = ADMIN_NAV_SECTIONS_META.map((section) => ({
+  heading: section.heading,
+  items: section.items.map((item) => ({
+    href: item.href,
+    label: item.label,
+    keywords: item.keywords,
+    summary: item.summary,
+    icon: ADMIN_ICONS[item.iconKey] ?? LayoutDashboard,
+    showPendingBadge: item.showPendingBadge,
+  })),
+}));
 
 const ALL_ADMIN_ITEMS = ADMIN_SECTIONS.flatMap((s) => s.items);
 

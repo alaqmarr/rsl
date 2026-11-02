@@ -569,6 +569,7 @@ export const STAFF_ROUTE_ACCESS_RULES: Array<{
   { prefix: "/staff", anyOf: ["staff:team.manage"], label: "Staff Team & Roles" },
   { prefix: "/inspector", anyOf: ["staff:ops.view"], label: "Support Check & Log" },
   { prefix: "/runbooks", anyOf: ["staff:clients.view"], label: "Server Health & Guides" },
+  { prefix: "/setup", anyOf: ["staff:team.manage"], label: "Setup & SSL Readiness" },
 ];
 
 export function canStaffAccessAdminRoute(staffRole: string, pathname: string): boolean {

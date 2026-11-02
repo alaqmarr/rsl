@@ -7,9 +7,10 @@ import {
 } from "@rsl/auth";
 import { formatInr, getEnv } from "@rsl/core";
 import { BrandLogo, PlatformFooter } from "@rsl/ui";
-import { ADMIN_SECTIONS, AdminSidebarNav, AdminTopBar } from "@/components/admin-nav";
+import { AdminSidebarNav, AdminTopBar } from "@/components/admin-nav";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
 import { staffLogoutAction } from "@/lib/actions";
+import { ADMIN_NAV_HREFS } from "@/lib/nav-routes";
 import { requireStaffSession } from "@/lib/session";
 
 export default async function ConsoleLayout({ children }: { children: React.ReactNode }) {
@@ -20,9 +21,9 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   const pendingWalletRequestsCount = adminData.totals.pendingWalletRequestsCount;
   const totalPending = pendingPlanRequestsCount + pendingWalletRequestsCount;
   const canViewBilling = canStaffPerform(staff.staffRole, "staff:billing.view");
-  const allowedHrefs = ADMIN_SECTIONS.flatMap((s) => s.items)
-    .map((item) => item.href)
-    .filter((href) => canStaffAccessAdminRoute(staff.staffRole, href));
+  const allowedHrefs = ADMIN_NAV_HREFS.filter((href) =>
+    canStaffAccessAdminRoute(staff.staffRole, href)
+  );
 
   const quickClients = adminData.businesses.map((b) => ({
     id: b.id,
