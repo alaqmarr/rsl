@@ -1,6 +1,8 @@
 "use server";
 
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
@@ -144,7 +146,18 @@ export async function completeInitialPlatformSetupAction(formData: FormData) {
   }
 
   const env = getEnv();
-  const expectedToken = (env.SETUP_BOOTSTRAP_TOKEN || "").trim();
+  let expectedToken = (env.SETUP_BOOTSTRAP_TOKEN || "").trim();
+  if (!expectedToken) {
+    try {
+      const envFile = path.join(env.REPO_ROOT, ".env");
+      if (fs.existsSync(envFile)) {
+        const m = fs.readFileSync(envFile, "utf8").match(/^SETUP_BOOTSTRAP_TOKEN=(.+)$/m);
+        if (m?.[1]) expectedToken = m[1].trim().replace(/^['"]|['"]$/g, "");
+      }
+    } catch {
+      // Ignore disk fallback error
+    }
+  }
   const providedToken = String(formData.get("setupKey") || "").trim();
 
   if (expectedToken.length > 0) {

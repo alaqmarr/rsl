@@ -265,21 +265,6 @@ echo "==> [7/8] Creating SQLite databases from scratch..."
 pnpm db:migrate:control
 pnpm db:migrate:tenants
 
-echo "==> [8/8] Launching scoped RSL PM2 services (leaving all other PM2 apps untouched)..."
+echo "==> [8/8] Launching scoped RSL PM2 services & running full DNS/SSL/DB verification..."
 RSL_APP_DIR="$APP_DIR" node infra/pm2/pm2-manager.mjs start
-
-echo ""
-echo "======================================================================"
-echo " RSL Marketing Platform Is LIVE!"
-echo "----------------------------------------------------------------------"
-echo " 1. FIRST-TIME SUPER ADMIN SETUP WIZARD (One-Click Key Included):"
-echo "    https://setup.${PRIMARY_DOMAIN}/?key=${SETUP_BOOTSTRAP_TOKEN}"
-echo "----------------------------------------------------------------------"
-echo " Customer App   : https://app.${PRIMARY_DOMAIN}"
-echo " Staff Console  : https://admin.${PRIMARY_DOMAIN}"
-echo " Help & API Docs: https://docs.${PRIMARY_DOMAIN}"
-echo " Client Tally   : https://<client>.tally.${PRIMARY_DOMAIN}"
-echo " Client API     : https://<client>.api.${PRIMARY_DOMAIN}"
-echo "----------------------------------------------------------------------"
-echo " Future Updates : bash update.sh"
-echo "======================================================================"
+pnpm ops:verify

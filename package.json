@@ -15,6 +15,7 @@
     "dev:worker": "pnpm --filter @rsl/worker dev",
     "dev:cleanup": "tsx infra/pm2/rsl-cleanup-service.ts",
     "ops:cleanup": "tsx infra/pm2/rsl-cleanup-service.ts --once",
+    "ops:verify": "tsx scripts/ops-verify-platform.ts",
     "pm2:start": "node infra/pm2/pm2-manager.mjs start",
     "pm2:restart": "node infra/pm2/pm2-manager.mjs restart",
     "pm2:reload": "node infra/pm2/pm2-manager.mjs reload",

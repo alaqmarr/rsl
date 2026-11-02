@@ -208,7 +208,7 @@ async function main() {
       cleanOrphanedRslPortListeners(managedRslPids);
       cleanNextBuildLocks();
       runOneShotDbAndLogCleanup();
-      runPm2(["startOrGracefulReload", ECOSYSTEM_PATH, "--only", RSL_ONLY_CSV, "--update-env"]);
+      runPm2(["start", ECOSYSTEM_PATH, "--only", RSL_ONLY_CSV, "--update-env"]);
       runPm2(["save"]);
       await verifyRslHealth();
       break;
@@ -233,7 +233,7 @@ async function main() {
 
     case "reload": {
       runOneShotDbAndLogCleanup();
-      runPm2(["startOrGracefulReload", ECOSYSTEM_PATH, "--only", RSL_ONLY_CSV, "--update-env"]);
+      runPm2(["start", ECOSYSTEM_PATH, "--only", RSL_ONLY_CSV, "--update-env"]);
       runPm2(["save"]);
       await verifyRslHealth();
       break;

@@ -58,6 +58,14 @@ export default async function AdminLoginPage({
             >
               Open Platform Setup Wizard →
             </a>
+            {!endpoints.isLocalDev && (
+              <a
+                href="/setup"
+                className="block text-center text-[11px] font-medium text-zinc-500 underline hover:text-slate-800"
+              >
+                DNS for setup.{endpoints.primaryDomain} still propagating? Open /setup here instead
+              </a>
+            )}
           </div>
         ) : (
           <>

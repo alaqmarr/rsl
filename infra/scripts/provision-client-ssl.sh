@@ -130,6 +130,12 @@ server {
     client_max_body_size 50M;
     add_header X-Content-Type-Options "nosniff" always;
 
+    location ^~ /.well-known/acme-challenge/ {
+        root ${ACME_WEBROOT};
+        default_type "text/plain";
+        allow all;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:4500;
         proxy_http_version 1.1;
