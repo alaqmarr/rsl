@@ -1,0 +1,27 @@
+{
+  "name": "@rsl/database",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./control": "./src/schemas/control.ts",
+    "./ingress": "./src/schemas/ingress.ts",
+    "./platform-logs": "./src/schemas/platform-logs.ts",
+    "./tenant-data": "./src/schemas/tenant-data.ts",
+    "./tenant-logs": "./src/schemas/tenant-logs.ts",
+    "./ddl": "./src/ddl.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rsl/core": "workspace:*",
+    "better-sqlite3": "12.11.1",
+    "drizzle-orm": "0.45.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "drizzle-kit": "^0.31.11"
+  }
+}

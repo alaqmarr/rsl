@@ -1,0 +1,21 @@
+{
+  "name": "@rsl/tenancy",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "db:migrate:control": "tsx src/cli/migrate-control.ts",
+    "db:migrate:tenants": "tsx src/cli/migrate-tenants.ts"
+  },
+  "dependencies": {
+    "@rsl/core": "workspace:*",
+    "@rsl/database": "workspace:*",
+    "drizzle-orm": "0.45.4",
+    "lru-cache": "^11.5.3",
+    "p-limit": "^7.3.3"
+  }
+}

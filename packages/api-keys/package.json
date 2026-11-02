@@ -1,0 +1,22 @@
+{
+  "name": "@rsl/api-keys",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rsl/billing": "workspace:*",
+    "@rsl/core": "workspace:*",
+    "@rsl/database": "workspace:*",
+    "@rsl/logging": "workspace:*",
+    "@rsl/rbac": "workspace:*",
+    "@rsl/tenancy": "workspace:*",
+    "drizzle-orm": "0.45.4",
+    "ioredis": "^6.0.0",
+    "rate-limiter-flexible": "^11.2.3",
+    "zod": "^4.6.7"
+  }
+}

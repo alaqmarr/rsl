@@ -1,0 +1,91 @@
+# ==============================================================================
+# Dependencies & Package Manager Caches
+# ==============================================================================
+node_modules/
+.pnpm-store/
+.pnpm-debug.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ==============================================================================
+# Build, Bundle & Compiler Artifacts
+# ==============================================================================
+.next/
+out/
+dist/
+build/
+.turbo/
+content-build/
+*.tsbuildinfo
+
+# ==============================================================================
+# SQLite Databases, WAL/SHM Journals, Backups & Runtime Data
+# (Never commit database files — server creates fresh DBs & seeds superadmin on setup)
+# ==============================================================================
+.rsl-data/
+.rsl-data*/
+data/
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.db.zst
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
+*.rslbackup
+*.rslbackup.tmp
+*.bak
+dump.rdb
+appendonly.aof*
+
+# ==============================================================================
+# Runtime Logs, PM2 PIDs & SSL Private Keys / Certificates
+# ==============================================================================
+.rsl-logs/
+logs/
+*.log
+*.pid
+*.seed
+*.pid.lock
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+
+# ==============================================================================
+# Environment Secrets & Credentials (keep .env.example committed)
+# ==============================================================================
+.env
+.env.*
+!.env.example
+.sentryclirc
+cloudflare.ini
+
+# ==============================================================================
+# Test, Coverage & Temporary Scratch Files
+# ==============================================================================
+coverage/
+.vitest/
+playwright-report/
+test-results/
+tmp/
+temp/
+*.tmp
+
+# ==============================================================================
+# OS & Editor Metadata
+# ==============================================================================
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

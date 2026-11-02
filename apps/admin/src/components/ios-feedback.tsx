@@ -1,0 +1,167 @@
+"use client";
+
+import React, { useTransition } from "react";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { useFormStatus } from "react-dom";
+import { IosSpinner } from "@rsl/ui";
+
+export { IosSpinner };
+
+export function SubmitButton({
+  children,
+  pendingText,
+  className = "adm-btn-primary",
+  spinnerSize = "xs",
+  disabled = false,
+  iconOnly = false,
+  name,
+  value,
+  title,
+}: {
+  children: React.ReactNode;
+  pendingText?: string;
+  className?: string;
+  spinnerSize?: "xs" | "sm" | "md";
+  disabled?: boolean;
+  iconOnly?: boolean;
+  name?: string;
+  value?: string;
+  title?: string;
+}) {
+  const { pending } = useFormStatus();
+  const isBusy = pending;
+
+  return (
+    <button
+      type="submit"
+      name={name}
+      value={value}
+      title={title}
+      disabled={disabled || isBusy}
+      aria-busy={isBusy}
+      className={`inline-flex items-center justify-center gap-1.5 ${className} disabled:cursor-not-allowed disabled:opacity-75`}
+    >
+      {iconOnly ? (
+        isBusy ? (
+          <IosSpinner size={spinnerSize} />
+        ) : (
+          children
+        )
+      ) : (
+        <>
+          {isBusy && <IosSpinner size={spinnerSize} />}
+          {isBusy && pendingText ? <span>{pendingText}</span> : children}
+        </>
+      )}
+    </button>
+  );
+}
+
+export function ActionLink({
+  href,
+  children,
+  className = "",
+  spinnerSize = "xs",
+  spinnerPosition = "left",
+  variant,
+  onClickDone,
+  prefetch = true,
+  title,
+}: {
+  href: string;
+  children: React.ReactNode;
+  className?: string;
+  spinnerSize?: "xs" | "sm";
+  spinnerPosition?: "left" | "right";
+  variant?: "inline" | "card";
+  onClickDone?: () => void;
+  prefetch?: boolean;
+  title?: string;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [isPending, startTransition] = useTransition();
+
+  const isInlineFlex = /\binline-flex\b/.test(className);
+  const isCardLayout =
+    variant === "card" ||
+    (!isInlineFlex && /\b(block|flex|flex-col|grid|justify-between)\b/.test(className));
+
+  const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (
+      e.defaultPrevented ||
+      e.button !== 0 ||
+      e.metaKey ||
+      e.ctrlKey ||
+      e.shiftKey ||
+      e.altKey ||
+      href.startsWith("http") ||
+      href.startsWith("#") ||
+      href.startsWith("/api/")
+    ) {
+      onClickDone?.();
+      return;
+    }
+
+    const currentFull =
+      typeof window !== "undefined"
+        ? `${window.location.pathname}${window.location.search}`
+        : pathname;
+    if (href === currentFull) {
+      e.preventDefault();
+      onClickDone?.();
+      return;
+    }
+
+    e.preventDefault();
+    onClickDone?.();
+    startTransition(() => {
+      router.push(href);
+    });
+  };
+
+  if (isCardLayout) {
+    return (
+      <Link
+        href={href}
+        prefetch={prefetch}
+        title={title}
+        onClick={handleClick}
+        aria-busy={isPending}
+        className={`relative ${className} ${isPending ? "opacity-85" : ""}`}
+      >
+        {children}
+        {isPending && (
+          <span
+            style={{ width: 20, height: 20 }}
+            className="pointer-events-none absolute top-3 right-3 inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/95 text-emerald-600 shadow-xs ring-1 ring-zinc-200"
+          >
+            <IosSpinner size="xs" />
+          </span>
+        )}
+      </Link>
+    );
+  }
+
+  return (
+    <Link
+      href={href}
+      prefetch={prefetch}
+      title={title}
+      onClick={handleClick}
+      aria-busy={isPending}
+      className={`${isInlineFlex ? "" : "inline-flex items-center gap-1.5"} ${className} ${
+        isPending ? "opacity-85" : ""
+      }`.trim()}
+    >
+      {isPending && spinnerPosition === "left" && (
+        <IosSpinner size={spinnerSize} className="shrink-0" />
+      )}
+      {children}
+      {isPending && spinnerPosition === "right" && (
+        <IosSpinner size={spinnerSize} className="shrink-0" />
+      )}
+    </Link>
+  );
+}

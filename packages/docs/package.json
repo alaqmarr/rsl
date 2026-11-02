@@ -1,0 +1,26 @@
+{
+  "name": "@rsl/docs",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build:content": "tsx src/cli/build-content.ts",
+    "lint:content": "tsx src/cli/lint-content.ts"
+  },
+  "dependencies": {
+    "@rsl/billing": "workspace:*",
+    "@rsl/core": "workspace:*",
+    "@rsl/database": "workspace:*",
+    "@rsl/logging": "workspace:*",
+    "@rsl/rbac": "workspace:*",
+    "@rsl/tenancy": "workspace:*",
+    "better-sqlite3": "12.11.1",
+    "gray-matter": "^4.0.3",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13"
+  }
+}

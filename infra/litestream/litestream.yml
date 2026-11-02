@@ -1,0 +1,24 @@
+# Litestream Continuous SQLite WAL Replication to Cloudflare R2 / S3
+# Place at /etc/litestream.yml on Ubuntu 24.04 (Oracle Cloud Free Tier)
+# Protects control-plane databases with sub-second RPO alongside nightly verified tenant .rslbackup snapshots.
+
+dbs:
+  - path: /var/lib/rsl/platform/control.db
+    replicas:
+      - type: s3
+        bucket: ${R2_BUCKET_PLATFORM_BACKUP}
+        path: litestream/control.db
+        endpoint: https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+        access-key-id: ${R2_ACCESS_KEY_ID}
+        secret-access-key: ${R2_SECRET_ACCESS_KEY}
+        sync-interval: 1s
+
+  - path: /var/lib/rsl/platform/platform-logs.db
+    replicas:
+      - type: s3
+        bucket: ${R2_BUCKET_PLATFORM_BACKUP}
+        path: litestream/platform-logs.db
+        endpoint: https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+        access-key-id: ${R2_ACCESS_KEY_ID}
+        secret-access-key: ${R2_SECRET_ACCESS_KEY}
+        sync-interval: 5s

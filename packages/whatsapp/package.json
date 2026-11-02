@@ -1,0 +1,25 @@
+{
+  "name": "@rsl/whatsapp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client-constants": "./src/client-constants.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rsl/api-keys": "workspace:*",
+    "@rsl/billing": "workspace:*",
+    "@rsl/core": "workspace:*",
+    "@rsl/database": "workspace:*",
+    "@rsl/logging": "workspace:*",
+    "@rsl/queue": "workspace:*",
+    "@rsl/rbac": "workspace:*",
+    "@rsl/tenancy": "workspace:*",
+    "drizzle-orm": "0.45.4",
+    "zod": "^4.6.7"
+  }
+}

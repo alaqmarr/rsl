@@ -1,0 +1,9 @@
+{
+  "name": "@rsl/config",
+  "version": "1.0.0",
+  "private": true,
+  "files": [
+    "tsconfig.library.json",
+    "tsconfig.nextjs.json"
+  ]
+}

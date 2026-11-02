@@ -1,0 +1,21 @@
+{
+  "name": "@rsl/queue",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rsl/core": "workspace:*",
+    "@rsl/database": "workspace:*",
+    "@rsl/tenancy": "workspace:*",
+    "bullmq": "^6.5.3",
+    "drizzle-orm": "0.45.4",
+    "ioredis": "^6.0.0",
+    "zod": "^4.6.7"
+  }
+}

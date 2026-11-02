@@ -1,0 +1,36 @@
+{
+  "name": "@rsl/worker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/index.ts --lane=all --health-port=4510",
+    "start": "tsx src/index.ts --lane=all --health-port=4510",
+    "start:realtime": "tsx src/index.ts --lane=realtime --health-port=4510",
+    "start:bulk": "tsx src/index.ts --lane=bulk --health-port=4511",
+    "start:maintenance": "tsx src/index.ts --lane=maintenance --health-port=4512",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rsl/backup": "workspace:*",
+    "@rsl/billing": "workspace:*",
+    "@rsl/config": "workspace:*",
+    "@rsl/core": "workspace:*",
+    "@rsl/database": "workspace:*",
+    "@rsl/logging": "workspace:*",
+    "@rsl/queue": "workspace:*",
+    "@rsl/tally": "workspace:*",
+    "@rsl/tenancy": "workspace:*",
+    "@rsl/whatsapp": "workspace:*",
+    "@sentry/node": "^11.10.0",
+    "bullmq": "^6.5.3",
+    "croner": "^11.0.0",
+    "drizzle-orm": "0.45.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3"
+  }
+}

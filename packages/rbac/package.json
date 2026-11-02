@@ -1,0 +1,19 @@
+{
+  "name": "@rsl/rbac",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./catalog": "./src/catalog.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rsl/core": "workspace:*",
+    "@rsl/database": "workspace:*",
+    "@rsl/tenancy": "workspace:*",
+    "drizzle-orm": "0.45.4"
+  }
+}

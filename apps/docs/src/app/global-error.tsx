@@ -1,0 +1,42 @@
+"use client";
+
+import * as Sentry from "@sentry/nextjs";
+import { useEffect } from "react";
+
+export default function GlobalError({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  useEffect(() => {
+    Sentry.captureException(error);
+  }, [error]);
+
+  return (
+    <html lang="en">
+      <body className="flex min-h-screen items-center justify-center bg-[#F8F9FB] p-6 font-sans text-slate-900 antialiased">
+        <div className="max-w-md rounded-2xl border border-zinc-200 bg-white p-7 shadow-sm">
+          <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-700">
+            Help Center
+          </span>
+          <h2 className="mt-3 text-lg font-semibold tracking-tight text-slate-900">
+            Could not load this help page
+          </h2>
+          <p className="mt-1.5 text-[13.5px] leading-relaxed text-zinc-600">
+            Our team has been notified automatically. Please reload to try again.
+          </p>
+          <div className="mt-5 flex items-center gap-3">
+            <button type="button" onClick={() => reset()} className="rsl-btn-primary">
+              Reload Help Page
+            </button>
+            <a href="/" className="rsl-btn-secondary">
+              All Guides
+            </a>
+          </div>
+        </div>
+      </body>
+    </html>
+  );
+}

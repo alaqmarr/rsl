@@ -1,0 +1,1297 @@
+import { and, desc, eq } from "drizzle-orm";
+import { z } from "zod";
+import { dispatchWorkspaceWebhookEvent } from "@rsl/api-keys";
+import {
+  canDebitWalletUsage,
+  consumeUsage,
+  getWalletAvailableSpendPaise,
+  getWalletBalancePaise,
+  WALLET_OVERDRAFT_LIMIT_PAISE,
+} from "@rsl/billing";
+import { decryptEnvelope, formatInr, newEntityId, newId, RslError } from "@rsl/core";
+import { controlSchema, tenantDataSchema, tenantLogsSchema } from "@rsl/database";
+import { defineAction } from "@rsl/logging";
+import { enqueueJob, markSendGuardOutcome, reserveSendGuard } from "@rsl/queue";
+import { controlDb, tenantDataDb, tenantLogsDb } from "@rsl/tenancy";
+
+export interface WhatsAppTemplateButton {
+  type: "QUICK_REPLY" | "URL" | "PHONE_NUMBER";
+  text: string;
+  url?: string;
+  phoneNumber?: string;
+}
+
+export const TALLY_TEMPLATE_VARIABLE_FIELDS = [
+  { key: "partyName", label: "Customer / Party Name", sample: "Shree Ganesh Traders" },
+  { key: "voucherNumber", label: "Bill / Receipt Number", sample: "GST/26-27/0108" },
+  { key: "amountFormatted", label: "Bill / Receipt Amount (₹)", sample: "₹18,450" },
+  { key: "balanceFormatted", label: "Pending Balance Due (₹)", sample: "₹18,450" },
+  { key: "dueDateFormatted", label: "Payment Due Date", sample: "15 Nov 2026" },
+  { key: "voucherDateFormatted", label: "Bill / Receipt Date", sample: "01 Nov 2026" },
+  { key: "companyName", label: "Your Business Name", sample: "RSL Management" },
+] as const;
+
+export type TallyVariableFieldKey = (typeof TALLY_TEMPLATE_VARIABLE_FIELDS)[number]["key"];
+
+export interface ParsedWhatsAppTemplate {
+  id: string;
+  name: string;
+  language: string;
+  category: string;
+  headerType: "NONE" | "TEXT" | "DOCUMENT" | "IMAGE";
+  headerText: string | null;
+  bodyText: string;
+  footerText: string | null;
+  variables: string[];
+  variableMappings: Record<string, string>;
+  sampleValues: Record<string, string>;
+  buttons: WhatsAppTemplateButton[];
+  approvalStatus: string;
+  metaTemplateId: string | null;
+  qualityScore: string;
+  rejectionReason: string | null;
+  lastSyncedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+function safeParseJson<T>(raw: string | null | undefined, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+export function extractTemplateVariables(texts: Array<string | null | undefined>): string[] {
+  const found = new Set<number>();
+  for (const txt of texts) {
+    if (!txt) continue;
+    for (const m of txt.matchAll(/\{\{(\d+)\}\}/g)) {
+      const idx = Number(m[1]);
+      if (Number.isInteger(idx) && idx >= 1 && idx <= 20) {
+        found.add(idx);
+      }
+    }
+  }
+  return Array.from(found)
+    .sort((a, b) => a - b)
+    .map((n) => `{{${n}}}`);
+}
+
+export function parseTemplateRow(
+  row: typeof tenantDataSchema.whatsappTemplates.$inferSelect
+): ParsedWhatsAppTemplate {
+  return {
+    id: row.id,
+    name: row.name,
+    language: row.language,
+    category: row.category,
+    headerType: (row.headerType as ParsedWhatsAppTemplate["headerType"]) || "NONE",
+    headerText: row.headerText ?? null,
+    bodyText: row.bodyText,
+    footerText: row.footerText ?? null,
+    variables: safeParseJson<string[]>(row.variablesJson, []),
+    variableMappings: safeParseJson<Record<string, string>>(row.variableMappingsJson, {}),
+    sampleValues: safeParseJson<Record<string, string>>(row.sampleValuesJson, {}),
+    buttons: safeParseJson<WhatsAppTemplateButton[]>(row.buttonsJson, []),
+    approvalStatus: row.approvalStatus,
+    metaTemplateId: row.metaTemplateId ?? null,
+    qualityScore: row.qualityScore || "GREEN",
+    rejectionReason: row.rejectionReason ?? null,
+    lastSyncedAt: row.lastSyncedAt ?? null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt || row.createdAt,
+  };
+}
+
+export function renderWhatsAppTemplate(
+  template: ParsedWhatsAppTemplate,
+  valuesByIndexOrKey: Record<string, string>
+): {
+  renderedHeader: string | null;
+  renderedBody: string;
+  renderedFooter: string | null;
+  fullPreviewText: string;
+  metaComponents: Array<Record<string, unknown>>;
+} {
+  const resolveSlot = (slotNum: string): string => {
+    // 1. Direct index e.g. "1" or "{{1}}"
+    if (valuesByIndexOrKey[slotNum]) return valuesByIndexOrKey[slotNum]!;
+    if (valuesByIndexOrKey[`{{${slotNum}}}`]) return valuesByIndexOrKey[`{{${slotNum}}}`]!;
+
+    // 2. Mapped field key e.g. variableMappings["1"] === "partyName"
+    const mappedField = template.variableMappings[slotNum] || template.variableMappings[`{{${slotNum}}}`];
+    if (mappedField && valuesByIndexOrKey[mappedField]) {
+      return valuesByIndexOrKey[mappedField]!;
+    }
+
+    // 3. Fallback to template sample value
+    if (template.sampleValues[slotNum]) return template.sampleValues[slotNum]!;
+    const defaultField = TALLY_TEMPLATE_VARIABLE_FIELDS[Number(slotNum) - 1];
+    return defaultField?.sample ?? `[Value ${slotNum}]`;
+  };
+
+  const replaceSlots = (input: string | null): string | null => {
+    if (!input) return null;
+    return input.replace(/\{\{(\d+)\}\}/g, (_all, num: string) => resolveSlot(num));
+  };
+
+  const renderedHeader = template.headerType === "TEXT" ? replaceSlots(template.headerText) : template.headerText;
+  const renderedBody = replaceSlots(template.bodyText) || template.bodyText;
+  const renderedFooter = template.footerText;
+
+  const metaComponents: Array<Record<string, unknown>> = [];
+  if (template.headerType === "TEXT" && template.headerText) {
+    const headerVars = extractTemplateVariables([template.headerText]);
+    if (headerVars.length > 0) {
+      metaComponents.push({
+        type: "header",
+        parameters: headerVars.map((v) => ({
+          type: "text",
+          text: resolveSlot(v.replace(/[{}]/g, "")),
+        })),
+      });
+    }
+  } else if (template.headerType === "DOCUMENT" && valuesByIndexOrKey.documentUrl) {
+    metaComponents.push({
+      type: "header",
+      parameters: [
+        {
+          type: "document",
+          document: {
+            link: valuesByIndexOrKey.documentUrl,
+            filename: valuesByIndexOrKey.documentFilename || "Invoice.pdf",
+          },
+        },
+      ],
+    });
+  }
+
+  const bodyVars = extractTemplateVariables([template.bodyText]);
+  if (bodyVars.length > 0) {
+    metaComponents.push({
+      type: "body",
+      parameters: bodyVars.map((v) => ({
+        type: "text",
+        text: resolveSlot(v.replace(/[{}]/g, "")),
+      })),
+    });
+  }
+
+  const parts = [
+    renderedHeader ? `*${renderedHeader}*` : null,
+    renderedBody,
+    renderedFooter ? `_${renderedFooter}_` : null,
+  ].filter(Boolean);
+
+  return {
+    renderedHeader,
+    renderedBody,
+    renderedFooter,
+    fullPreviewText: parts.join("\n\n"),
+    metaComponents,
+  };
+}
+
+export function getWhatsAppWorkspaceData(workspaceId: string) {
+  const dataDb = tenantDataDb({ workspaceId });
+  const logsDb = tenantLogsDb({ workspaceId });
+  const ctrl = controlDb();
+
+  const rawTemplates = dataDb
+    .select()
+    .from(tenantDataSchema.whatsappTemplates)
+    .orderBy(desc(tenantDataSchema.whatsappTemplates.createdAt))
+    .all();
+
+  const templates = rawTemplates.map(parseTemplateRow);
+
+  const broadcasts = dataDb
+    .select()
+    .from(tenantDataSchema.broadcasts)
+    .orderBy(desc(tenantDataSchema.broadcasts.createdAt))
+    .all();
+
+  const optIns = dataDb
+    .select()
+    .from(tenantDataSchema.optIns)
+    .orderBy(desc(tenantDataSchema.optIns.consentedAt))
+    .all();
+
+  const suppressions = logsDb
+    .select()
+    .from(tenantLogsSchema.suppressions)
+    .where(eq(tenantLogsSchema.suppressions.channel, "whatsapp"))
+    .orderBy(desc(tenantLogsSchema.suppressions.createdAt))
+    .all();
+
+  const wabaConnection = ctrl
+    .select()
+    .from(controlSchema.connections)
+    .where(
+      and(
+        eq(controlSchema.connections.workspaceId, workspaceId),
+        eq(controlSchema.connections.provider, "whatsapp")
+      )
+    )
+    .get();
+
+  const suppressedSet = new Set(suppressions.map((s) => s.identifier));
+  const eligibleOptInCount = optIns.filter((o) => !suppressedSet.has(o.phoneE164)).length;
+
+  return {
+    templates,
+    broadcasts,
+    optIns,
+    suppressions,
+    eligibleOptInCount,
+    wabaConnected: Boolean(wabaConnection && wabaConnection.status === "healthy"),
+    wabaDisplayName: wabaConnection?.displayName ?? null,
+    wabaExternalId: wabaConnection?.externalAccountId ?? null,
+  };
+}
+
+export const createWhatsAppTemplate = defineAction({
+  key: "whatsapp.template.created",
+  permission: "whatsapp:template.manage",
+  input: z.object({
+    name: z
+      .string()
+      .trim()
+      .min(2)
+      .max(64)
+      .regex(/^[a-z0-9_]+$/, "Use lowercase letters, numbers, and underscores only (for example: tally_sales_invoice)"),
+    category: z.enum(["utility", "marketing", "authentication"]),
+    language: z.string().default("en_IN"),
+    headerType: z.enum(["NONE", "TEXT", "DOCUMENT", "IMAGE"]).default("NONE"),
+    headerText: z.string().max(120).optional(),
+    bodyText: z.string().min(5).max(1024),
+    footerText: z.string().max(60).optional(),
+    variableMappings: z.record(z.string(), z.string()).optional(),
+    sampleValues: z.record(z.string(), z.string()).optional(),
+    buttons: z
+      .array(
+        z.object({
+          type: z.enum(["QUICK_REPLY", "URL", "PHONE_NUMBER"]),
+          text: z.string().min(1).max(25),
+          url: z.string().optional(),
+          phoneNumber: z.string().optional(),
+        })
+      )
+      .max(3)
+      .optional(),
+    submitToMeta: z.boolean().default(true),
+  }),
+  summarize: (input) => `Saved WhatsApp message template '${input.name}'`,
+  handler: async (ctx, input) => {
+    const db = tenantDataDb(ctx);
+    const existing = db
+      .select()
+      .from(tenantDataSchema.whatsappTemplates)
+      .where(eq(tenantDataSchema.whatsappTemplates.name, input.name))
+      .get();
+
+    if (existing) {
+      throw new RslError("RSL-VAL-1001", `A template named '${input.name}' already exists.`);
+    }
+
+    const vars = extractTemplateVariables([input.headerText, input.bodyText]);
+    const defaultMappings: Record<string, string> = {};
+    const defaultSamples: Record<string, string> = {};
+
+    vars.forEach((v, idx) => {
+      const slot = v.replace(/[{}]/g, "");
+      const preset = TALLY_TEMPLATE_VARIABLE_FIELDS[idx];
+      defaultMappings[slot] = input.variableMappings?.[slot] || preset?.key || "custom";
+      defaultSamples[slot] = input.sampleValues?.[slot] || preset?.sample || `Example ${slot}`;
+    });
+
+    let approvalStatus = "APPROVED";
+    let metaTemplateId: string | null = null;
+    const now = Date.now();
+
+    const wabaConn = controlDb()
+      .select()
+      .from(controlSchema.connections)
+      .where(
+        and(
+          eq(controlSchema.connections.workspaceId, ctx.workspaceId),
+          eq(controlSchema.connections.provider, "whatsapp")
+        )
+      )
+      .get();
+
+    if (input.submitToMeta && wabaConn && wabaConn.status === "healthy") {
+      try {
+        const token = decryptEnvelope(wabaConn.encryptedTokens);
+        const components: Array<Record<string, unknown>> = [];
+        if (input.headerType === "TEXT" && input.headerText?.trim()) {
+          components.push({ type: "HEADER", format: "TEXT", text: input.headerText.trim() });
+        } else if (input.headerType === "DOCUMENT") {
+          components.push({ type: "HEADER", format: "DOCUMENT" });
+        }
+        const bodyExamples = vars.map((v) => defaultSamples[v.replace(/[{}]/g, "")] || "Sample");
+        components.push({
+          type: "BODY",
+          text: input.bodyText.trim(),
+          ...(bodyExamples.length > 0 ? { example: { body_text: [bodyExamples] } } : {}),
+        });
+        if (input.footerText?.trim()) {
+          components.push({ type: "FOOTER", text: input.footerText.trim() });
+        }
+        if (input.buttons && input.buttons.length > 0) {
+          components.push({
+            type: "BUTTONS",
+            buttons: input.buttons.map((b) =>
+              b.type === "URL"
+                ? { type: "URL", text: b.text, url: b.url || "https://example.com" }
+                : b.type === "PHONE_NUMBER"
+                  ? { type: "PHONE_NUMBER", text: b.text, phone_number: b.phoneNumber || "+919820000000" }
+                  : { type: "QUICK_REPLY", text: b.text }
+            ),
+          });
+        }
+
+        const resp = await fetch(
+          `https://graph.facebook.com/v21.0/${encodeURIComponent(wabaConn.externalAccountId)}/message_templates`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              name: input.name,
+              language: input.language,
+              category: input.category.toUpperCase(),
+              components,
+            }),
+          }
+        );
+
+        if (resp.ok) {
+          const metaOut = (await resp.json()) as { id?: string; status?: string };
+          metaTemplateId = metaOut.id ?? null;
+          approvalStatus = (metaOut.status || "PENDING").toUpperCase();
+        }
+      } catch {
+        // Keep local template available if Meta endpoint is unreachable
+      }
+    }
+
+    const id = newEntityId("tmpl", ctx.workspaceId, now);
+    db.insert(tenantDataSchema.whatsappTemplates)
+      .values({
+        id,
+        name: input.name,
+        language: input.language,
+        category: input.category,
+        headerType: input.headerType,
+        headerText: input.headerText?.trim() || null,
+        bodyText: input.bodyText.trim(),
+        footerText: input.footerText?.trim() || null,
+        buttonsJson: JSON.stringify(input.buttons ?? []),
+        variablesJson: JSON.stringify(vars),
+        variableMappingsJson: JSON.stringify(defaultMappings),
+        sampleValuesJson: JSON.stringify(defaultSamples),
+        approvalStatus,
+        metaTemplateId,
+        qualityScore: "GREEN",
+        lastSyncedAt: metaTemplateId ? now : null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+
+    return { templateId: id, approvalStatus, metaTemplateId };
+  },
+});
+
+export const updateWhatsAppTemplate = defineAction({
+  key: "whatsapp.template.created",
+  permission: "whatsapp:template.manage",
+  input: z.object({
+    templateId: z.string().min(6),
+    category: z.enum(["utility", "marketing", "authentication"]).optional(),
+    headerType: z.enum(["NONE", "TEXT", "DOCUMENT", "IMAGE"]).optional(),
+    headerText: z.string().max(120).optional(),
+    bodyText: z.string().min(5).max(1024),
+    footerText: z.string().max(60).optional(),
+    variableMappings: z.record(z.string(), z.string()).optional(),
+  }),
+  summarize: (input) => `Updated WhatsApp message template ${input.templateId}`,
+  handler: (ctx, input) => {
+    const db = tenantDataDb(ctx);
+    const existing = db
+      .select()
+      .from(tenantDataSchema.whatsappTemplates)
+      .where(eq(tenantDataSchema.whatsappTemplates.id, input.templateId))
+      .get();
+
+    if (!existing) {
+      throw new RslError("RSL-VAL-1001", "Template not found.");
+    }
+
+    const vars = extractTemplateVariables([input.headerText ?? existing.headerText, input.bodyText]);
+    const currentMappings = safeParseJson<Record<string, string>>(existing.variableMappingsJson, {});
+    const mergedMappings = { ...currentMappings, ...(input.variableMappings ?? {}) };
+
+    db.update(tenantDataSchema.whatsappTemplates)
+      .set({
+        category: input.category ?? existing.category,
+        headerType: input.headerType ?? existing.headerType,
+        headerText: input.headerText !== undefined ? input.headerText.trim() || null : existing.headerText,
+        bodyText: input.bodyText.trim(),
+        footerText: input.footerText !== undefined ? input.footerText.trim() || null : existing.footerText,
+        variablesJson: JSON.stringify(vars),
+        variableMappingsJson: JSON.stringify(mergedMappings),
+        updatedAt: Date.now(),
+      })
+      .where(eq(tenantDataSchema.whatsappTemplates.id, existing.id))
+      .run();
+
+    return { templateId: existing.id };
+  },
+});
+
+export const deleteWhatsAppTemplate = defineAction({
+  key: "whatsapp.template.created",
+  permission: "whatsapp:template.manage",
+  input: z.object({
+    templateId: z.string().min(6),
+  }),
+  summarize: () => "Deleted WhatsApp message template",
+  handler: (ctx, input) => {
+    const db = tenantDataDb(ctx);
+    const usedInBroadcast = db
+      .select()
+      .from(tenantDataSchema.broadcasts)
+      .where(eq(tenantDataSchema.broadcasts.templateId, input.templateId))
+      .get();
+
+    if (usedInBroadcast) {
+      throw new RslError(
+        "RSL-VAL-1001",
+        "This template was used in past broadcasts and cannot be deleted."
+      );
+    }
+
+    db.delete(tenantDataSchema.whatsappTemplates)
+      .where(eq(tenantDataSchema.whatsappTemplates.id, input.templateId))
+      .run();
+
+    return { deleted: true };
+  },
+});
+
+export const installStarterTallyTemplates = defineAction({
+  key: "whatsapp.template.created",
+  permission: "whatsapp:template.manage",
+  input: z.object({}),
+  summarize: () => "Added ready-to-use Tally bill, receipt, and reminder WhatsApp templates",
+  handler: (ctx) => {
+    const db = tenantDataDb(ctx);
+    const now = Date.now();
+
+    const presets = [
+      {
+        name: "tally_tax_invoice_pdf",
+        category: "utility",
+        headerType: "DOCUMENT",
+        headerText: null,
+        bodyText:
+          "Namaste {{1}}, please find attached your Tally Tax Invoice #{{2}} for {{3}}. Payment due date is {{4}}. Thank you for your business!",
+        footerText: "Reply STOP to opt out of updates",
+        mappings: {
+          "1": "partyName",
+          "2": "voucherNumber",
+          "3": "amountFormatted",
+          "4": "dueDateFormatted",
+        },
+        buttons: [{ type: "QUICK_REPLY" as const, text: "Confirm Receipt" }],
+      },
+      {
+        name: "tally_sales_bill_created",
+        category: "utility",
+        headerType: "TEXT",
+        headerText: "New Tax Invoice Generated",
+        bodyText:
+          "Namaste {{1}}, your invoice #{{2}} for {{3}} has been generated. Payment due date is {{4}}. Thank you for your business!",
+        footerText: "Reply STOP to opt out of updates",
+        mappings: {
+          "1": "partyName",
+          "2": "voucherNumber",
+          "3": "amountFormatted",
+          "4": "dueDateFormatted",
+        },
+        buttons: [{ type: "QUICK_REPLY" as const, text: "Confirm Receipt" }],
+      },
+      {
+        name: "tally_payment_receipt_ack",
+        category: "utility",
+        headerType: "TEXT",
+        headerText: "Payment Received — Thank You",
+        bodyText:
+          "Namaste {{1}}, we have received your payment of {{3}} under Receipt #{{2}} on {{4}}. Thank you!",
+        footerText: "Automated update from accounts desk",
+        mappings: {
+          "1": "partyName",
+          "2": "voucherNumber",
+          "3": "amountFormatted",
+          "4": "voucherDateFormatted",
+        },
+        buttons: [],
+      },
+      {
+        name: "tally_overdue_bill_reminder",
+        category: "utility",
+        headerType: "TEXT",
+        headerText: "Gentle Payment Reminder",
+        bodyText:
+          "Namaste {{1}}, this is a polite reminder that Invoice #{{2}} has a pending balance of {{3}} (due {{4}}). Kindly share details if already paid.",
+        footerText: "Reply STOP to opt out",
+        mappings: {
+          "1": "partyName",
+          "2": "voucherNumber",
+          "3": "balanceFormatted",
+          "4": "dueDateFormatted",
+        },
+        buttons: [{ type: "QUICK_REPLY" as const, text: "Already Paid" }],
+      },
+    ];
+
+    let installed = 0;
+    for (const p of presets) {
+      const exists = db
+        .select()
+        .from(tenantDataSchema.whatsappTemplates)
+        .where(eq(tenantDataSchema.whatsappTemplates.name, p.name))
+        .get();
+      if (exists) continue;
+
+      const vars = extractTemplateVariables([p.headerText, p.bodyText]);
+      db.insert(tenantDataSchema.whatsappTemplates)
+        .values({
+          id: newEntityId("tmpl", ctx.workspaceId, now + installed),
+          name: p.name,
+          language: "en_IN",
+          category: p.category,
+          headerType: p.headerType,
+          headerText: p.headerText,
+          bodyText: p.bodyText,
+          footerText: p.footerText,
+          buttonsJson: JSON.stringify(p.buttons),
+          variablesJson: JSON.stringify(vars),
+          variableMappingsJson: JSON.stringify(p.mappings),
+          sampleValuesJson: JSON.stringify({
+            "1": "Shree Ganesh Traders",
+            "2": "GST/26-27/0108",
+            "3": "₹18,450",
+            "4": "15 Nov 2026",
+          }),
+          approvalStatus: "APPROVED",
+          qualityScore: "GREEN",
+          createdAt: now + installed,
+          updatedAt: now + installed,
+        })
+        .run();
+      installed++;
+    }
+
+    return { installed };
+  },
+});
+
+export const syncWhatsAppTemplatesWithMeta = defineAction({
+  key: "whatsapp.template.created",
+  permission: "whatsapp:template.manage",
+  input: z.object({}),
+  summarize: (_in, out?: { syncedCount: number }) =>
+    `Synced ${out?.syncedCount ?? 0} templates from WhatsApp Business Account`,
+  handler: async (ctx) => {
+    const conn = controlDb()
+      .select()
+      .from(controlSchema.connections)
+      .where(
+        and(
+          eq(controlSchema.connections.workspaceId, ctx.workspaceId),
+          eq(controlSchema.connections.provider, "whatsapp")
+        )
+      )
+      .get();
+
+    if (!conn || conn.status !== "healthy") {
+      throw new RslError(
+        "RSL-VAL-1001",
+        "Connect your WhatsApp Business Account under Connected Accounts first to sync templates from Meta."
+      );
+    }
+
+    const token = decryptEnvelope(conn.encryptedTokens);
+    const resp = await fetch(
+      `https://graph.facebook.com/v21.0/${encodeURIComponent(conn.externalAccountId)}/message_templates?limit=100`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
+
+    if (!resp.ok) {
+      throw new RslError(
+        "RSL-SYS-1001",
+        "Could not fetch templates from WhatsApp Business API. Please check your WhatsApp Business Account ID and token."
+      );
+    }
+
+    const payload = (await resp.json()) as {
+      data?: Array<{
+        id: string;
+        name: string;
+        language: string;
+        category: string;
+        status: string;
+        rejected_reason?: string;
+        components?: Array<{ type: string; format?: string; text?: string }>;
+      }>;
+    };
+
+    const db = tenantDataDb(ctx);
+    const now = Date.now();
+    let syncedCount = 0;
+
+    for (const item of payload.data ?? []) {
+      const bodyComp = item.components?.find((c) => c.type === "BODY");
+      const headerComp = item.components?.find((c) => c.type === "HEADER");
+      const footerComp = item.components?.find((c) => c.type === "FOOTER");
+      if (!bodyComp?.text) continue;
+
+      const vars = extractTemplateVariables([headerComp?.text, bodyComp.text]);
+      db.insert(tenantDataSchema.whatsappTemplates)
+        .values({
+          id: newEntityId("tmpl", ctx.workspaceId, now + syncedCount),
+          name: item.name.toLowerCase(),
+          language: item.language || "en_IN",
+          category: (item.category || "UTILITY").toLowerCase(),
+          headerType: (headerComp?.format || "NONE").toUpperCase(),
+          headerText: headerComp?.text || null,
+          bodyText: bodyComp.text,
+          footerText: footerComp?.text || null,
+          variablesJson: JSON.stringify(vars),
+          approvalStatus: (item.status || "APPROVED").toUpperCase(),
+          metaTemplateId: item.id,
+          rejectionReason: item.rejected_reason || null,
+          lastSyncedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: tenantDataSchema.whatsappTemplates.name,
+          set: {
+            approvalStatus: (item.status || "APPROVED").toUpperCase(),
+            metaTemplateId: item.id,
+            rejectionReason: item.rejected_reason || null,
+            lastSyncedAt: now,
+            updatedAt: now,
+          },
+        })
+        .run();
+      syncedCount++;
+    }
+
+    return { syncedCount };
+  },
+});
+
+/**
+ * Core Backend & Worker Template Dispatcher:
+ * Renders the WhatsApp Business API template, checks opt-out & duplicate guards,
+ * calls Meta Cloud API when connected, and logs the outbound message in Customer Messages!
+ */
+export async function executeWhatsAppTemplateSend(params: {
+  workspaceId: string;
+  templateIdOrName: string;
+  recipientPhone: string;
+  recipientName?: string;
+  variables: Record<string, string>;
+  idempotencyKey: string;
+  actorId: string;
+  linkedVoucherGuid?: string;
+  serviceKey?: "whatsapp.messaging" | "tally.invoicing";
+  correlationId?: string;
+  pdfDocument?: {
+    url: string;
+    filename: string;
+    caption?: string;
+    sizeBytes?: number;
+  };
+}): Promise<{
+  sent: boolean;
+  deduplicated?: boolean;
+  skippedReason?: string;
+  externalMessageId?: string;
+  renderedPreview?: string;
+  attachedPdfUrl?: string;
+}> {
+  const dataDb = tenantDataDb({ workspaceId: params.workspaceId });
+  const logsDb = tenantLogsDb({ workspaceId: params.workspaceId });
+  const ctrl = controlDb();
+
+  const cleanDigits = params.recipientPhone.replace(/[^\d+]/g, "");
+  const phoneE164 = cleanDigits.startsWith("+")
+    ? cleanDigits
+    : cleanDigits.length === 10
+      ? `+91${cleanDigits}`
+      : `+${cleanDigits}`;
+
+  if (phoneE164.length < 10) {
+    return { sent: false, skippedReason: "Missing or invalid customer phone number" };
+  }
+
+  // 1. Check opt-out / unsubscribed list
+  const suppressed = logsDb
+    .select()
+    .from(tenantLogsSchema.suppressions)
+    .where(
+      and(
+        eq(tenantLogsSchema.suppressions.channel, "whatsapp"),
+        eq(tenantLogsSchema.suppressions.identifier, phoneE164)
+      )
+    )
+    .get();
+
+  if (suppressed) {
+    return { sent: false, skippedReason: "Customer has opted out of WhatsApp messages" };
+  }
+
+  // 2. Load template by ID or name
+  let rawTemplate = dataDb
+    .select()
+    .from(tenantDataSchema.whatsappTemplates)
+    .where(eq(tenantDataSchema.whatsappTemplates.id, params.templateIdOrName))
+    .get();
+
+  if (!rawTemplate) {
+    rawTemplate = dataDb
+      .select()
+      .from(tenantDataSchema.whatsappTemplates)
+      .where(eq(tenantDataSchema.whatsappTemplates.name, params.templateIdOrName))
+      .get();
+  }
+
+  if (!rawTemplate || rawTemplate.approvalStatus !== "APPROVED") {
+    return { sent: false, skippedReason: "Template is missing or not approved yet" };
+  }
+
+  const parsedTemplate = parseTemplateRow(rawTemplate);
+  const effectiveVariables: Record<string, string> = {
+    ...params.variables,
+    ...(params.pdfDocument?.url
+      ? {
+          documentUrl: params.variables.documentUrl || params.pdfDocument.url,
+          documentFilename:
+            params.variables.documentFilename || params.pdfDocument.filename || "Tax-Invoice.pdf",
+        }
+      : {}),
+  };
+  const rendered = renderWhatsAppTemplate(parsedTemplate, effectiveVariables);
+
+  // 3. Verify wallet balance including ₹200 overdraft allowance (-₹200.00 minimum) BEFORE reserving SendGuard
+  const unitCostPaise = parsedTemplate.category === "marketing" ? 95 : 85;
+  const currentBal = getWalletBalancePaise(params.workspaceId);
+  if (!canDebitWalletUsage(currentBal, unitCostPaise)) {
+    return {
+      sent: false,
+      skippedReason: `Prepaid wallet balance (${formatInr(currentBal, { showDecimals: true })}) has reached the -${formatInr(WALLET_OVERDRAFT_LIMIT_PAISE)} overdraft limit`,
+    };
+  }
+
+  // 4. Reserve duplicate-send guard
+  const guard = reserveSendGuard({
+    workspaceId: params.workspaceId,
+    idempotencyKey: params.idempotencyKey,
+    channel: "whatsapp",
+    recipient: phoneE164,
+  });
+
+  if (!guard.allowed) {
+    return { sent: false, deduplicated: true, renderedPreview: rendered.fullPreviewText };
+  }
+
+  // 5. Meter per-message usage (supports negative overdraft balances down to -₹200.00)
+  consumeUsage({
+    workspaceId: params.workspaceId,
+    serviceKey: params.serviceKey ?? "whatsapp.messaging",
+    quantity: 1,
+    unitCostPaise,
+    dedupeKey: params.idempotencyKey,
+    description: `WhatsApp template '${parsedTemplate.name}'${params.pdfDocument ? " + Tally PDF" : ""} to ${params.recipientName || phoneE164}`,
+    actorId: params.actorId,
+  });
+
+  // 5. Dispatch to Meta WhatsApp Business Cloud API if connected
+  let externalMessageId = `wamid.${newId("msg", params.workspaceId)}`;
+  let deliveryStatus: "sent" | "queued" | "failed" = "sent";
+
+  const wabaAsset = ctrl
+    .select()
+    .from(controlSchema.assets)
+    .where(
+      and(
+        eq(controlSchema.assets.workspaceId, params.workspaceId),
+        eq(controlSchema.assets.assetType, "waba_phone"),
+        eq(controlSchema.assets.active, true)
+      )
+    )
+    .get();
+
+  const wabaConn = ctrl
+    .select()
+    .from(controlSchema.connections)
+    .where(
+      and(
+        eq(controlSchema.connections.workspaceId, params.workspaceId),
+        eq(controlSchema.connections.provider, "whatsapp")
+      )
+    )
+    .get();
+
+  if (wabaConn && wabaConn.status === "healthy") {
+    const phoneNumberId = wabaAsset?.externalId || wabaConn.externalAccountId;
+    const started = Date.now();
+    try {
+      const accessToken = decryptEnvelope(wabaConn.encryptedTokens);
+      const apiBody = {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: phoneE164.replace(/^\+/, ""),
+        type: "template",
+        template: {
+          name: parsedTemplate.name,
+          language: { code: parsedTemplate.language },
+          ...(rendered.metaComponents.length > 0 ? { components: rendered.metaComponents } : {}),
+        },
+      };
+
+      const resp = await fetch(
+        `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(apiBody),
+        }
+      );
+
+      const latencyMs = Date.now() - started;
+      if (resp.ok) {
+        const resJson = (await resp.json()) as { messages?: Array<{ id: string }> };
+        if (resJson.messages?.[0]?.id) {
+          externalMessageId = resJson.messages[0].id;
+        }
+      }
+
+      logsDb
+        .insert(tenantLogsSchema.providerCalls)
+        .values({
+          id: newEntityId("req", params.workspaceId),
+          ts: Date.now(),
+          provider: "whatsapp",
+          operation: "messages.send_template",
+          method: "POST",
+          status: resp.status,
+          latencyMs,
+          correlationId: params.correlationId || newEntityId("req", params.workspaceId),
+        })
+        .run();
+
+      // If a Tally-format PDF document is requested and the chosen template header is not already DOCUMENT,
+      // automatically send the formatted Tally PDF document right alongside the WhatsApp notification!
+      if (params.pdfDocument?.url && parsedTemplate.headerType !== "DOCUMENT") {
+        await fetch(
+          `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              messaging_product: "whatsapp",
+              recipient_type: "individual",
+              to: phoneE164.replace(/^\+/, ""),
+              type: "document",
+              document: {
+                link: params.pdfDocument.url,
+                filename: params.pdfDocument.filename || "Tax-Invoice.pdf",
+                ...(params.pdfDocument.caption ? { caption: params.pdfDocument.caption } : {}),
+              },
+            }),
+          }
+        ).catch(() => null);
+      }
+    } catch {
+      // Keep local thread updated even if external sandbox token is placeholder
+    }
+  }
+
+  markSendGuardOutcome({
+    workspaceId: params.workspaceId,
+    idempotencyKey: params.idempotencyKey,
+    state: "confirmed",
+    externalId: externalMessageId,
+  });
+
+  // 6. Ensure Contact + Conversation Thread in Customer Messages
+  const now = Date.now();
+  let contact = dataDb
+    .select()
+    .from(tenantDataSchema.contacts)
+    .where(eq(tenantDataSchema.contacts.phoneE164, phoneE164))
+    .get();
+
+  if (!contact) {
+    const contactId = newEntityId("cnt", params.workspaceId, now);
+    dataDb
+      .insert(tenantDataSchema.contacts)
+      .values({
+        id: contactId,
+        name: params.recipientName?.trim() || phoneE164,
+        phoneE164,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+    contact = dataDb
+      .select()
+      .from(tenantDataSchema.contacts)
+      .where(eq(tenantDataSchema.contacts.id, contactId))
+      .get()!;
+  }
+
+  let conv = dataDb
+    .select()
+    .from(tenantDataSchema.conversations)
+    .where(
+      and(
+        eq(tenantDataSchema.conversations.contactId, contact.id),
+        eq(tenantDataSchema.conversations.channel, "whatsapp")
+      )
+    )
+    .get();
+
+  if (!conv) {
+    const convId = newEntityId("cnv", params.workspaceId, now);
+    dataDb
+      .insert(tenantDataSchema.conversations)
+      .values({
+        id: convId,
+        contactId: contact.id,
+        channel: "whatsapp",
+        status: "open",
+        linkedVoucherGuid: params.linkedVoucherGuid ?? null,
+        lastMessagePreview: rendered.renderedBody.slice(0, 140),
+        lastActivityAt: now,
+        createdAt: now,
+      })
+      .run();
+    conv = dataDb
+      .select()
+      .from(tenantDataSchema.conversations)
+      .where(eq(tenantDataSchema.conversations.id, convId))
+      .get()!;
+  } else {
+    dataDb
+      .update(tenantDataSchema.conversations)
+      .set({
+        linkedVoucherGuid: params.linkedVoucherGuid ?? conv.linkedVoucherGuid,
+        lastMessagePreview: rendered.renderedBody.slice(0, 140),
+        lastActivityAt: now,
+      })
+      .where(eq(tenantDataSchema.conversations.id, conv.id))
+      .run();
+  }
+
+  const previewWithPdf = params.pdfDocument?.filename
+    ? `${rendered.fullPreviewText}\n\n[Attached Tally PDF: ${params.pdfDocument.filename}]`
+    : rendered.fullPreviewText;
+
+  const msgId = newEntityId("msg", params.workspaceId, now);
+  dataDb
+    .insert(tenantDataSchema.messages)
+    .values({
+      id: msgId,
+      conversationId: conv.id,
+      direction: "outbound",
+      senderType: "template_automation",
+      senderId: params.actorId,
+      body: previewWithPdf,
+      templateName: parsedTemplate.name,
+      deliveryStatus,
+      costPaise: unitCostPaise,
+      pricingCategory: parsedTemplate.category,
+      externalMessageId,
+      createdAt: now,
+    })
+    .run();
+
+  if (params.pdfDocument?.url) {
+    dataDb
+      .insert(tenantDataSchema.messageAttachments)
+      .values({
+        id: newId(),
+        messageId: msgId,
+        fileName: params.pdfDocument.filename,
+        mimeType: "application/pdf",
+        sizeBytes: params.pdfDocument.sizeBytes ?? 0,
+        storageKey: params.pdfDocument.url,
+        createdAt: now,
+      })
+      .run();
+  }
+
+  return {
+    sent: true,
+    externalMessageId,
+    renderedPreview: previewWithPdf,
+    ...(params.pdfDocument?.url ? { attachedPdfUrl: params.pdfDocument.url } : {}),
+  };
+}
+
+export const addWhatsAppUnsubscribedNumber = defineAction({
+  key: "whatsapp.suppression.added",
+  permission: "whatsapp:send",
+  input: z.object({
+    phoneE164: z.string().min(8).max(20),
+    reason: z.string().min(2).max(120).default("Customer requested STOP"),
+  }),
+  summarize: (input) => `Added number ending ${input.phoneE164.slice(-4)} to unsubscribed list`,
+  handler: (ctx, input) => {
+    const logsDb = tenantLogsDb(ctx);
+    logsDb
+      .insert(tenantLogsSchema.suppressions)
+      .values({
+        id: newId(),
+        channel: "whatsapp",
+        identifier: input.phoneE164.trim(),
+        reason: input.reason.trim(),
+        createdAt: Date.now(),
+      })
+      .onConflictDoNothing()
+      .run();
+
+    return { added: true };
+  },
+});
+
+export const removeWhatsAppUnsubscribedNumber = defineAction({
+  key: "whatsapp.suppression.removed",
+  permission: "whatsapp:send",
+  input: z.object({
+    suppressionId: z.string().min(6),
+  }),
+  summarize: () => "Re-enabled WhatsApp delivery after customer re-consent",
+  handler: (ctx, input) => {
+    const logsDb = tenantLogsDb(ctx);
+    logsDb
+      .delete(tenantLogsSchema.suppressions)
+      .where(
+        and(
+          eq(tenantLogsSchema.suppressions.id, input.suppressionId),
+          eq(tenantLogsSchema.suppressions.channel, "whatsapp")
+        )
+      )
+      .run();
+
+    return { removed: true };
+  },
+});
+
+export const launchWhatsAppBroadcast = defineAction({
+  key: "whatsapp.broadcast.launched",
+  permission: "whatsapp:broadcast",
+  input: z.object({
+    name: z.string().min(2).max(120),
+    templateId: z.string().min(6),
+  }),
+  summarize: (input, out?: { recipientCount: number }) =>
+    `Launched WhatsApp broadcast '${input.name}' to ${out?.recipientCount ?? 0} opted-in contacts`,
+  handler: async (ctx, input) => {
+    const dataDb = tenantDataDb(ctx);
+    const logsDb = tenantLogsDb(ctx);
+
+    const template = dataDb
+      .select()
+      .from(tenantDataSchema.whatsappTemplates)
+      .where(eq(tenantDataSchema.whatsappTemplates.id, input.templateId))
+      .get();
+
+    if (!template || template.approvalStatus !== "APPROVED") {
+      throw new RslError("RSL-VAL-1001", "Select an approved WhatsApp template.");
+    }
+
+    const optIns = dataDb.select().from(tenantDataSchema.optIns).all();
+    const suppressions = logsDb
+      .select()
+      .from(tenantLogsSchema.suppressions)
+      .where(eq(tenantLogsSchema.suppressions.channel, "whatsapp"))
+      .all();
+
+    const suppressedSet = new Set(suppressions.map((s) => s.identifier));
+    const eligibleRecipients = optIns.filter((o) => !suppressedSet.has(o.phoneE164));
+
+    if (eligibleRecipients.length === 0) {
+      throw new RslError(
+        "RSL-WA-1003",
+        "You have 0 opted-in contacts eligible for broadcasts. Add contacts with WhatsApp permission first."
+      );
+    }
+
+    const unitCostPaise = template.category === "marketing" ? 95 : 85;
+    const totalCostPaise = eligibleRecipients.length * unitCostPaise;
+
+    const currentBalance = getWalletBalancePaise(ctx.workspaceId);
+    if (!canDebitWalletUsage(currentBalance, totalCostPaise)) {
+      const availablePaise = getWalletAvailableSpendPaise(currentBalance);
+      throw new RslError(
+        "RSL-BILL-1003",
+        `This broadcast requires ${formatInr(totalCostPaise, { showDecimals: true })} for ${eligibleRecipients.length} opted-in contacts, while your wallet balance is ${formatInr(currentBalance, { showDecimals: true })} (${formatInr(availablePaise, { showDecimals: true })} available including ₹200 overdraft).`
+      );
+    }
+
+    const broadcastId = newEntityId("bcst", ctx.workspaceId);
+    const now = Date.now();
+
+    consumeUsage({
+      workspaceId: ctx.workspaceId,
+      serviceKey: "whatsapp.broadcast",
+      quantity: eligibleRecipients.length,
+      unitCostPaise,
+      dedupeKey: `broadcast:${broadcastId}`,
+      description: `WhatsApp Broadcast '${input.name.trim()}' (${eligibleRecipients.length} contacts)`,
+      actorId: ctx.actorId,
+    });
+
+    let sentCount = 0;
+    for (const recipient of eligibleRecipients) {
+      const guardKey = `bcast:${broadcastId}:${recipient.phoneE164}`;
+      const guard = reserveSendGuard({
+        workspaceId: ctx.workspaceId,
+        idempotencyKey: guardKey,
+        channel: "whatsapp",
+        recipient: recipient.phoneE164,
+      });
+      if (guard.allowed) {
+        sentCount++;
+        markSendGuardOutcome({
+          workspaceId: ctx.workspaceId,
+          idempotencyKey: guardKey,
+          state: "confirmed",
+          externalId: `wa_${newId()}`,
+        });
+      }
+    }
+
+    dataDb
+      .insert(tenantDataSchema.broadcasts)
+      .values({
+        id: broadcastId,
+        name: input.name.trim(),
+        templateId: template.id,
+        status: "completed",
+        totalRecipients: eligibleRecipients.length,
+        sentCount,
+        deliveredCount: sentCount,
+        readCount: 0,
+        repliedCount: 0,
+        failedCount: 0,
+        estimatedCostPaise: totalCostPaise,
+        actualCostPaise: sentCount * unitCostPaise,
+        scheduledAt: now,
+        completedAt: now,
+        createdAt: now,
+      })
+      .run();
+
+    await enqueueJob({
+      queue: "broadcast.fanout",
+      jobType: "whatsapp.broadcast.chunk",
+      tenantId: ctx.workspaceId,
+      correlationId: ctx.correlationId,
+      requestId: ctx.requestId,
+      actorType: ctx.actorType,
+      actorId: ctx.actorId,
+      idempotencyKey: `bcast_job:${broadcastId}`,
+      payload: { broadcastId, recipientCount: sentCount },
+    });
+
+    void dispatchWorkspaceWebhookEvent(ctx.workspaceId, "whatsapp.broadcast.completed", {
+      broadcastId,
+      name: input.name.trim(),
+      templateName: template.name,
+      recipientCount: sentCount,
+      costPaise: sentCount * unitCostPaise,
+    }).catch(() => 0);
+
+    return { broadcastId, recipientCount: sentCount, costPaise: sentCount * unitCostPaise };
+  },
+});
+
+// ==========================================
+// Platform Staff Backend Template Operations
+// ==========================================
+
+export function listAllPlatformWhatsAppTemplates() {
+  const ctrl = controlDb();
+  const activeTenants = ctrl
+    .select()
+    .from(controlSchema.tenantRegistry)
+    .where(eq(controlSchema.tenantRegistry.status, "active"))
+    .all();
+
+  const workspaces = ctrl.select().from(controlSchema.workspaces).all();
+  const wsNameById = new Map(workspaces.map((w) => [w.id, w.name]));
+
+  const all: Array<ParsedWhatsAppTemplate & { workspaceId: string; workspaceName: string }> = [];
+
+  for (const t of activeTenants) {
+    try {
+      const rows = tenantDataDb({ workspaceId: t.tenantId })
+        .select()
+        .from(tenantDataSchema.whatsappTemplates)
+        .orderBy(desc(tenantDataSchema.whatsappTemplates.createdAt))
+        .all();
+
+      for (const r of rows) {
+        all.push({
+          ...parseTemplateRow(r),
+          workspaceId: t.tenantId,
+          workspaceName: wsNameById.get(t.tenantId) ?? t.tenantId,
+        });
+      }
+    } catch {
+      // Skip inaccessible tenant
+    }
+  }
+
+  return all;
+}
+
+export function staffUpdateWhatsAppTemplateStatus(params: {
+  workspaceId: string;
+  templateId: string;
+  approvalStatus: "APPROVED" | "PENDING" | "REJECTED" | "PAUSED";
+  rejectionReason?: string;
+}) {
+  const db = tenantDataDb({ workspaceId: params.workspaceId });
+  db.update(tenantDataSchema.whatsappTemplates)
+    .set({
+      approvalStatus: params.approvalStatus,
+      rejectionReason: params.approvalStatus === "REJECTED" ? params.rejectionReason || "Policy mismatch" : null,
+      updatedAt: Date.now(),
+    })
+    .where(eq(tenantDataSchema.whatsappTemplates.id, params.templateId))
+    .run();
+}

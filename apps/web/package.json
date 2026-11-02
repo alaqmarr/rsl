@@ -1,0 +1,53 @@
+{
+  "name": "@rsl/web",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 4500",
+    "build": "next build",
+    "start": "next start --port 4500",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rsl/analytics": "workspace:*",
+    "@rsl/api-keys": "workspace:*",
+    "@rsl/auth": "workspace:*",
+    "@rsl/backup": "workspace:*",
+    "@rsl/billing": "workspace:*",
+    "@rsl/connections": "workspace:*",
+    "@rsl/core": "workspace:*",
+    "@rsl/database": "workspace:*",
+    "@rsl/docs": "workspace:*",
+    "@rsl/google": "workspace:*",
+    "@rsl/inbox": "workspace:*",
+    "@rsl/logging": "workspace:*",
+    "@rsl/meta": "workspace:*",
+    "@rsl/notifications": "workspace:*",
+    "@rsl/queue": "workspace:*",
+    "@rsl/rbac": "workspace:*",
+    "@rsl/storage": "workspace:*",
+    "@rsl/tally": "workspace:*",
+    "@rsl/tenancy": "workspace:*",
+    "@rsl/ui": "workspace:*",
+    "@rsl/whatsapp": "workspace:*",
+    "@sentry/nextjs": "^11.10.0",
+    "better-sqlite3": "12.11.1",
+    "drizzle-orm": "0.45.4",
+    "lucide-react": "^1.66.0",
+    "next": "^16.4.3",
+    "qrcode": "^1.5.4",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "sileo": "^0.1.6",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^22.20.5",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "tailwindcss": "^4.3.3"
+  }
+}

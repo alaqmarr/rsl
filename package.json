@@ -1,0 +1,51 @@
+{
+  "name": "rsl-marketing",
+  "version": "1.0.0",
+  "private": true,
+  "description": "RSL Marketing Platform — Multi-tenant SaaS by Rapid Shift Labs",
+  "packageManager": "pnpm@10.0.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:web": "pnpm --filter @rsl/web dev",
+    "dev:admin": "pnpm --filter @rsl/admin dev",
+    "dev:docs": "pnpm --filter @rsl/docs-site dev",
+    "dev:worker": "pnpm --filter @rsl/worker dev",
+    "dev:cleanup": "tsx infra/pm2/rsl-cleanup-service.ts",
+    "ops:cleanup": "tsx infra/pm2/rsl-cleanup-service.ts --once",
+    "pm2:start": "node infra/pm2/pm2-manager.mjs start",
+    "pm2:restart": "node infra/pm2/pm2-manager.mjs restart",
+    "pm2:reload": "node infra/pm2/pm2-manager.mjs reload",
+    "pm2:cleanup": "node infra/pm2/pm2-manager.mjs cleanup",
+    "pm2:stop": "node infra/pm2/pm2-manager.mjs stop",
+    "pm2:status": "node infra/pm2/pm2-manager.mjs status",
+    "sync:public": "node scripts/sync-public-assets.mjs",
+    "build": "node scripts/sync-public-assets.mjs && turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "vitest run",
+    "db:migrate:control": "pnpm --filter @rsl/tenancy db:migrate:control",
+    "db:migrate:tenants": "pnpm --filter @rsl/tenancy db:migrate:tenants",
+    "docs:build": "pnpm --filter @rsl/docs build:content",
+    "docs:lint": "pnpm --filter @rsl/docs lint:content",
+    "format": "prettier --write \"**/*.{ts,tsx,md,mdx,json}\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "prettier": "^3.9.10",
+    "tsx": "^4.23.15",
+    "turbo": "^2.11.10",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild",
+      "sharp",
+      "unrs-resolver"
+    ]
+  }
+}

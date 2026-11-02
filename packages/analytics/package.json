@@ -1,0 +1,16 @@
+{
+  "name": "@rsl/analytics",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rsl/core": "workspace:*",
+    "@rsl/database": "workspace:*",
+    "@rsl/tenancy": "workspace:*",
+    "drizzle-orm": "0.45.4"
+  }
+}

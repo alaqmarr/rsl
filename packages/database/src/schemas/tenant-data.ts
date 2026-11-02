@@ -1,0 +1,407 @@
+import { sqliteTable, text, integer, uniqueIndex, index } from "drizzle-orm/sqlite-core";
+
+// Inbox & Contacts
+export const contacts = sqliteTable(
+  "contacts",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    phoneE164: text("phone_e164"),
+    email: text("email"),
+    companyName: text("company_name"),
+    instagramHandle: text("instagram_handle"),
+    facebookScopedId: text("facebook_scoped_id"),
+    tallyPartyGuid: text("tally_party_guid"),
+    tagsJson: text("tags_json").notNull().default("[]"),
+    lifetimeValuePaise: integer("lifetime_value_paise").notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    index("idx_contacts_phone").on(t.phoneE164),
+    index("idx_contacts_created").on(t.createdAt),
+  ]
+);
+
+export const conversations = sqliteTable(
+  "conversations",
+  {
+    id: text("id").primaryKey(),
+    contactId: text("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    channel: text("channel").notNull(), // whatsapp | instagram | facebook | google_review
+    assetId: text("asset_id"),
+    externalThreadId: text("external_thread_id"),
+    subject: text("subject"),
+    status: text("status").notNull().default("open"), // open | pending | resolved | snoozed
+    assignedUserId: text("assigned_user_id"),
+    unreadCount: integer("unread_count").notNull().default(0),
+    lastCustomerMessageAt: integer("last_customer_message_at"),
+    firstReplyTimeSec: integer("first_reply_time_sec"),
+    slaTargetMinutes: integer("sla_target_minutes").notNull().default(30),
+    slaBreached: integer("sla_breached", { mode: "boolean" }).notNull().default(false),
+    linkedVoucherGuid: text("linked_voucher_guid"),
+    lastMessagePreview: text("last_message_preview"),
+    lastActivityAt: integer("last_activity_at").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [
+    index("idx_conversations_status_activity").on(t.status, t.lastActivityAt),
+    index("idx_conversations_channel").on(t.channel),
+  ]
+);
+
+export const messages = sqliteTable(
+  "messages",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    direction: text("direction").notNull(), // inbound | outbound
+    senderType: text("sender_type").notNull(), // customer | team_member | template_automation
+    senderId: text("sender_id"),
+    body: text("body").notNull(),
+    templateName: text("template_name"),
+    deliveryStatus: text("delivery_status").notNull().default("sent"), // queued | sent | delivered | read | failed
+    costPaise: integer("cost_paise").notNull().default(0),
+    pricingCategory: text("pricing_category"), // utility | marketing | service
+    externalMessageId: text("external_message_id"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [
+    index("idx_messages_conv_ts").on(t.conversationId, t.createdAt),
+    index("idx_messages_ts").on(t.createdAt),
+  ]
+);
+
+export const messageAttachments = sqliteTable("message_attachments", {
+  id: text("id").primaryKey(),
+  messageId: text("message_id")
+    .notNull()
+    .references(() => messages.id, { onDelete: "cascade" }),
+  fileName: text("file_name").notNull(),
+  mimeType: text("mime_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  storageKey: text("storage_key").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const labels = sqliteTable("labels", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  colorHex: text("color_hex").notNull().default("#0E8A56"),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const conversationLabels = sqliteTable(
+  "conversation_labels",
+  {
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    labelId: text("label_id")
+      .notNull()
+      .references(() => labels.id, { onDelete: "cascade" }),
+  },
+  (t) => [uniqueIndex("uq_conv_label").on(t.conversationId, t.labelId)]
+);
+
+export const internalNotes = sqliteTable("internal_notes", {
+  id: text("id").primaryKey(),
+  conversationId: text("conversation_id")
+    .notNull()
+    .references(() => conversations.id, { onDelete: "cascade" }),
+  authorUserId: text("author_user_id").notNull(),
+  authorName: text("author_name").notNull(),
+  body: text("body").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const cannedReplies = sqliteTable("canned_replies", {
+  id: text("id").primaryKey(),
+  shortcut: text("shortcut").notNull().unique(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
+// Google Business Reviews
+export const reviews = sqliteTable(
+  "reviews",
+  {
+    id: text("id").primaryKey(),
+    externalReviewId: text("external_review_id").notNull().unique(),
+    locationName: text("location_name").notNull(),
+    reviewerName: text("reviewer_name").notNull(),
+    rating: integer("rating").notNull(), // 1 to 5
+    comment: text("comment").notNull(),
+    replyStatus: text("reply_status").notNull().default("unreplied"), // unreplied | draft_ready | replied
+    publishedReplyText: text("published_reply_text"),
+    repliedAt: integer("replied_at"),
+    reviewedAt: integer("reviewed_at").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [index("idx_reviews_rating_ts").on(t.rating, t.reviewedAt)]
+);
+
+// Marketing, Campaigns, Scheduled Social Posts & Website Sales Tracking
+export const campaigns = sqliteTable(
+  "campaigns",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    channel: text("channel").notNull(), // meta_ads | instagram | facebook | whatsapp_broadcast
+    objective: text("objective").notNull(), // messages | website_sales | lead_generation | awareness
+    status: text("status").notNull().default("active"), // active | paused | completed | draft
+    dailyBudgetPaise: integer("daily_budget_paise").notNull().default(0),
+    totalSpendPaise: integer("total_spend_paise").notNull().default(0),
+    attributedRevenuePaise: integer("attributed_revenue_paise").notNull().default(0),
+    impressions: integer("impressions").notNull().default(0),
+    clicks: integer("clicks").notNull().default(0),
+    conversions: integer("conversions").notNull().default(0),
+    startDate: integer("start_date").notNull(),
+    endDate: integer("end_date"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [index("idx_campaigns_status").on(t.status)]
+);
+
+export const insightSnapshots = sqliteTable(
+  "insight_snapshots",
+  {
+    id: text("id").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    dayKey: text("day_key").notNull(), // YYYY-MM-DD
+    spendPaise: integer("spend_paise").notNull().default(0),
+    revenuePaise: integer("revenue_paise").notNull().default(0),
+    impressions: integer("impressions").notNull().default(0),
+    clicks: integer("clicks").notNull().default(0),
+    leadsCount: integer("leads_count").notNull().default(0),
+    salesCount: integer("sales_count").notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_insight_campaign_day").on(t.campaignId, t.dayKey),
+    index("idx_insight_day").on(t.dayKey),
+  ]
+);
+
+export const scheduledPosts = sqliteTable("scheduled_posts", {
+  id: text("id").primaryKey(),
+  channel: text("channel").notNull(), // instagram_feed | instagram_reel | facebook_page | google_post
+  caption: text("caption").notNull(),
+  mediaUrl: text("media_url"),
+  scheduledFor: integer("scheduled_for").notNull(),
+  status: text("status").notNull().default("scheduled"), // draft | scheduled | published | failed
+  publishedAt: integer("published_at"),
+  reachCount: integer("reach_count").notNull().default(0),
+  engagementCount: integer("engagement_count").notNull().default(0),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const pixelEvents = sqliteTable(
+  "pixel_events",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id").notNull().unique(), // deduplication key
+    eventName: text("event_name").notNull(), // Purchase | Lead | AddToCart | ViewContent
+    valuePaise: integer("value_paise").notNull().default(0),
+    currency: text("currency").notNull().default("INR"),
+    matchQualityScore: integer("match_quality_score").notNull().default(80), // 0-100
+    customerHash: text("customer_hash"),
+    occurredAt: integer("occurred_at").notNull(),
+  },
+  (t) => [index("idx_pixel_occurred").on(t.occurredAt)]
+);
+
+// WhatsApp Business API Templates, Broadcasts, Reminders & Opt-In Proof
+export const whatsappTemplates = sqliteTable("whatsapp_templates", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  language: text("language").notNull().default("en_IN"),
+  category: text("category").notNull(), // utility | marketing | authentication
+  headerType: text("header_type").notNull().default("NONE"), // NONE | TEXT | DOCUMENT | IMAGE
+  headerText: text("header_text"),
+  bodyText: text("body_text").notNull(),
+  footerText: text("footer_text"),
+  buttonsJson: text("buttons_json").notNull().default("[]"),
+  variablesJson: text("variables_json").notNull().default("[]"),
+  variableMappingsJson: text("variable_mappings_json").notNull().default("{}"),
+  sampleValuesJson: text("sample_values_json").notNull().default("{}"),
+  approvalStatus: text("approval_status").notNull().default("APPROVED"), // DRAFT | PENDING | APPROVED | REJECTED | PAUSED
+  metaTemplateId: text("meta_template_id"),
+  qualityScore: text("quality_score").notNull().default("GREEN"),
+  rejectionReason: text("rejection_reason"),
+  lastSyncedAt: integer("last_synced_at"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull().default(0),
+});
+
+// Tally-to-WhatsApp Event Automation Rules (Instant Bill / Receipt Notifications via Worker)
+export const tallyAutomationRules = sqliteTable(
+  "tally_automation_rules",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    triggerEvent: text("trigger_event").notNull(), // Sales | Receipt | CreditNote | Purchase | All
+    templateId: text("template_id")
+      .notNull()
+      .references(() => whatsappTemplates.id, { onDelete: "cascade" }),
+    templateName: text("template_name").notNull(),
+    minAmountPaise: integer("min_amount_paise").notNull().default(0),
+    delaySeconds: integer("delay_seconds").notNull().default(0),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    triggeredCount: integer("triggered_count").notNull().default(0),
+    lastTriggeredAt: integer("last_triggered_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [index("idx_tally_auto_event").on(t.triggerEvent, t.active)]
+);
+
+export const broadcasts = sqliteTable("broadcasts", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  templateId: text("template_id")
+    .notNull()
+    .references(() => whatsappTemplates.id),
+  status: text("status").notNull().default("draft"), // draft | sending | completed | paused | cancelled
+  totalRecipients: integer("total_recipients").notNull().default(0),
+  sentCount: integer("sent_count").notNull().default(0),
+  deliveredCount: integer("delivered_count").notNull().default(0),
+  readCount: integer("read_count").notNull().default(0),
+  repliedCount: integer("replied_count").notNull().default(0),
+  failedCount: integer("failed_count").notNull().default(0),
+  estimatedCostPaise: integer("estimated_cost_paise").notNull().default(0),
+  actualCostPaise: integer("actual_cost_paise").notNull().default(0),
+  scheduledAt: integer("scheduled_at"),
+  completedAt: integer("completed_at"),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const optIns = sqliteTable(
+  "opt_ins",
+  {
+    id: text("id").primaryKey(),
+    contactId: text("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    phoneE164: text("phone_e164").notNull(),
+    channel: text("channel").notNull().default("whatsapp"),
+    source: text("source").notNull(), // website_checkout | store_invoice | inbound_whatsapp | manual_written
+    evidenceNote: text("evidence_note").notNull(),
+    consentedAt: integer("consented_at").notNull(),
+  },
+  (t) => [uniqueIndex("uq_opt_in_phone_channel").on(t.phoneE164, t.channel)]
+);
+
+export const reminderRules = sqliteTable("reminder_rules", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  triggerDaysOffset: integer("trigger_days_offset").notNull(), // -3 = 3 days before due, +7 = 7 days overdue
+  templateName: text("template_name").notNull(),
+  maxRemindersPerBill: integer("max_reminders_per_bill").notNull().default(3),
+  quietHoursStart: integer("quiet_hours_start").notNull().default(20), // 8 PM
+  quietHoursEnd: integer("quiet_hours_end").notNull().default(9), // 9 AM
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  createdAt: integer("created_at").notNull(),
+});
+
+// Tally Prime Sync Mirror
+export const tallyCompanies = sqliteTable("tally_companies", {
+  id: text("id").primaryKey(),
+  companyGuid: text("company_guid").notNull().unique(),
+  name: text("name").notNull(),
+  financialYearFrom: text("financial_year_from").notNull(),
+  lastAlterId: integer("last_alter_id").notNull().default(0),
+  lastSyncedAt: integer("last_synced_at"),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const tallyParties = sqliteTable("tally_parties", {
+  id: text("id").primaryKey(),
+  partyGuid: text("party_guid").notNull().unique(),
+  companyId: text("company_id")
+    .notNull()
+    .references(() => tallyCompanies.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  phoneE164: text("phone_e164"),
+  gstin: text("gstin"),
+  closingBalancePaise: integer("closing_balance_paise").notNull().default(0),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const tallyVouchers = sqliteTable(
+  "tally_vouchers",
+  {
+    id: text("id").primaryKey(),
+    guid: text("guid").notNull().unique(),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => tallyCompanies.id, { onDelete: "cascade" }),
+    voucherNumber: text("voucher_number").notNull(),
+    voucherType: text("voucher_type").notNull(), // Sales | Receipt | CreditNote | Purchase
+    partyName: text("party_name").notNull(),
+    partyPhoneE164: text("party_phone_e164"),
+    amountPaise: integer("amount_paise").notNull(),
+    paidAmountPaise: integer("paid_amount_paise").notNull().default(0),
+    voucherDate: integer("voucher_date").notNull(),
+    dueDate: integer("due_date"),
+    paymentStatus: text("payment_status").notNull().default("unpaid"), // unpaid | partial | paid | cancelled
+    whatsappInvoiceSentAt: integer("whatsapp_invoice_sent_at"),
+    remindersSentCount: integer("reminders_sent_count").notNull().default(0),
+    alterId: integer("alter_id").notNull().default(1),
+    contentHash: text("content_hash").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    index("idx_vouchers_type_status").on(t.voucherType, t.paymentStatus),
+    index("idx_vouchers_due_date").on(t.dueDate),
+  ]
+);
+
+export const syncRuns = sqliteTable("sync_runs", {
+  id: text("id").primaryKey(),
+  companyId: text("company_id"),
+  source: text("source").notNull().default("agent"), // agent | manual
+  vouchersUpserted: integer("vouchers_upserted").notNull().default(0),
+  durationMs: integer("duration_ms").notNull().default(0),
+  status: text("status").notNull().default("success"),
+  createdAt: integer("created_at").notNull(),
+});
+
+// Transactional Outbox & Tenant Settings
+export const outbox = sqliteTable(
+  "outbox",
+  {
+    id: text("id").primaryKey(),
+    queueName: text("queue_name").notNull(),
+    jobType: text("job_type").notNull(),
+    idempotencyKey: text("idempotency_key").notNull().unique(),
+    envelopeJson: text("envelope_json").notNull(),
+    status: text("status").notNull().default("pending"), // pending | enqueued | completed | failed
+    attempts: integer("attempts").notNull().default(0),
+    nextRunAt: integer("next_run_at").notNull(),
+    lastError: text("last_error"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [index("idx_outbox_status_next").on(t.status, t.nextRunAt)]
+);
+
+export const settings = sqliteTable("settings", {
+  key: text("key").primaryKey(),
+  valueJson: text("value_json").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const schemaMeta = sqliteTable("schema_meta", {
+  version: integer("version").primaryKey(),
+  appliedAt: integer("applied_at").notNull(),
+});
