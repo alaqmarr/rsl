@@ -8,24 +8,30 @@ import { getAvatarInitials, getAvatarToneClasses } from "@rsl/ui";
 const REPO_ROOT = path.resolve(__dirname, "../../../..");
 
 describe("Sprint 6 & Sprint 7 — Design Tokens, True Vector Assets, Interactive Charts & Docs Portal", () => {
-  it("replaces bloated base64 SVGs with < 4 KB true vector SVGs and syncs favicon, manifest, OG, email logo & diagrams", () => {
-    const svgFiles = [
-      "logo-nobg.svg",
-      "logo.svg",
-      "long-logo-nobg.svg",
-      "long-logo.svg",
+  it("uses official RapidShift Labs PNG/JPEG brand logos across UI & PDFs and mirrors derived favicon, manifest, OG, email logo & diagrams cleanly", () => {
+    const officialLogoFiles = [
+      "logo-nobg.png",
+      "logo.png",
+      "long-logo-nobg.png",
+      "long-logo.jpeg",
     ];
 
-    for (const file of svgFiles) {
+    for (const file of officialLogoFiles) {
       const full = path.join(REPO_ROOT, "public", file);
-      const raw = fs.readFileSync(full, "utf8");
-      const stat = fs.statSync(full);
-      expect(stat.size).toBeLessThan(4096);
-      expect(raw).toContain("<svg");
-      expect(raw).not.toContain("data:image/");
+      expect(fs.existsSync(full)).toBe(true);
+      expect(fs.statSync(full).size).toBeGreaterThan(1024);
+    }
+
+    // Ensure synthetic SVG replacements never linger in root or mirrored app public dirs
+    for (const staleSvg of ["logo-nobg.svg", "logo.svg", "long-logo-nobg.svg", "long-logo.svg"]) {
+      expect(fs.existsSync(path.join(REPO_ROOT, "public", staleSvg))).toBe(false);
+      expect(fs.existsSync(path.join(REPO_ROOT, "apps/web/public", staleSvg))).toBe(false);
+      expect(fs.existsSync(path.join(REPO_ROOT, "apps/admin/public", staleSvg))).toBe(false);
+      expect(fs.existsSync(path.join(REPO_ROOT, "apps/docs/public", staleSvg))).toBe(false);
     }
 
     const requiredAssets = [
+      ...officialLogoFiles,
       "favicon.ico",
       "apple-touch-icon.png",
       "icon-192.png",
@@ -43,6 +49,12 @@ describe("Sprint 6 & Sprint 7 — Design Tokens, True Vector Assets, Interactive
       expect(fs.existsSync(path.join(REPO_ROOT, "apps/admin/public", rel))).toBe(true);
       expect(fs.existsSync(path.join(REPO_ROOT, "apps/docs/public", rel))).toBe(true);
     }
+
+    const uiIndex = fs.readFileSync(path.join(REPO_ROOT, "packages/ui/src/index.tsx"), "utf8");
+    expect(uiIndex).toContain('src="/logo-nobg.png"');
+    expect(uiIndex).toContain('src="/long-logo-nobg.png"');
+    expect(uiIndex).not.toContain('src="/logo-nobg.svg"');
+    expect(uiIndex).not.toContain('src="/long-logo-nobg.svg"');
 
     const emailLogoSize = fs.statSync(path.join(REPO_ROOT, "public/email-logo.png")).size;
     expect(emailLogoSize).toBeLessThan(12 * 1024);

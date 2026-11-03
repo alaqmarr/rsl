@@ -39,6 +39,11 @@
     --ruby: #ef4444;
   }
 
+  [data-theme="dark"] .rsl-brand-logo-img,
+  .dark .rsl-brand-logo-img {
+    filter: invert(1);
+  }
+
   html,
   body {
     background-color: var(--canvas);

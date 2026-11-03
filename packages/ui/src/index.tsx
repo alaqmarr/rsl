@@ -117,13 +117,13 @@ export function BrandLogo({
     return (
       <span className={`inline-flex shrink-0 items-center gap-2 ${className}`}>
         <img
-          src="/logo-nobg.svg"
+          src="/logo-nobg.png"
           alt="RapidShift Labs"
           width={px}
           height={px}
           draggable={false}
           style={{ width: px, height: px, flexShrink: 0 }}
-          className="shrink-0 select-none object-contain"
+          className="rsl-brand-logo-img shrink-0 select-none object-contain"
         />
         {subtitle ? (
           <span className="truncate text-[11px] font-medium text-zinc-500">{subtitle}</span>
@@ -133,18 +133,18 @@ export function BrandLogo({
   }
 
   const h = BRAND_LONG_HEIGHT_PX[size];
-  const w = Math.round(h * (1536 / 453));
+  const w = Math.round(h * (1228 / 362));
 
   return (
     <span className={`inline-flex min-w-0 flex-col items-start ${className}`}>
       <img
-        src="/long-logo-nobg.svg"
+        src="/long-logo-nobg.png"
         alt="RapidShift Labs"
         width={w}
         height={h}
         draggable={false}
         style={{ height: h, width: "auto", maxWidth: "100%", flexShrink: 0 }}
-        className="shrink-0 select-none object-contain"
+        className="rsl-brand-logo-img shrink-0 select-none object-contain"
       />
       {subtitle ? (
         <span className="mt-1 block truncate text-[10.5px] font-medium leading-none text-zinc-500">
@@ -174,13 +174,13 @@ export function PlatformFooter({
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div className="flex flex-wrap items-center gap-2.5">
           <img
-            src="/long-logo-nobg.svg"
+            src="/long-logo-nobg.png"
             alt="RapidShift Labs"
             width={75}
             height={22}
             draggable={false}
             style={{ height: 20, width: "auto", flexShrink: 0 }}
-            className="shrink-0 select-none object-contain opacity-90"
+            className="rsl-brand-logo-img shrink-0 select-none object-contain opacity-90"
           />
           <span className="hidden text-zinc-300 sm:inline">•</span>
           <span className="font-medium text-slate-700">{suiteLabel}</span>
@@ -1674,7 +1674,7 @@ export function GstTaxInvoiceDocument(props: GstTaxInvoiceDocumentProps) {
         <div>
           <div className="flex flex-col items-start gap-2">
             <img
-              src="/long-logo-nobg.svg"
+              src="/long-logo-nobg.png"
               alt="RapidShift Labs"
               width={122}
               height={36}
@@ -1941,7 +1941,7 @@ export function GstTaxInvoiceDocument(props: GstTaxInvoiceDocumentProps) {
       <div className="mt-8 flex flex-col justify-between gap-3 border-t border-zinc-200 pt-4 text-[11px] text-zinc-500 sm:flex-row sm:items-center">
         <div className="flex items-center gap-2.5">
           <img
-            src="/logo-nobg.svg"
+            src="/logo-nobg.png"
             alt="RapidShift Labs"
             width={18}
             height={18}

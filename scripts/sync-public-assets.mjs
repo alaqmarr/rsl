@@ -26,10 +26,12 @@ function countFilesRecursive(dir) {
 if (fs.existsSync(rootPublic)) {
   const totalFiles = countFilesRecursive(rootPublic);
   for (const target of targets) {
+    // Mirror cleanly so deleted/stale files never linger in app public folders
+    fs.rmSync(target, { recursive: true, force: true });
     fs.mkdirSync(target, { recursive: true });
     fs.cpSync(rootPublic, target, { recursive: true, force: true });
   }
   console.log(
-    `[sync-public-assets] Synced ${totalFiles} files (including subdirectories) from public/ -> apps/{web,admin,docs}/public/`
+    `[sync-public-assets] Mirrored ${totalFiles} files (including subdirectories) from public/ -> apps/{web,admin,docs}/public/`
   );
 }
