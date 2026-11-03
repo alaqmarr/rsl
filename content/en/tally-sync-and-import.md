@@ -1,149 +1,140 @@
 ---
-title: Tally Prime Cloud Sync, Client Ledgers, Auto Paid-Bill Sync & Exact PDF Invoices
-summary: Complete minute-by-minute guide to enter mobile numbers in Tally Party Ledgers, enable Port 9000, load your personalized <business>-rsl-sync.tdl v2.7 add-on, automatically settle invoices when marked Paid in Tally, view Client & Supplier Ledgers, and send untouched Tally-printed PDF invoices on WhatsApp.
+title: Tally Prime All-in-One Suite — Bills, Direct Product Sync, Multi-Company, Client Ledgers & Exact PDFs
+summary: Complete keystroke-by-keystroke Tally Prime guide to configure F11 and F12 settings, load your personalized <business>-rsl-sync.tdl v2.8 add-on, sync Products (Stock Items) and Party Ledgers live on Ctrl + A, detect multiple Tally companies via F3, settle Paid-in-Tally invoices automatically, and send untouched Tally-printed PDF invoices on WhatsApp.
 section: Daily Operations
 audience: customer
 service: tally.sync
 order: 4
-lastReviewed: 2026-11-03
+lastReviewed: 2026-11-04
 ---
 
-## Core Guarantee — Your Tally Invoice PDF Is Never Altered
+## Core Guarantees — Zero Bill Overwrites, Direct Product Sync & Untouched Tally PDFs
 
-RapidShift Labs **never** redesigns, re-templates, or alters your Tally Prime invoice PDF. When Tally Prime exports a bill via local Port `9000` or the Windows Connector, RapidShift captures Tally Prime's own native `Voucher` print output (`%PDF-1.x`) byte-for-byte — preserving your company logo, custom TDL columns, HSN/SAC table, e-Invoice IRN & QR code, e-Way Bill details, bank details, and authorised signatory box — and delivers that exact PDF on WhatsApp using the `tally_tax_invoice_pdf` (`DOCUMENT` header) template.
+RapidShift Labs provides an **All-in-One Tally Prime Suite** spanning **Bills & Receipts** (`/tally`), **Client & Supplier Ledgers** (`/tally/parties`), and **Stock & Godown Inventory** (`/inventory`):
+
+1. **Zero Bill Overwrite Guarantee**: Creating sequential bills in Tally Prime (for example **Bill `#8`** followed immediately by **Bill `#9`**) resolves each voucher's exact `MasterID` and `GUID` independently in `.tdl v2.8`, backed by a server-side Non-Destructive Bill Number Collision Shield so earlier saved bills are never replaced.
+2. **Direct Real-Time Product & Ledger Sync**: Saving any **Stock Item** or **Party Ledger** in Tally Prime (`Ctrl + A` in Create/Alter or `Alt + C` inside a voucher) pushes the product or ledger directly to RapidShift Labs in real time, while **`<Your Business> & RSL Sync - Sync All Now`** bulk-imports all existing Godowns, Stock Items, Party Ledgers, and Vouchers per company.
+3. **100% Untouched Tally-Printed Invoice PDFs**: RapidShift Labs never redesigns or alters your Tally invoice layout. When local Port `9000` or Windows Connector `v2.6` is active, RapidShift exports Tally Prime's native `Voucher` print output (`%PDF-1.x`) byte-for-byte — preserving your company logo, custom TDL columns, HSN/SAC table, e-Invoice IRN/QR code, and authorised signatory box.
 
 ![Tally Prime to Cloud Dashboard and WhatsApp Sync Architecture](/diagrams/tally-sync-architecture.svg)
 
-> [!IMPORTANT] Built-in Data Protection: If Tally Prime is restarting or has no company open (returning 0 bills), the `RSL-SYNC-CIRCUIT-BREAKER` safeguard blocks empty snapshot deletion so your cached bills and pending reminders remain untouched.
+> [!IMPORTANT] Built-in Data Protection: If Tally Prime is restarting or has no company open (returning 0 bills), the `RSL-SYNC-CIRCUIT-BREAKER` safeguard blocks empty snapshot deletion so your synced bills, stock balances, and pending reminders remain untouched.
 
 ---
 
-## Pre-Step 0 — Enter Customer Mobile Numbers in Tally Party Ledgers (Do Not Skip)
+## Pre-Step 0 — Required `F11` Company Features & `F12` Settings in Tally Prime
 
-For Tally Prime to tell WhatsApp *which* phone number should receive a customer's bill, the customer's 10-digit mobile number must be saved inside their **Party Ledger** in Tally Prime:
+Follow these one-time keystrokes inside each Tally Prime company you want to sync so Products, Selling Prices, Bill-Wise Settlements, and Customer Mobile Numbers populate accurately:
 
-1. Open **Tally Prime** on your Windows PC and open your accounting company.
-2. On **Gateway of Tally**, select **Alter** -> select **Ledger** -> press **Enter** -> choose a customer ledger (under `Sundry Debtors`).
-3. **If you do NOT see a `Mobile no.` field on the Ledger screen:**
-   - Press **F12 (Configure)** while inside the Ledger Alteration screen.
-   - Find **Provide Contact Details** (under *Party Details*) and type **Yes**, then press **Ctrl + A** to save F12 configuration.
-4. Back on the Ledger screen, move the cursor down to **Mailing Details / Contact Details -> Mobile no.** (or set **Provide multiple mobile numbers** = **No** and enter the primary number in **Mobile no.**):
-   - Type the customer's **10-digit Indian mobile number** (for example `9820011223` or `+919820011223` — RapidShift automatically normalizes `9820011223`, `09820011223`, and `919820011223` to `+919820011223`).
-5. Press **Ctrl + A** to save the Party Ledger.
-   - *(Tip: If a party's mobile number was missing when a bill synced, you can also add the customer's phone number under **Customer Messages -> Contacts** in RapidShift Labs with the matching company/party name)*
+### A. Enable `F11` Accounting, Bill-Wise & Inventory Features
+1. Open **Tally Prime** on your Windows PC and open your company.
+2. Press **F11 (Features)** from any screen in Tally Prime:
+   - Under **Accounting**: set **Enable Bill-wise entry** = **Yes**.
+   - Under **Inventory**: set **Maintain Inventory** = **Yes** and **Integrate Accounts with Inventory** = **Yes**.
+   - Under **Taxation**: set **Enable Goods and Services Tax (GST)** = **Yes** (if GST-registered).
+3. Press **Ctrl + A** to save `F11` Company Features.
+
+### B. Enable `F12` Mobile Numbers & Credit Terms on Customer / Supplier Ledgers
+1. On **Gateway of Tally**, select **Alter** -> **Ledger** -> choose a customer (`Sundry Debtors`) or supplier (`Sundry Creditors`) ledger.
+2. Set **Maintain balances bill-by-bill** = **Yes** and enter **Default credit period** (for example `15 Days`) and **Credit limit** (if applicable).
+3. If you do not see a **`Mobile no.`** field on the Ledger screen:
+   - Press **F12 (Configure)** while inside the Ledger screen.
+   - Set **Provide Contact Details** = **Yes**, then press **Ctrl + A**.
+4. Enter the customer's **10-digit Indian mobile number** in **Mobile no.** (for example `9820011223` or `+919820011223`) and press **Ctrl + A** to save. With `.tdl v2.8` loaded, pressing **Ctrl + A** immediately syncs that party ledger to `/tally/parties`.
+
+### C. Enable `F12` Standard Buying & Selling Rates on Stock Items (Products)
+1. On **Gateway of Tally**, select **Create** (or **Alter**) -> **Stock Item**.
+2. Press **F12 (Configure)** while inside the Stock Item screen:
+   - Set **Provide Standard Buying and Selling Rates** = **Yes**.
+   - Set **Provide Part Number for Stock Items** = **Yes** (optional SKU code).
+   - Set **Set GST Details** / **HSN/SAC Details** = **Yes** (if applicable).
+   - Press **Ctrl + A** to save `F12` configuration.
+3. On the Stock Item screen, enter **Name**, **Under** (Stock Group), **Units** (UOM such as `PCS`, `NOS`, `BOX`, `KG`), **Alter Standard Rates = Yes** (enter Standard Cost and Standard Selling Price), **GST Rate / HSN**, and **Opening Balance** (quantity and rate).
+4. Press **Ctrl + A**. With `.tdl v2.8` loaded, the product appears immediately in **Stock & Godown Inventory** (`/inventory`), even if you created it on the fly by pressing **`Alt + C`** while typing a Sales or Purchase bill.
 
 ---
 
 ## Step 1 — Verify Your Dedicated Tally HTTPS Endpoint
 
 1. Sign in to `https://app.rapidshiftlabs.in` and click **Tally Prime & Bills** (`/tally`) in the left sidebar.
-2. Click the **Connect Tally Prime** tab (`/tally?tab=connect`).
+2. Click the **Connect Tally Prime (.tdl & Setup Guide)** tab (`/tally?tab=connect`).
 3. Confirm your dedicated SSL endpoint URL (`https://<your-slug>.tally.rapidshiftlabs.in/api/webhooks/tally`) shows **SSL Active**.
-4. Click **Run Live Endpoint Check**:
-   - RapidShift sends a safe `POST /api/webhooks/tally?mode=ping` test pulse (zero fake vouchers are added to your books) and confirms **Endpoint Verified**.
+4. Click **Run Live Endpoint Check** to send a safe `mode=ping` handshake without adding fake vouchers to your books.
 
 ---
 
 ## Step 2 — Enable Tally Prime Local XML Server on Port `9000` (For Native Tally PDFs)
 
-1. Open **Tally Prime** on your Windows PC.
-2. Press **F1 (Help)** at the top-right bar of Tally Prime.
-3. Select **Settings** -> press **Enter**.
-4. Select **Connectivity** -> press **Enter**.
-5. Select **Client/Server Configuration** -> press **Enter**.
-6. Configure the four fields exactly as follows:
-   - **TallyPrime acts as**: select **Both**
-   - **Enable ODBC**: type **Yes**
-   - **Port**: type `9000`
-   - Leave SSL / other advanced rows at their default values.
-7. Press **Ctrl + A** to save. If Tally Prime asks **Restart TallyPrime to apply changes?**, click **Yes** (or press **Y**).
-8. **Minute Verification Check on Your PC**: Open Chrome or Edge on that same Windows PC and visit `http://127.0.0.1:9000`. You should see `<RESPONSE>TallyPrime Server is Running</RESPONSE>` (or a blank XML page with no "This site can't be reached" error).
+1. In **Tally Prime**, press **F1 (Help)** -> **Settings** -> **Connectivity** -> **Client/Server Configuration**.
+2. Configure the fields as follows:
+   - **TallyPrime acts as**: **Both**
+   - **Enable ODBC**: **Yes**
+   - **Port**: `9000`
+3. Press **Ctrl + A** to save (accept the restart prompt if Tally Prime asks to restart).
+4. Open Chrome or Edge on that same Windows PC and visit `http://127.0.0.1:9000`. Confirm you see `<RESPONSE>TallyPrime Server is Running</RESPONSE>`.
 
 ---
 
-## Step 3 — Find Your Exact Tally Prime Folder & Download Your Personalized `.tdl v2.7` Safely
+## Step 3 — Download & Load Your Personalized `<business>-rsl-sync.tdl` (`v2.8`)
 
-1. **Find your exact Tally folder on Windows**:
-   - Minimize Tally Prime to your Windows Desktop.
-   - **Right-click** the **TallyPrime** shortcut icon on your Desktop -> click **Open file location** (it usually opens `C:\Program Files\TallyPrime` or `C:\TallyPrime`).
-   - Click inside the top folder address bar in Windows File Explorer and press **Ctrl + C** to copy that folder path (or create a dedicated simple folder `C:\TallyPrime` so there are no Windows Administrator permission prompts).
-2. **Prevent Windows from Hiding `.txt` or Renaming `(1)`**:
-   - In Windows File Explorer, click **View -> Show -> File name extensions** (make sure there is a checkmark next to **File name extensions**).
-   - Back in RapidShift Labs (**Tally Prime & Bills -> Connect Tally Prime**), click **Download Personalized `.tdl v2.7`**.
-   - Save the file directly into `C:\TallyPrime\<your-business>-rsl-sync.tdl` (RapidShift automatically names the `.tdl` file with your workspace's business slug, such as `sharma-traders-rsl-sync.tdl`).
-   - **Critical Check:** If an older `.tdl` file already exists in that folder, **overwrite/replace** it — never let Chrome/Edge save it with ` (1).tdl`, because Tally Prime will keep loading the old file.
-
----
-
-## Step 4 — Load `.tdl v2.7` into Tally Prime Memory (Exact Keystrokes)
-
-1. Switch to **Tally Prime** and press **F1 (Help)** at the top right.
-2. Arrow down to **TDLs & Add-Ons** and press **Enter**.
-3. Look at the right-hand vertical button bar and press **F4 (Manage Local TDLs)**.
-4. Set **Load selected TDL files on startup** = **Yes** and press **Enter**.
-5. On the first empty row under **List of TDL Files to preload on startup**:
-   - Choose **Specify Path** (or paste the path directly).
-   - Type or paste (`Ctrl + V`): `C:\TallyPrime\<your-business>-rsl-sync.tdl` and press **Enter**.
-   - Set **Load TDL** = **Yes** and press **Enter**.
-   - On the next blank line, select **End of List**.
-6. Press **Ctrl + A** to accept and compile the TDL.
-7. Look at the **TDLs & Add-Ons** list before pressing Escape: next to `<your-business>-rsl-sync.tdl`, confirm the status says **`Loaded`** (not `Error` or `Not Loaded`).
-8. Press **Esc** once to return to **Gateway of Tally**. Look at the bottom of the **Gateway of Tally** menu — you will now see two items bearing your business name:
+1. In Windows File Explorer, click **View -> Show -> File name extensions** so `.tdl` extensions are visible.
+2. In RapidShift Labs (**Tally Prime & Bills -> Connect Tally Prime**), click **Download `<your-business>-rsl-sync.tdl` (`v2.8`)**.
+3. Save the file directly to `C:\TallyPrime\<your-business>-rsl-sync.tdl`.
+   - **Important**: Always **overwrite/replace** any older `.tdl` file in that folder. Do not allow the browser to save a duplicate named `(1).tdl`, or Tally Prime will keep running the old version in memory.
+4. Switch to **Tally Prime** and press **F1 (Help)** -> **TDLs & Add-Ons** -> **F4 (Manage Local TDLs)**:
+   - Set **Load selected TDL files on startup** = **Yes**.
+   - Specify path: `C:\TallyPrime\<your-business>-rsl-sync.tdl`.
+   - Set **Load TDL** = **Yes**, select **End of List** on the next blank line, and press **Ctrl + A**.
+5. Confirm the status next to `<your-business>-rsl-sync.tdl` says **`Loaded`**, then press **Esc** back to **Gateway of Tally**. You will see two personalized menu items:
    - **`<Your Business Name> & RSL Sync - Connection Test`**
    - **`<Your Business Name> & RSL Sync - Sync All Now`**
 
 ---
 
-## Step 5 — Test Connection & Sync Existing Tally Bills, Receipts & Ledgers
+## Step 4 — Opening & Syncing Multiple Tally Companies (`F3 -> Select Company`)
 
-1. On **Gateway of Tally**, arrow down to **`<Your Business Name> & RSL Sync - Connection Test`** and press **Enter**:
-   - Tally Prime sends a live handshake to `https://<your-slug>.tally.rapidshiftlabs.in` and pops up a confirmation box showing **Connected**.
-2. Next, arrow down to **`<Your Business Name> & RSL Sync - Sync All Now`** and press **Enter**:
-   - Tally Prime pushes your open company's Sales, Receipt, Payment, Credit Note, Debit Note, and Purchase vouchers to RapidShift Labs, computes Paid/Partial bill settlements, updates Client & Supplier Ledgers (`/tally/parties`), and reconciles any previously deleted Day Book vouchers.
-3. Switch to your browser at `https://app.rapidshiftlabs.in/tally`:
-   - Confirm the status banner turns green (**Live Connected**), your synced bills appear in `/tally`, and your customer/supplier running balances appear under **Client & Supplier Ledgers** (`/tally/parties`).
+Tally Prime exports vouchers and masters from companies that are currently **open in Tally memory**:
 
----
-
-## Step 6 — Set Up Automatic Untouched Tally PDF Invoice & Reminder Rules
-
-1. First, make sure your WhatsApp templates are loaded and `APPROVED`:
-   - Open **WhatsApp & Templates** (`/whatsapp`), click **Load Ready-Made Tally Templates**, and click **Sync Templates with WhatsApp**.
-2. Return to **Tally Prime & Bills** (`/tally`) and scroll to **Instant Voucher Event WhatsApp Rules**:
-   - **Voucher Type Trigger**: select **Sales (`Sales` — Send Bill / Native Tally PDF)**.
-   - **Approved WhatsApp Template**: select **`tally_tax_invoice_pdf`** (this template includes a `DOCUMENT` header slot so RapidShift attaches your exact untouched Tally-printed PDF invoice automatically).
-   - Keep **Attach Native Tally Prime Printed PDF** enabled and click **Create Automation Rule**.
-3. Optional — Add a **Payment Receipt Rule**:
-   - Create a second rule with **Voucher Type**: `Receipt` and **Template**: `tally_payment_receipt_thankyou` so customers receive an instant WhatsApp receipt acknowledgment the second you press **Ctrl + A** on an `F6 Receipt` voucher in Tally.
-4. Optional — Add **Scheduled Overdue Payment Reminders**:
-   - Scroll to **Scheduled Overdue Payment Reminder Rules**.
-   - Choose when to remind unpaid `Sales` bills (for example `3 days before due date`, `On due date`, or `7 days after due date`), pick `tally_overdue_payment_reminder`, and click **Save Reminder Rule**.
+1. If you operate **multiple Tally companies** (such as Head Office + Branch, Wholesale + Retail, or separate Financial Year books):
+   - Press **F3 (Company)** inside Tally Prime -> choose **Select Company** -> open each additional company so all active companies are loaded in Tally Prime's left-hand **List of Open Companies**.
+2. On **Gateway of Tally**, click **`<Your Business Name> & RSL Sync - Connection Test`**:
+   - `.tdl v2.8` transmits your complete list of open Tally companies (`openCompanies`) and registers every allowed company in RapidShift Labs immediately — even brand-new companies with 0 bills.
+3. Next, click **`<Your Business Name> & RSL Sync - Sync All Now`**:
+   - `.tdl v2.8` loops through **every open Tally company** one by one, bulk-syncing each company's **Godowns**, **Stock Items (Products)**, **Sundry Debtor & Creditor Ledgers**, **Sales/Purchase/Receipt/Payment/Credit/Debit Vouchers**, and **Day Book Deletion Reconciliations** with strict per-company scoping.
+4. In RapidShift Labs, use the **Tally Company** switcher bar right at the top of `/tally`, `/tally/parties`, and `/inventory` to view **All Synced Companies** together or isolate any single Tally company's bills, receivables, and stock valuation.
+5. **Restricting Which Open Companies Sync**: If an accountant also opens an unrelated personal company on the same PC, go to **Connect Tally Prime -> Multi-Company Tally Routing**, select **Only Selected Companies**, pick the allowed company names, and click **Save Company Routing**.
 
 ---
 
-## How Live Paid-in-Tally Sync, Edits, Cancellations (`Alt + X`) & Deletions (`Alt + D`) Work Automatically
+## Step 5 — Set Up Automatic Untouched Tally PDF Invoice & Overdue Reminder Rules
 
-- **Invoices Marked Paid in Tally (`F6 Receipt`, `F5 Payment`, `Alt + F6 Credit Note`, `Alt + F5 Debit Note`)**: Whenever an invoice is settled in Tally Prime via Bill-Wise `Agst Ref`, Cash/Bank counter sale, or an on-account Receipt/Payment against the same Party Ledger (FIFO), RapidShift automatically marks the corresponding Sales/Purchase invoice **Paid** or **Partially Paid**, updates the party's T-account running balance in `/tally/parties`, and cancels any pending overdue WhatsApp reminders.
-- **New or Altered Bill (`F8 Sales`, `F9 Purchase`, `F6 Receipt`, `F5 Payment` -> `Ctrl + A`)**: Syncs to RapidShift within seconds; updates amount/due date without overwriting other bills or creating duplicate vouchers.
-- **Optional Vouchers (`Ctrl + L` Optional)**: Automatically skipped so proforma/draft memos never trigger customer WhatsApp messages until converted to a Regular voucher.
-- **Cancelled Voucher (`Alt + X` in Day Book or Voucher)**: Immediately marks the voucher **Cancelled** in RapidShift with `₹0` balance due, reverses any receipt settlement allocations cleanly, and cancels any queued payment reminders.
-- **Deleted Voucher (`Alt + D` inside Voucher Alteration)**: Sends a real-time delete event to RapidShift Labs, removing the voucher, recomputing bill settlements, and cancelling unsent reminders. *(If someone deletes a bill from Day Book list view without opening it, clicking **`<Your Business Name> & RSL Sync - Sync All Now`** or running the Windows Connector reconciles and removes it automatically.)*
-
----
-
-## Multi-Company Tally Prime Routing & Manual XML/CSV Import
-
-- **Filtering Specific Tally Companies**: If you open 3 companies inside Tally Prime on the same PC (e.g., `Shree Traders FY 26-27`, `Shree Exports`, and a personal ledger company) and only want `Shree Traders FY 26-27` in this workspace, open **Tally Prime & Bills -> Connect Tally Prime -> Multi-Company Tally Routing**, switch from **Accept All Open Companies** to **Only Selected Company Names**, type `Shree Traders FY 26-27`, and click **Save Routing**.
-- **Two RapidShift Workspaces on One Tally PC**: Append `?isolated=1` (click **Download Isolated Multi-Workspace `.tdl`** in **Connect Tally Prime**) so each `.tdl` file uses workspace-prefixed TDL symbol names and both load cleanly side-by-side in `F4 Manage Local TDLs`.
-- **Manual Offline Upload Fallback (XML or CSV)**: If your Tally PC has no internet temporarily, export Day Book in Tally Prime (**Alt + E -> Export -> Day Book -> Format: XML (Data Interchange)**), then upload that `.xml` or `.csv` file in the **Manual XML / CSV Import** card on `/tally`.
+1. Open **WhatsApp & Templates** (`/whatsapp`), click **Load Ready-Made Tally Templates**, and click **Sync Templates with WhatsApp**.
+2. Open **Tally Prime & Bills -> WhatsApp Rules & Reminders** (`/tally?tab=rules`):
+   - **Instant Sales PDF Rule**: select **Voucher Type = Sales**, **Template = `tally_tax_invoice_pdf`**, keep **Attach Native Tally Prime Printed PDF** enabled, and click **Create Automation Rule**.
+   - **Instant Payment Receipt Rule (Optional)**: select **Voucher Type = Receipt** and **Template = `tally_payment_receipt_thankyou`**.
+   - **Scheduled Overdue Reminders (Optional)**: configure rules such as `3 days before due date` or `7 days after due date` with `tally_overdue_payment_reminder`.
 
 ---
 
-## Troubleshooting Tally Desktop Errors
+## How Daily Tally Operations Sync Automatically in `v2.8`
 
-| Message / Symptom | Exact Root Cause | Minute-by-Minute Fix |
+- **Creating Sequential Bills (`F8 Sales`, `F9 Purchase`)**: Saving Bill `#8` and then Bill `#9` with `Ctrl + A` syncs both bills independently along with their inventory `lineItems`, deducting Sales quantities and adding Purchase quantities in `/inventory`.
+- **Creating or Editing Products (`Stock Item` or `Alt + C`)**: Saving any Stock Item in Tally Prime pushes its latest name, group, UOM, HSN, GST %, standard selling/cost rates, reorder level, and stock balance directly to `/inventory`.
+- **Invoices Marked Paid in Tally (`F6 Receipt`, `F5 Payment`, `Alt + F6 Credit Note`, `Alt + F5 Debit Note`)**: Selecting **Agst Ref** against an invoice number (or posting against the same Party Ledger via FIFO) marks that invoice **Paid** or **Partially Paid**, updates the party's T-account running balance in `/tally/parties`, and cancels pending overdue WhatsApp reminders.
+- **Altering, Cancelling (`Alt + X`), Optional (`Ctrl + L`), or Deleting (`Alt + D`)**:
+  - Editing an existing bill in Tally **Alter** mode updates it in place (including line-item stock recalculation).
+  - Marking a voucher **Optional (`Ctrl + L`)** skips/removes it so proforma drafts never trigger WhatsApp messages.
+  - Cancelling (`Alt + X`) or deleting (`Alt + D`) reverses stock movements, clears settlements, and cancels unsent WhatsApp jobs.
+
+---
+
+## Troubleshooting Tally Prime Sync
+
+| Symptom / Message | Root Cause | Exact Fix |
 | --- | --- | --- |
-| `Bad formula! '##RSLPingMsg Then ...'` | An older `.tdl` (`v2.3`/`v2.4`) is still loaded in Tally memory | Download `.tdl v2.7`, overwrite `C:\TallyPrime\<your-business>-rsl-sync.tdl`, press `F1 -> TDLs & Add-Ons -> F4 -> Ctrl + A` |
-| Bill synced, but **No WhatsApp Sent** | Party Ledger in Tally has blank `Mobile no.`, or template not `APPROVED` | Open Party Ledger in Tally (`Alter -> Ledger -> F12 Provide Contact Details: Yes`), add 10-digit mobile, re-save voucher (`Ctrl + A`) |
-| WhatsApp text arrived without PDF | Tally Local Port `9000` is off or rule used a text-only template | Enable Port `9000` (`F1 -> Settings -> Connectivity -> Client/Server -> Both / 9000`), pair Windows Connector (`v2.5`), and select `tally_tax_invoice_pdf` |
-| `Tally File Not Found` in `F4` | Windows saved file as `<your-business>-rsl-sync.tdl.txt` | Enable `View -> Show -> File name extensions` in File Explorer and rename to exact `.tdl` |
+| Earlier bill was overwritten or Last Client Source shows `TallyPrime-RSL-TDL/2.7` (or older) | Older `.tdl` file is still loaded in Tally RAM | Download `<business>-rsl-sync.tdl` (`v2.8`), overwrite `C:\TallyPrime\<business>-rsl-sync.tdl`, and press `F1 -> TDLs & Add-Ons -> F4 -> Ctrl + A` |
+| Products created in Tally did not appear in `/inventory` | `.tdl v2.8` was not loaded yet, or existing products were created before connecting | Load `.tdl v2.8` via `F1 -> TDLs & Add-Ons -> F4 -> Ctrl + A` and click `<Business> & RSL Sync - Sync All Now` once on Gateway of Tally |
+| Second Tally company does not appear in the Tally Company bar | Second company is closed in Tally Prime, or filtered out in Routing | Press `F3 -> Select Company` in Tally Prime so both companies are open, confirm **Sync All Open Companies** in `/tally?tab=connect`, and click `Sync All Now` |
+| Product Selling Price shows `₹0` before first invoice | Standard Selling Rate not enabled on the Stock Item in Tally | Open Stock Item in Tally -> press `F12` -> set `Provide Standard Buying and Selling Rates = Yes` -> enter Standard Selling Price -> `Ctrl + A` |
+| Bill synced, but no WhatsApp message was sent | Party Ledger has blank `Mobile no.`, or WhatsApp template is not `APPROVED` | Open Party Ledger in Tally (`Alter -> Ledger -> F12 Provide Contact Details = Yes`), add 10-digit mobile number, and press `Ctrl + A` |
+| WhatsApp arrived as text without Tally's printed PDF | Tally Local Port `9000` is off or Windows Connector is not running | Enable Port `9000` (`F1 -> Settings -> Connectivity -> Client/Server -> Both / 9000`), run Windows Connector `v2.6`, and use template `tally_tax_invoice_pdf` |

@@ -694,7 +694,10 @@ export interface TallyAgeingBucketSummary {
   amountPaise: number;
 }
 
-export function getWorkspacePartiesLedgerSummary(workspaceId: string) {
+export function getWorkspacePartiesLedgerSummary(
+  workspaceId: string,
+  companyIdFilter?: string
+) {
   const db = tenantDataDb({ workspaceId });
   const now = Date.now();
 
@@ -704,6 +707,10 @@ export function getWorkspacePartiesLedgerSummary(workspaceId: string) {
     .orderBy(desc(tenantDataSchema.tallyCompanies.lastSyncedAt))
     .all();
   const compNameMap = new Map(companies.map((c) => [c.id, c.name]));
+  const activeCompanyFilter =
+    companyIdFilter && companyIdFilter !== "all" && compNameMap.has(companyIdFilter)
+      ? companyIdFilter
+      : null;
 
   // Self-heal: if vouchers exist for parties not yet materialized in `tally_parties`, reconcile once
   const existingVouchers = db
@@ -725,16 +732,22 @@ export function getWorkspacePartiesLedgerSummary(workspaceId: string) {
     }
   }
 
-  const parties = db
+  const rawParties = db
     .select()
     .from(tenantDataSchema.tallyParties)
     .orderBy(desc(tenantDataSchema.tallyParties.closingBalancePaise))
     .all();
+  const parties = activeCompanyFilter
+    ? rawParties.filter((p) => p.companyId === activeCompanyFilter)
+    : rawParties;
 
-  const allVouchers = db
+  const rawAllVouchers = db
     .select()
     .from(tenantDataSchema.tallyVouchers)
     .all();
+  const allVouchers = activeCompanyFilter
+    ? rawAllVouchers.filter((v) => v.companyId === activeCompanyFilter)
+    : rawAllVouchers;
 
   const bucketDefs: Array<{ key: AgeingBucketKey; label: string; min: number; max: number }> = [
     { key: "0_15", label: "0–15 Days", min: 0, max: 15 },

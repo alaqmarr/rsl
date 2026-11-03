@@ -94,9 +94,17 @@ export default async function InventoryStockPage({
   });
 
   const [inv, localPortProbe] = await Promise.all([
-    Promise.resolve(getWorkspaceInventorySummary(session.workspace.id)),
+    Promise.resolve(
+      getWorkspaceInventorySummary(
+        session.workspace.id,
+        sp.company && sp.company !== "all" ? sp.company : undefined
+      )
+    ),
     endpoints.isLocalDev ? probeLocalTallyPort9000(9000) : Promise.resolve(null),
   ]);
+
+  const selectedCompanyId =
+    sp.company && inv.companies.some((c) => c.id === sp.company) ? sp.company : "all";
 
   const requestedTab =
     sp.tab === "godowns" ||
@@ -181,6 +189,8 @@ export default async function InventoryStockPage({
         activeSection="inventory"
         partiesCount={inv.parties.length}
         stockItemsCount={inv.items.length}
+        companies={inv.companies}
+        selectedCompanyId={selectedCompanyId}
       />
 
       <PageHeader
@@ -297,7 +307,7 @@ export default async function InventoryStockPage({
             return (
               <ActionLink
                 key={t.key}
-                href={`/inventory?tab=${t.key}`}
+                href={`/inventory?tab=${t.key}${selectedCompanyId !== "all" ? `&company=${encodeURIComponent(selectedCompanyId)}` : ""}`}
                 spinnerSize="xs"
                 className={`rounded-xl px-4 py-2 text-xs font-semibold transition ${
                   active
@@ -352,9 +362,9 @@ export default async function InventoryStockPage({
                   const active = healthFilter === pill.key;
                   const href = `/inventory?tab=summary${
                     pill.key !== "all" ? `&health=${pill.key}` : ""
-                  }${selectedGroup !== "all" ? `&group=${encodeURIComponent(selectedGroup)}` : ""}${
-                    query ? `&q=${encodeURIComponent(query)}` : ""
-                  }`;
+                  }${selectedCompanyId !== "all" ? `&company=${encodeURIComponent(selectedCompanyId)}` : ""}${
+                    selectedGroup !== "all" ? `&group=${encodeURIComponent(selectedGroup)}` : ""
+                  }${query ? `&q=${encodeURIComponent(query)}` : ""}`;
                   return (
                     <ActionLink
                       key={pill.key}

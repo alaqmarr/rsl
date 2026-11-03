@@ -87,7 +87,12 @@ export default async function TallyPartiesLedgersPage({
   );
 
   const [ledgerSummary, tallyOverview] = await Promise.all([
-    Promise.resolve(getWorkspacePartiesLedgerSummary(session.workspace.id)),
+    Promise.resolve(
+      getWorkspacePartiesLedgerSummary(
+        session.workspace.id,
+        sp.company && sp.company !== "all" ? sp.company : undefined
+      )
+    ),
     Promise.resolve(getTallyWorkspaceSummary(session.workspace.id)),
   ]);
 
@@ -138,9 +143,15 @@ export default async function TallyPartiesLedgersPage({
     <div className="w-full space-y-6">
       <TallySuiteNav
         activeSection="parties"
-        vouchersCount={tallyOverview.vouchers.length}
+        vouchersCount={
+          selectedCompanyId === "all"
+            ? tallyOverview.vouchers.length
+            : tallyOverview.vouchers.filter((v) => v.companyId === selectedCompanyId).length
+        }
         partiesCount={ledgerSummary.kpis.totalPartiesCount}
         stockItemsCount={tallyOverview.totals.stockItemsCount}
+        companies={ledgerSummary.companies}
+        selectedCompanyId={selectedCompanyId}
       />
 
       <PageHeader
@@ -375,9 +386,17 @@ export default async function TallyPartiesLedgersPage({
           {ledgerSummary.ageingBuckets.map((b) => {
             const active = bucketFilter === b.key;
             const isHighRisk = b.key === "61_90" || b.key === "90_plus";
+            const compSuffix =
+              selectedCompanyId !== "all" ? `&company=${encodeURIComponent(selectedCompanyId)}` : "";
             const href = active
-              ? `/tally/parties${groupFilter !== "all" ? `?group=${groupFilter}` : ""}`
-              : `/tally/parties?bucket=${b.key}${groupFilter !== "all" ? `&group=${groupFilter}` : ""}`;
+              ? `/tally/parties${
+                  groupFilter !== "all"
+                    ? `?group=${groupFilter}${compSuffix}`
+                    : selectedCompanyId !== "all"
+                      ? `?company=${encodeURIComponent(selectedCompanyId)}`
+                      : ""
+                }`
+              : `/tally/parties?bucket=${b.key}${groupFilter !== "all" ? `&group=${groupFilter}` : ""}${compSuffix}`;
             return (
               <ActionLink
                 key={b.key}

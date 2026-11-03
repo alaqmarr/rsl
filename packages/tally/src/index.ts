@@ -33,8 +33,10 @@ import { controlDb, tenantDataDb, tenantLogsDb } from "@rsl/tenancy";
 import {
   collectVoucherStockItemIdsBeforeDelete,
   extractInventoryLineItemsFromVoucherXml,
+  ingestTallyMastersJsonForWorkspace,
   ingestTallyMastersXmlForWorkspace,
   listVoucherLineItemsMap,
+  parseJsonVoucherLineItems,
   recalculateCompanyInventoryMovements,
   syncLocalTallyInventoryMastersFromPort9000,
   syncVoucherInventoryLineItems,
@@ -55,7 +57,7 @@ export * from "./inventory";
 export * from "./ledgers";
 
 export const AGENT_HEARTBEAT_STALE_MS = 120_000;
-export const LATEST_TALLY_TDL_VERSION = "2.7";
+export const LATEST_TALLY_TDL_VERSION = "2.8";
 const TALLY_COMPANY_ROUTING_SETTING_KEY = "tally.company_routing";
 const TALLY_BATCH_PREFIX = "tally.sync_batch.";
 const PENDING_PDF_ID_PREFIX = "pending_pdf:";
@@ -686,6 +688,138 @@ export function isTallyCompanyAllowed(
   const candidate = (companyName ?? "").trim().toLowerCase();
   if (!candidate) return false;
   return routing.allowedCompanyNames.some((allowed) => allowed.trim().toLowerCase() === candidate);
+}
+
+function normalizeFinancialYearIso(raw?: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  if (/^\d{8}$/.test(trimmed)) {
+    return `${trimmed.slice(0, 4)}-${trimmed.slice(4, 6)}-${trimmed.slice(6, 8)}`;
+  }
+  const parsed = parseTallyDateNullableLocal(trimmed);
+  if (parsed !== null) {
+    return new Date(parsed + 5.5 * 3600_000).toISOString().slice(0, 10);
+  }
+  return null;
+}
+
+function parseTallyDateNullableLocal(raw: string): number | null {
+  const monthNames: Record<string, number> = {
+    jan: 0,
+    feb: 1,
+    mar: 2,
+    apr: 3,
+    may: 4,
+    jun: 5,
+    jul: 6,
+    aug: 7,
+    sep: 8,
+    oct: 9,
+    nov: 10,
+    dec: 11,
+  };
+  const alphaMatch = raw.match(/^(\d{1,2})[-/\s]([A-Za-z]{3,9})[-/\s](\d{2,4})$/);
+  if (alphaMatch) {
+    const day = Number(alphaMatch[1]);
+    const monIdx = monthNames[alphaMatch[2]!.slice(0, 3).toLowerCase()];
+    const rawYear = Number(alphaMatch[3]);
+    const year = rawYear < 100 ? 2000 + rawYear : rawYear;
+    if (monIdx !== undefined && day >= 1 && day <= 31) {
+      return Date.UTC(year, monIdx, day);
+    }
+  }
+  return null;
+}
+
+/**
+ * Registers one or more open Tally Prime companies into `tally_companies` immediately
+ * (even when a newly opened company has 0 vouchers and 0 products yet), honoring
+ * workspace Multi-Company Routing rules.
+ */
+export function registerTallyCompaniesForWorkspace(params: {
+  workspaceId: string;
+  companies: Array<string | { name?: string; guid?: string; startingFrom?: string }>;
+  updateLastSyncedAt?: boolean;
+}): {
+  registeredCompanies: Array<{ id: string; name: string; companyGuid: string }>;
+  ignoredCount: number;
+} {
+  const db = tenantDataDb({ workspaceId: params.workspaceId });
+  const routing = getTallyCompanyRoutingConfig(params.workspaceId);
+  const now = Date.now();
+  const registeredCompanies: Array<{ id: string; name: string; companyGuid: string }> = [];
+  const seenSlugs = new Set<string>();
+  let ignoredCount = 0;
+
+  for (const entry of params.companies) {
+    const rawName = typeof entry === "string" ? entry : entry?.name;
+    const cleanName = String(rawName ?? "")
+      .replace(/^[\x00-\x1f]+/, "")
+      .trim();
+    if (!cleanName || cleanName === "Primary Tally Company") continue;
+
+    if (!isTallyCompanyAllowed(cleanName, routing)) {
+      ignoredCount++;
+      continue;
+    }
+
+    const companyGuid = `comp_${cleanName.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
+    if (seenSlugs.has(companyGuid)) continue;
+    seenSlugs.add(companyGuid);
+
+    const fyIso =
+      typeof entry === "object" && entry !== null
+        ? normalizeFinancialYearIso(entry.startingFrom)
+        : null;
+
+    let row = db
+      .select()
+      .from(tenantDataSchema.tallyCompanies)
+      .where(eq(tenantDataSchema.tallyCompanies.companyGuid, companyGuid))
+      .get();
+
+    if (!row) {
+      const id = newEntityId("tco", params.workspaceId, now);
+      db.insert(tenantDataSchema.tallyCompanies)
+        .values({
+          id,
+          companyGuid,
+          name: cleanName,
+          financialYearFrom: fyIso ?? "2026-04-01",
+          lastAlterId: 0,
+          lastSyncedAt: params.updateLastSyncedAt === false ? null : now,
+          createdAt: now,
+        })
+        .onConflictDoNothing()
+        .run();
+      row = db
+        .select()
+        .from(tenantDataSchema.tallyCompanies)
+        .where(eq(tenantDataSchema.tallyCompanies.companyGuid, companyGuid))
+        .get();
+    } else if (params.updateLastSyncedAt !== false || fyIso) {
+      db.update(tenantDataSchema.tallyCompanies)
+        .set({
+          name: cleanName,
+          ...(fyIso ? { financialYearFrom: fyIso } : {}),
+          ...(params.updateLastSyncedAt !== false ? { lastSyncedAt: now } : {}),
+        })
+        .where(eq(tenantDataSchema.tallyCompanies.id, row.id))
+        .run();
+    }
+
+    if (row) {
+      registeredCompanies.push({
+        id: row.id,
+        name: row.name,
+        companyGuid: row.companyGuid,
+      });
+    }
+  }
+
+  return { registeredCompanies, ignoredCount };
 }
 
 export const saveTallyCompanyRouting = defineAction({
@@ -1560,13 +1694,29 @@ export function recordAgentHeartbeat(params: {
   tallyHost?: string;
   tallyPort?: number;
   activeCompanyName?: string | null;
+  openCompanies?: string[];
   lastAlterId?: number;
   lastErrorMessage?: string | null;
   agentVersion?: string;
   osVersion?: string;
 }) {
   const now = Date.now();
-  controlDb()
+  const ctrl = controlDb();
+  const devRow = ctrl
+    .select({ workspaceId: controlSchema.agentDevices.workspaceId })
+    .from(controlSchema.agentDevices)
+    .where(eq(controlSchema.agentDevices.id, params.deviceId))
+    .get();
+
+  const normalizedOpenList = Array.isArray(params.openCompanies)
+    ? params.openCompanies.map((c) => String(c ?? "").trim()).filter(Boolean)
+    : [];
+  const effectiveActiveLabel =
+    normalizedOpenList.length > 0
+      ? normalizedOpenList.join(", ")
+      : params.activeCompanyName;
+
+  ctrl
     .update(controlSchema.agentDevices)
     .set({
       status: "online",
@@ -1575,8 +1725,8 @@ export function recordAgentHeartbeat(params: {
       ...(params.tallyPort && Number.isFinite(params.tallyPort)
         ? { tallyPort: Math.max(1, Math.min(65535, Math.trunc(params.tallyPort))) }
         : {}),
-      ...(params.activeCompanyName !== undefined
-        ? { activeCompanyName: params.activeCompanyName ? params.activeCompanyName.slice(0, 160) : null }
+      ...(effectiveActiveLabel !== undefined
+        ? { activeCompanyName: effectiveActiveLabel ? effectiveActiveLabel.slice(0, 160) : null }
         : {}),
       ...(params.lastAlterId !== undefined && Number.isFinite(params.lastAlterId)
         ? { lastAlterId: Math.max(0, Math.trunc(params.lastAlterId)) }
@@ -1592,6 +1742,30 @@ export function recordAgentHeartbeat(params: {
     })
     .where(eq(controlSchema.agentDevices.id, params.deviceId))
     .run();
+
+  if (devRow?.workspaceId && params.tallyReachable) {
+    const candidates =
+      normalizedOpenList.length > 0
+        ? normalizedOpenList
+        : params.activeCompanyName
+          ? params.activeCompanyName
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : [];
+    if (candidates.length > 0) {
+      try {
+        registerTallyCompaniesForWorkspace({
+          workspaceId: devRow.workspaceId,
+          companies: candidates,
+          updateLastSyncedAt: true,
+        });
+      } catch {
+        // Non-blocking
+      }
+    }
+  }
+
   return { recordedAt: now };
 }
 
@@ -3759,7 +3933,7 @@ export const bulkImportTallyData = defineAction({
 
     const tx = db.$client.transaction(() => {
       for (const item of parsedItems) {
-        const guid = resolveCanonicalVoucherGuid(
+        const { guid, collidedWithDifferentBillNumber } = resolveCanonicalVoucherGuid(
           db,
           company.id,
           companyGuid,
@@ -3767,8 +3941,10 @@ export const bulkImportTallyData = defineAction({
           item.masterId,
           item.voucherType,
           item.voucherNumber,
-          item.partyName
+          item.partyName,
+          { isAuthoritativeSource: true }
         );
+        const effectiveMasterId = collidedWithDifferentBillNumber ? null : (item.masterId ?? null);
         const paymentStatus = item.isCancelled
           ? "cancelled"
           : item.voucherType === "Receipt" ||
@@ -3790,7 +3966,7 @@ export const bulkImportTallyData = defineAction({
           .values({
             id: newId("tvch", ctx.workspaceId),
             guid,
-            masterId: item.masterId ?? null,
+            masterId: effectiveMasterId,
             companyId: company.id,
             voucherNumber: item.voucherNumber,
             voucherType: item.voucherType,
@@ -3816,7 +3992,7 @@ export const bulkImportTallyData = defineAction({
           .onConflictDoUpdate({
             target: tenantDataSchema.tallyVouchers.guid,
             set: {
-              ...(item.masterId ? { masterId: item.masterId } : {}),
+              ...(effectiveMasterId ? { masterId: effectiveMasterId } : {}),
               voucherNumber: item.voucherNumber,
               voucherType: item.voucherType,
               partyName: item.partyName,
@@ -4126,6 +4302,9 @@ export function generateTallyPrimeTdlAddOn(params: {
   const reconcileUrl = extractedToken
     ? `${cleanEndpoint}?mode=reconcile&token=${encodeURIComponent(extractedToken)}`
     : `${cleanEndpoint}?mode=reconcile`;
+  const mastersUrl = extractedToken
+    ? `${cleanEndpoint}?mode=masters&token=${encodeURIComponent(extractedToken)}`
+    : `${cleanEndpoint}?mode=masters`;
 
   const tokenHeaderLine = extractedToken
     ? `\n    Header          : "X-Tally-Webhook-Token: ${extractedToken}"`
@@ -4209,7 +4388,7 @@ export function generateTallyPrimeTdlAddOn(params: {
     08 : Query Box : "Delete ?" : Yes : No
     09 : If : $$LastResult
     10 :     Delete Target
-    11 :     If : ##DShouldSync And (##DGuid != "")
+    11 :     If : ##DShouldSync And (Not (##DGuid = ""))
     12 :         Set : ${p}VGuid       : ##DGuid
     13 :         Set : ${p}VMasterId   : ##DMasterId
     14 :         Set : ${p}VAlterId    : "0"
@@ -4228,18 +4407,19 @@ export function generateTallyPrimeTdlAddOn(params: {
     27 :         Set : ${p}VCancelled  : "No"
     28 :         Set : ${p}VDeleted    : "Yes"
     29 :         Set : ${p}VOptional   : "No"
-    30 :         Set : ${p}VSyncBatch  : ""
-    31 :         Set : DProgSub : "Removing deleted " + ##DVchType + " #" + ##DVchNo
-    32 :         Start Progress : 1 : "${brandSyncTitle}" : ##DCompany : ##DProgSub
-    33 :         Show Progress  : 0
-    34 :         Walk Collection : ${p}CloudVoucherPost
-    35 :             Set : DRespStatus : $RSLOkStatus
-    36 :         End Walk
-    37 :         Show Progress  : 1
-    38 :         End Progress
-    39 :     End If
-    40 : End If
-    41 : Return
+    30 :         Set : ${p}VInAlter    : "No"
+    31 :         Set : ${p}VSyncBatch  : ""
+    32 :         Set : DProgSub : "Removing deleted " + ##DVchType + " #" + ##DVchNo
+    33 :         Start Progress : 1 : "${brandSyncTitle}" : ##DCompany : ##DProgSub
+    34 :         Show Progress  : 0
+    35 :         Walk Collection : ${p}CloudVoucherPost
+    36 :             Set : DRespStatus : $RSLOkStatus
+    37 :         End Walk
+    38 :         Show Progress  : 1
+    39 :         End Progress
+    40 :     End If
+    41 : End If
+    42 : Return
 
 [Function: ${p}HandleVoucherCancel]
     Variable : CGuid       : String  : ""
@@ -4271,7 +4451,7 @@ export function generateTallyPrimeTdlAddOn(params: {
     13 : Query Box : "Cancel ?" : Yes : No
     14 : If : $$LastResult
     15 :     Cancel Object
-    16 :     If : ##CShouldSync And (##CGuid != "")
+    16 :     If : ##CShouldSync And (Not (##CGuid = ""))
     17 :         Set : ${p}VGuid       : ##CGuid
     18 :         Set : ${p}VMasterId   : ##CMasterId
     19 :         Set : ${p}VAlterId    : ##CAlterId
@@ -4290,31 +4470,36 @@ export function generateTallyPrimeTdlAddOn(params: {
     32 :         Set : ${p}VCancelled  : "Yes"
     33 :         Set : ${p}VDeleted    : "No"
     34 :         Set : ${p}VOptional   : "No"
-    35 :         Set : ${p}VSyncBatch  : ""
-    36 :         Set : CProgSub : "Syncing cancelled " + ##CVchType + " #" + ##CVchNo
-    37 :         Start Progress : 1 : "${brandSyncTitle}" : ##CCompany : ##CProgSub
-    38 :         Show Progress  : 0
-    39 :         Walk Collection : ${p}CloudVoucherPost
-    40 :             Set : CRespStatus : $RSLOkStatus
-    41 :         End Walk
-    42 :         Show Progress  : 1
-    43 :         End Progress
-    44 :     End If
-    45 : End If
-    46 : Return
+    35 :         Set : ${p}VInAlter    : "No"
+    36 :         Set : ${p}VSyncBatch  : ""
+    37 :         Set : CProgSub : "Syncing cancelled " + ##CVchType + " #" + ##CVchNo
+    38 :         Start Progress : 1 : "${brandSyncTitle}" : ##CCompany : ##CProgSub
+    39 :         Show Progress  : 0
+    40 :         Walk Collection : ${p}CloudVoucherPost
+    41 :             Set : CRespStatus : $RSLOkStatus
+    42 :         End Walk
+    43 :         Show Progress  : 1
+    44 :         End Progress
+    45 :     End If
+    46 : End If
+    47 : Return
 `;
 
   return `;; ============================================================================
-;; ${brandSyncTitle} - Tally Prime Cloud Sync, Ledgers & WhatsApp Add-On (v2.7)
+;; ${brandSyncTitle} - Tally Prime All-in-One Cloud Sync Add-On (v2.8)
 ;; Business Workspace : ${safeBizName}
 ;; Recommended File   : ${tdlFilename}
 ;; Cloud Endpoint     : ${cleanEndpoint}
 ;; Company Scope      : ${companyScopeComment}
 ;;
-;; THIN-CLIENT ARCHITECTURE (ZERO RE-DOWNLOADS FOR NEW FEATURES):
-;;   - Templates, WhatsApp PDF attachment, multi-company routing, paid-bill settlement,
-;;     client ledgers, and reminder rules are controlled 100% server-side on rapidshiftlabs.in!
-;;   - OTA Manifest: ${cleanEndpoint}?mode=tdl-manifest
+;; ALL-IN-ONE TALLY SUITE COVERAGE (v2.8):
+;;   - Bills & Vouchers (Ctrl+A) -> Sales, Purchase, Receipt, Payment, Credit Note, Debit Note
+;;                                  + Itemized Line Items + Bill-Wise Settlements (Zero Overwrite!)
+;;   - Products / Stock Items    -> Instant real-time import on Create/Alter Stock Item or Alt+C
+;;   - Client & Supplier Ledgers -> Instant real-time import on Create/Alter Sundry Debtor/Creditor
+;;   - Multi-Company Detection   -> Detects & syncs ALL open Tally companies (even 0-bill companies)
+;;   - Delete (Alt+D) / Cancel   -> Instantly removes or cancels bill & restores stock/settlements
+;;   - OTA Manifest              -> ${cleanEndpoint}?mode=tdl-manifest
 ;;
 ;; SETUP IN TALLY PRIME (Release 2.0 / 3.0 / 4.0 / 5.0+):
 ;;   1. Copy/overwrite this file to your TDL folder
@@ -4323,15 +4508,8 @@ export function generateTallyPrimeTdlAddOn(params: {
 ;;   3. Set "Load selected TDL files on startup" = Yes
 ;;   4. Select ${tdlFilename} and press Ctrl+A to reload (or restart Tally)
 ;;   5. On Gateway of Tally:
-;;        - Click "${menuTestTitle}" to verify connectivity
-;;        - Click "${menuSyncTitle}" to sync & reconcile all open Tally companies!
-;;
-;; LIVE SYNC COVERAGE:
-;;   - Create / Edit (Ctrl+A) -> Sales, Receipt, Payment, Credit Note, Debit Note, Purchase + Bill-Wise Agst Ref
-;;   - Paid in Tally          -> Receipts & Credit Notes automatically mark Sales invoices Paid & stop reminders
-;;   - Delete (Alt+D)         -> Instantly removes deleted voucher & recomputes bill settlements
-;;   - Cancel (Alt+X)         -> Instantly marks voucher Cancelled & stops reminders
-;;   - ${menuSyncTitle} -> Multi-year full history sync & Day Book delete reconciliation
+;;        - Click "${menuTestTitle}" to verify & register open companies
+;;        - Click "${menuSyncTitle}" to sync all Companies, Products, Ledgers & Bills!
 ;; ============================================================================
 
 [#Menu: Gateway of Tally]
@@ -4390,6 +4568,10 @@ export function generateTallyPrimeTdlAddOn(params: {
     Type        : String
     Persistent  : No
 
+[Variable: ${p}VDateObj]
+    Type        : Date
+    Persistent  : No
+
 [Variable: ${p}VDueDate]
     Type        : String
     Persistent  : No
@@ -4414,7 +4596,155 @@ export function generateTallyPrimeTdlAddOn(params: {
     Type        : String
     Persistent  : No
 
+[Variable: ${p}VInAlter]
+    Type        : String
+    Persistent  : No
+
 [Variable: ${p}VSyncBatch]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SPendingPost]
+    Type        : Logical
+    Persistent  : No
+
+[Variable: ${p}SGuid]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SMasterId]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SAlterId]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SCompany]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SName]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SGroup]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SCategory]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SUom]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SPartNo]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SHsn]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SGstRate]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SSellPrice]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SCostPrice]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SOpenQty]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SOpenVal]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SCloseQty]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SCloseRate]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SCloseVal]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}SReorder]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}LPendingPost]
+    Type        : Logical
+    Persistent  : No
+
+[Variable: ${p}LGuid]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}LCompany]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}LName]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}LGroup]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}LPhone]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}LEmail]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}LGstin]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}LPan]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}LContact]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}LState]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}LPincode]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}LCreditLimit]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}LCreditDays]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}LOpenBal]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}LCloseBal]
     Type        : String
     Persistent  : No
 
@@ -4438,50 +4768,137 @@ export function generateTallyPrimeTdlAddOn(params: {
     ${p}VCancelled   : "No"
     ${p}VDeleted     : "No"
     ${p}VOptional    : "No"
+    ${p}VInAlter     : "No"
     ${p}VSyncBatch   : ""
+    ${p}SPendingPost : No
+    ${p}SGuid        : ""
+    ${p}SMasterId    : ""
+    ${p}SAlterId     : ""
+    ${p}SCompany     : ""
+    ${p}SName        : ""
+    ${p}SGroup       : ""
+    ${p}SCategory    : ""
+    ${p}SUom         : ""
+    ${p}SPartNo      : ""
+    ${p}SHsn         : ""
+    ${p}SGstRate     : ""
+    ${p}SSellPrice   : ""
+    ${p}SCostPrice   : ""
+    ${p}SOpenQty     : ""
+    ${p}SOpenVal     : ""
+    ${p}SCloseQty    : ""
+    ${p}SCloseRate   : ""
+    ${p}SCloseVal    : ""
+    ${p}SReorder     : ""
+    ${p}LPendingPost : No
+    ${p}LGuid        : ""
+    ${p}LCompany     : ""
+    ${p}LName        : ""
+    ${p}LGroup       : ""
+    ${p}LPhone       : ""
+    ${p}LEmail       : ""
+    ${p}LGstin       : ""
+    ${p}LPan         : ""
+    ${p}LContact     : ""
+    ${p}LState       : ""
+    ${p}LPincode     : ""
+    ${p}LCreditLimit : ""
+    ${p}LCreditDays  : ""
+    ${p}LOpenBal     : ""
+    ${p}LCloseBal    : ""
 
 [System: Formula]
-    ${p}BaseTypeName        : $Parent:VoucherType:$VoucherTypeName
-    ${p}IsTargetVch         : ($VoucherTypeName = "Sales") Or ($VoucherTypeName = "Receipt") Or ($VoucherTypeName = "Payment") Or ($VoucherTypeName = "Credit Note") Or ($VoucherTypeName = "Debit Note") Or ($VoucherTypeName = "Purchase") Or (@@${p}BaseTypeName = "Sales") Or (@@${p}BaseTypeName = "Receipt") Or (@@${p}BaseTypeName = "Payment") Or (@@${p}BaseTypeName = "Credit Note") Or (@@${p}BaseTypeName = "Debit Note") Or (@@${p}BaseTypeName = "Purchase")
-    ${p}IsAllowedActiveComp : ${activeCompanyFilterExpr}
-    ${p}IsAllowedCompObj    : ${collectionCompanyFilterExpr}
-    ${p}ShouldPostOnSave    : (($$InCreateMode And (Not $IsOptional) And (Not $$IsEmpty:$PartyLedgerName)) Or $$InAlterMode) And @@${p}IsTargetVch And @@${p}IsAllowedActiveComp
-    ${p}SyncableSavedVoucher: (Not $IsOptional) And ((Not $$IsEmpty:$PartyLedgerName) Or $IsCancelled) And @@${p}IsTargetVch
-    ${p}MatchesJustSavedVch : ($VoucherTypeName = ##${p}VVchType) And ($PartyLedgerName = ##${p}VParty) And (Not $IsOptional)
-    ${p}PartyPhoneExpr      : If Not $$IsEmpty:($LedgerMobile:Ledger:$PartyLedgerName) Then $LedgerMobile:Ledger:$PartyLedgerName Else (If Not $$IsEmpty:$PartyMobileNo Then $PartyMobileNo Else $LedgerPhone:Ledger:$PartyLedgerName)
-    ${p}PartyGroupExpr      : $Parent:Ledger:$PartyLedgerName
-    ${p}AgstBillLed1        : $LedgerEntries[1].BillAllocations[1].Name
-    ${p}AgstBillAll1        : $AllLedgerEntries[1].BillAllocations[1].Name
-    ${p}FormAgstBillStr     : If Not $$IsEmpty:@@${p}AgstBillLed1 Then @@${p}AgstBillLed1 Else @@${p}AgstBillAll1
-    ${p}FormNarrationStr    : $Narration
-    ${p}IsPartyLedLine      : $IsPartyLedger Or ($LedgerName = $PartyLedgerName)
-    ${p}AmtFilteredParty    : $$Number:($$Abs:($$FilterValue:$Amount:AllLedgerEntries:1:${p}IsPartyLedLine))
-    ${p}AmtPartyLed         : $$Number:($$Abs:$LedgerEntries[1].Amount)
-    ${p}AmtAllLed           : $$Number:($$Abs:$AllLedgerEntries[1].Amount)
-    ${p}AmtRoot             : $$Number:($$Abs:$Amount)
-    ${p}AmtInventory        : $$Number:($$Abs:($$CollAmtTotal:InventoryEntries:$Amount))
-    ${p}BestAmountNum       : If @@${p}AmtFilteredParty > 0 Then @@${p}AmtFilteredParty Else (If @@${p}AmtPartyLed > 0 Then @@${p}AmtPartyLed Else (If @@${p}AmtAllLed > 0 Then @@${p}AmtAllLed Else (If @@${p}AmtRoot > 0 Then @@${p}AmtRoot Else @@${p}AmtInventory)))
-    ${p}FormMasterIdStr     : $$String:$MasterID
-    ${p}FormAlterIdStr      : $$String:$AlterID
-    ${p}FormBaseTypeStr     : $Parent:VoucherType:$VoucherTypeName
-    ${p}FormAmountStr       : $$String:@@${p}BestAmountNum
-    ${p}FormDateStr         : $$String:$Date:UniversalDate
-    ${p}FormDueDateStr      : $$String:$BasicDueDateOfPymt
-    ${p}FormCancelledStr    : If $IsCancelled Then "Yes" Else "No"
-    ${p}FormOptionalStr     : If $IsOptional Then "Yes" Else "No"
-    ${p}OpenCompCountFormula: $$NumItems:${p}OpenCompaniesColl
-    ${p}CompVchTotalFormula : $$NumItems:${p}ExistingVouchersColl
-    ${p}CompIdxStrFormula   : $$String:##RSLCompIdx
-    ${p}SyncBatchFormula    : "b_" + ##RSLCompIdxStr + "_" + ($$String:$$MachineDate:UniversalDate) + "_" + ($$String:$$MachineTime)
-    ${p}RecDeletedNumFormula: ##RSLDeletedTotal + ($$Number:##RSLRecDeletedStr)
-    ${p}SyncedCountFormula  : $$String:##RSLSyncedCount
-    ${p}FailedCountFormula  : $$String:##RSLFailedCount
-    ${p}DeletedTotalFormula : $$String:##RSLDeletedTotal
+    ${p}FromDateFormula           : $$Date:"1-Apr-2000"
+    ${p}ToDateFormula             : $$Date:"31-Mar-2099"
+    ${p}LookupFromDateFormula     : If $$IsEmpty:##${p}VDateObj Then @@${p}FromDateFormula Else ##${p}VDateObj
+    ${p}LookupToDateFormula       : If $$IsEmpty:##${p}VDateObj Then @@${p}ToDateFormula Else ##${p}VDateObj
+    ${p}BaseTypeName              : $Parent:VoucherType:$VoucherTypeName
+    ${p}IsTargetVch               : ($VoucherTypeName = "Sales") Or ($VoucherTypeName = "Receipt") Or ($VoucherTypeName = "Payment") Or ($VoucherTypeName = "Credit Note") Or ($VoucherTypeName = "Debit Note") Or ($VoucherTypeName = "Purchase") Or (@@${p}BaseTypeName = "Sales") Or (@@${p}BaseTypeName = "Receipt") Or (@@${p}BaseTypeName = "Payment") Or (@@${p}BaseTypeName = "Credit Note") Or (@@${p}BaseTypeName = "Debit Note") Or (@@${p}BaseTypeName = "Purchase")
+    ${p}IsAllowedActiveComp       : ${activeCompanyFilterExpr}
+    ${p}IsAllowedCompObj          : ${collectionCompanyFilterExpr}
+    ${p}ShouldPostOnSave          : (($$InCreateMode And (Not $IsOptional) And (Not $$IsEmpty:$PartyLedgerName)) Or $$InAlterMode) And @@${p}IsTargetVch And @@${p}IsAllowedActiveComp
+    ${p}SyncableSavedVoucher      : (Not $IsOptional) And ((Not $$IsEmpty:$PartyLedgerName) Or $IsCancelled) And @@${p}IsTargetVch
+    ${p}MatchesJustSavedVch       : ($VoucherTypeName = ##${p}VVchType) And ($PartyLedgerName = ##${p}VParty) And (Not $IsOptional)
+    ${p}CurMasterNumFormula       : $$Number:$MasterID
+    ${p}HasNonEmptyVchNo          : Not ($$IsEmpty:$VoucherNumber)
+    ${p}IsExactVchNoMatch         : (Not (##${p}VVchNo = "")) And ($VoucherNumber = ##${p}VVchNo)
+    ${p}MatchesCurrentPostVch     : (##${p}VDeleted = "No") And (##${p}VCancelled = "No") And (Not (##${p}VGuid = "")) And ($GUID = ##${p}VGuid)
+    ${p}HasNonEmptyItemName       : Not ($$IsEmpty:$RSLItemName)
+    ${p}HasNonEmptyBillName       : Not ($$IsEmpty:$RSLBillName)
+    ${p}PartyPhoneExpr            : If Not $$IsEmpty:($LedgerMobile:Ledger:$PartyLedgerName) Then $LedgerMobile:Ledger:$PartyLedgerName Else (If Not $$IsEmpty:$PartyMobileNo Then $PartyMobileNo Else $LedgerPhone:Ledger:$PartyLedgerName)
+    ${p}PartyGroupExpr            : $Parent:Ledger:$PartyLedgerName
+    ${p}AgstBillLed1              : $LedgerEntries[1].BillAllocations[1].Name
+    ${p}AgstBillAll1              : $AllLedgerEntries[1].BillAllocations[1].Name
+    ${p}FormAgstBillStr           : If Not $$IsEmpty:@@${p}AgstBillLed1 Then @@${p}AgstBillLed1 Else @@${p}AgstBillAll1
+    ${p}FormNarrationStr          : $Narration
+    ${p}IsPartyLedLine            : $IsPartyLedger Or ($LedgerName = $PartyLedgerName)
+    ${p}AmtFilteredParty          : $$Number:($$Abs:($$FilterValue:$Amount:AllLedgerEntries:1:${p}IsPartyLedLine))
+    ${p}AmtPartyLed               : $$Number:($$Abs:$LedgerEntries[1].Amount)
+    ${p}AmtAllLed                 : $$Number:($$Abs:$AllLedgerEntries[1].Amount)
+    ${p}AmtRoot                   : $$Number:($$Abs:$Amount)
+    ${p}AmtInventory              : $$Number:($$Abs:($$CollAmtTotal:InventoryEntries:$Amount))
+    ${p}BestAmountNum             : If @@${p}AmtFilteredParty > 0 Then @@${p}AmtFilteredParty Else (If @@${p}AmtPartyLed > 0 Then @@${p}AmtPartyLed Else (If @@${p}AmtAllLed > 0 Then @@${p}AmtAllLed Else (If @@${p}AmtRoot > 0 Then @@${p}AmtRoot Else @@${p}AmtInventory)))
+    ${p}FormMasterIdStr           : $$String:$MasterID
+    ${p}FormAlterIdStr            : $$String:$AlterID
+    ${p}FormBaseTypeStr           : $Parent:VoucherType:$VoucherTypeName
+    ${p}FormAmountStr             : $$String:@@${p}BestAmountNum
+    ${p}FormDateStr               : $$String:$Date:UniversalDate
+    ${p}FormDueDateStr            : $$String:$BasicDueDateOfPymt
+    ${p}FormCancelledStr          : If $IsCancelled Then "Yes" Else "No"
+    ${p}FormOptionalStr           : If $IsOptional Then "Yes" Else "No"
+    ${p}FormInAlterStr            : If $$InAlterMode Then "Yes" Else "No"
+    ${p}CompStartDateStr          : $$String:$StartingFrom:UniversalDate
+    ${p}ShouldPostStockOnSave     : (Not $$IsEmpty:$Name) And @@${p}IsAllowedActiveComp
+    ${p}StockHsnStr               : If Not $$IsEmpty:($HSNDetails[Last].HSNCode) Then $HSNDetails[Last].HSNCode Else $GSTDetails[Last].HSNCode
+    ${p}StockGstRateStr           : $$String:($GSTDetails[Last].StatewiseDetails[1].RateDetails[3].GSTRate)
+    ${p}StockSellPriceStr         : If Not $$IsEmpty:($StandardPriceList[Last].Rate) Then ($$String:($StandardPriceList[Last].Rate)) Else ($$String:$StandardPrice)
+    ${p}StockCostPriceStr         : If Not $$IsEmpty:($StandardCostList[Last].Rate) Then ($$String:($StandardCostList[Last].Rate)) Else ($$String:$StandardCost)
+    ${p}StockOpenQtyStr           : $$String:$OpeningBalance
+    ${p}StockOpenValStr           : $$String:($$Abs:$OpeningValue)
+    ${p}StockCloseQtyStr          : $$String:$ClosingBalance
+    ${p}StockCloseRateStr         : $$String:$ClosingRate
+    ${p}StockCloseValStr          : $$String:($$Abs:$ClosingValue)
+    ${p}StockReorderStr           : $$String:$ReorderBase
+    ${p}SavedStockGuidFormula     : $GUID:StockItem:##${p}SName
+    ${p}SavedStockMasterIdFormula : $$String:($MasterID:StockItem:##${p}SName)
+    ${p}SavedStockAlterIdFormula  : $$String:($AlterID:StockItem:##${p}SName)
+    ${p}SavedStockCloseQtyFormula : $$String:($ClosingBalance:StockItem:##${p}SName)
+    ${p}SavedStockCloseValFormula : $$String:($$Abs:($ClosingValue:StockItem:##${p}SName))
+    ${p}IsCreditorGroupExpr       : ($Parent = $$GroupSundryCreditors) Or ($$IsBelongsTo:$$GroupSundryCreditors) Or ($Parent:Group:$Parent = $$GroupSundryCreditors)
+    ${p}IsDebtorGroupExpr         : ($Parent = $$GroupSundryDebtors) Or ($$IsBelongsTo:$$GroupSundryDebtors) Or ($Parent:Group:$Parent = $$GroupSundryDebtors)
+    ${p}IsPartyParentGroup        : @@${p}IsDebtorGroupExpr Or @@${p}IsCreditorGroupExpr
+    ${p}ShouldPostLedgerOnSave    : (Not $$IsEmpty:$Name) And @@${p}IsPartyParentGroup And @@${p}IsAllowedActiveComp
+    ${p}LedgerRoleGroupStr        : If @@${p}IsCreditorGroupExpr Then "Sundry Creditors" Else "Sundry Debtors"
+    ${p}LedgerPhoneDirectStr      : If Not $$IsEmpty:$LedgerMobile Then $LedgerMobile Else $LedgerPhone
+    ${p}LedgerGstinStr            : If Not $$IsEmpty:$PartyGSTIN Then $PartyGSTIN Else $GSTIN
+    ${p}LedgerStateStr            : If Not $$IsEmpty:$LedStateName Then $LedStateName Else $StateName
+    ${p}LedgerCreditLimitStr      : $$String:($$Abs:$CreditLimit)
+    ${p}LedgerCreditDaysStr       : $$String:$BillCreditPeriod
+    ${p}LedOpenSignedNum          : If $$IsDr:$OpeningBalance Then ($$Number:($$Abs:$OpeningBalance)) Else (0 - ($$Number:($$Abs:$OpeningBalance)))
+    ${p}LedCloseSignedNum         : If $$IsDr:$ClosingBalance Then ($$Number:($$Abs:$ClosingBalance)) Else (0 - ($$Number:($$Abs:$ClosingBalance)))
+    ${p}LedgerOpenSignedStr       : $$String:@@${p}LedOpenSignedNum
+    ${p}LedgerCloseSignedStr      : $$String:@@${p}LedCloseSignedNum
+    ${p}SavedLedgerGuidFormula    : $GUID:Ledger:##${p}LName
+    ${p}SavedLedCloseSignedNum    : If $$IsDr:($ClosingBalance:Ledger:##${p}LName) Then ($$Number:($$Abs:($ClosingBalance:Ledger:##${p}LName))) Else (0 - ($$Number:($$Abs:($ClosingBalance:Ledger:##${p}LName))))
+    ${p}SavedLedgerCloseSignedStr : $$String:@@${p}SavedLedCloseSignedNum
+    ${p}OpenCompCountFormula      : $$NumItems:${p}OpenCompaniesColl
+    ${p}CompVchTotalFormula       : $$NumItems:${p}ExistingVouchersColl
+    ${p}CompStockTotalFormula     : $$NumItems:${p}ExistingStockItemsColl
+    ${p}CompLedTotalFormula       : $$NumItems:${p}ExistingPartyLedgersColl
+    ${p}CompGodownTotalFormula    : $$NumItems:${p}ExistingGodownsColl
+    ${p}CompMastersAnyFormula     : (@@${p}CompStockTotalFormula + @@${p}CompLedTotalFormula + @@${p}CompGodownTotalFormula)
+    ${p}CompIdxStrFormula         : $$String:##RSLCompIdx
+    ${p}SyncBatchFormula          : "b_" + ##RSLCompIdxStr + "_" + ($$String:$$MachineDate:UniversalDate) + "_" + ($$String:$$MachineTime)
+    ${p}RecDeletedNumFormula      : ##RSLDeletedTotal + ($$Number:##RSLRecDeletedStr)
+    ${p}SyncedCountFormula        : $$String:##RSLSyncedCount
+    ${p}SyncedStockCountFormula   : $$String:##RSLStockSyncedTotal
+    ${p}SyncedLedCountFormula     : $$String:##RSLLedSyncedTotal
+    ${p}FailedCountFormula        : $$String:##RSLFailedCount
+    ${p}DeletedTotalFormula       : $$String:##RSLDeletedTotal
 
 [#Form: Voucher]
-    Add : On : Form Accept : @@${p}ShouldPostOnSave : Call : ${p}CaptureVoucherBeforeAccept
-    Add : On : Form Accept : Yes : Form Accept
-    Add : On : Form Accept : ##${p}VPendingPost : Call : ${p}PostCapturedVoucherAfterAccept${voucherDeleteCancelFormLines}
+    Add : On : Form Accept : First : @@${p}ShouldPostOnSave : Call : ${p}CaptureVoucherBeforeAccept
+    Add : On : Form Accept : Last  : ##${p}VPendingPost     : Call : ${p}PostCapturedVoucherAfterAccept${voucherDeleteCancelFormLines}
 ${voucherDeleteCancelDefinitions}
 [Function: ${p}CaptureVoucherBeforeAccept]
     01 : Set : ${p}VGuid        : $GUID
@@ -4496,171 +4913,359 @@ ${voucherDeleteCancelDefinitions}
     10 : Set : ${p}VPhone       : @@${p}PartyPhoneExpr
     11 : Set : ${p}VAmount      : @@${p}FormAmountStr
     12 : Set : ${p}VDate        : @@${p}FormDateStr
-    13 : Set : ${p}VDueDate     : @@${p}FormDueDateStr
-    14 : Set : ${p}VAgstBill    : @@${p}FormAgstBillStr
-    15 : Set : ${p}VNarration   : @@${p}FormNarrationStr
-    16 : Set : ${p}VCancelled   : @@${p}FormCancelledStr
-    17 : Set : ${p}VDeleted     : "No"
-    18 : Set : ${p}VOptional    : @@${p}FormOptionalStr
-    19 : Set : ${p}VSyncBatch   : ""
-    20 : Set : ${p}VPendingPost : Yes
-    21 : Return
+    13 : Set : ${p}VDateObj     : $Date
+    14 : Set : ${p}VDueDate     : @@${p}FormDueDateStr
+    15 : Set : ${p}VAgstBill    : @@${p}FormAgstBillStr
+    16 : Set : ${p}VNarration   : @@${p}FormNarrationStr
+    17 : Set : ${p}VCancelled   : @@${p}FormCancelledStr
+    18 : Set : ${p}VDeleted     : "No"
+    19 : Set : ${p}VOptional    : @@${p}FormOptionalStr
+    20 : Set : ${p}VInAlter     : @@${p}FormInAlterStr
+    21 : Set : ${p}VSyncBatch   : ""
+    22 : Set : ${p}VPendingPost : Yes
+    23 : Return
 
 [Function: ${p}PostCapturedVoucherAfterAccept]
-    Variable  : RSLProgressSub : String : ""
-    Variable  : RSLRespStatus  : String : ""
-    Variable  : RSLFoundSaved  : Number : 0
+    Variable  : RSLProgressSub   : String : ""
+    Variable  : RSLRespStatus    : String : ""
+    Variable  : RSLBestMasterNum : Number : 0
+    Variable  : RSLCurMasterNum  : Number : 0
     01 : Set : ${p}VPendingPost : No
     02 : If  : ##${p}VGuid = ""
     03 :     Walk Collection : ${p}JustSavedVoucherColl
-    04 :         If : ##RSLFoundSaved = 0
-    05 :             Set : ${p}VGuid     : $GUID
-    06 :             Set : ${p}VMasterId : @@${p}FormMasterIdStr
-    07 :             Set : ${p}VAlterId  : @@${p}FormAlterIdStr
-    08 :             If  : $VoucherNumber != ""
-    09 :                 Set : ${p}VVchNo : $VoucherNumber
-    10 :             End If
-    11 :             Set : RSLFoundSaved : 1
-    12 :         End If
-    13 :     End Walk
-    14 : End If
-    15 : Set : RSLProgressSub  : "Syncing " + ##${p}VVchType + " #" + ##${p}VVchNo
-    16 : Start Progress : 1 : "${brandSyncTitle}" : ##${p}VCompany : ##RSLProgressSub
-    17 : Show Progress  : 0
-    18 : Walk Collection : ${p}CloudVoucherPost
-    19 :     Set : RSLRespStatus : $RSLOkStatus
-    20 : End Walk
-    21 : Show Progress  : 1
-    22 : End Progress
-    23 : Return
+    04 :         Set : RSLCurMasterNum : @@${p}CurMasterNumFormula
+    05 :         If  : @@${p}IsExactVchNoMatch And (##RSLCurMasterNum > ##RSLBestMasterNum)
+    06 :             Set : RSLBestMasterNum : ##RSLCurMasterNum
+    07 :             Set : ${p}VGuid        : $GUID
+    08 :             Set : ${p}VMasterId    : @@${p}FormMasterIdStr
+    09 :             Set : ${p}VAlterId     : @@${p}FormAlterIdStr
+    10 :             If  : @@${p}HasNonEmptyVchNo
+    11 :                 Set : ${p}VVchNo   : $VoucherNumber
+    12 :             End If
+    13 :         End If
+    14 :     End Walk
+    15 :     If  : ##RSLBestMasterNum = 0
+    16 :         Walk Collection : ${p}JustSavedVoucherColl
+    17 :             Set : RSLCurMasterNum : @@${p}CurMasterNumFormula
+    18 :             If  : ##RSLCurMasterNum > ##RSLBestMasterNum
+    19 :                 Set : RSLBestMasterNum : ##RSLCurMasterNum
+    20 :                 Set : ${p}VGuid        : $GUID
+    21 :                 Set : ${p}VMasterId    : @@${p}FormMasterIdStr
+    22 :                 Set : ${p}VAlterId     : @@${p}FormAlterIdStr
+    23 :                 If  : @@${p}HasNonEmptyVchNo
+    24 :                     Set : ${p}VVchNo   : $VoucherNumber
+    25 :                 End If
+    26 :             End If
+    27 :         End Walk
+    28 :     End If
+    29 : End If
+    30 : Set : RSLProgressSub  : "Syncing " + ##${p}VVchType + " #" + ##${p}VVchNo
+    31 : Start Progress : 1 : "${brandSyncTitle}" : ##${p}VCompany : ##RSLProgressSub
+    32 : Show Progress  : 0
+    33 : Walk Collection : ${p}CloudVoucherPost
+    34 :     Set : RSLRespStatus : $RSLOkStatus
+    35 : End Walk
+    36 : Show Progress  : 1
+    37 : End Progress
+    38 : Return
+
+[#Form: Stock Item]
+    Add : On : Form Accept : First : @@${p}ShouldPostStockOnSave : Call : ${p}CaptureStockItemBeforeAccept
+    Add : On : Form Accept : Last  : ##${p}SPendingPost          : Call : ${p}PostStockItemAfterAccept
+
+[Function: ${p}CaptureStockItemBeforeAccept]
+    01 : Set : ${p}SGuid        : $GUID
+    02 : Set : ${p}SMasterId    : @@${p}FormMasterIdStr
+    03 : Set : ${p}SAlterId     : @@${p}FormAlterIdStr
+    04 : Set : ${p}SCompany     : ##SVCurrentCompany
+    05 : Set : ${p}SName        : $Name
+    06 : Set : ${p}SGroup       : $Parent
+    07 : Set : ${p}SCategory    : $Category
+    08 : Set : ${p}SUom         : $BaseUnits
+    09 : Set : ${p}SPartNo      : $PartNo
+    10 : Set : ${p}SHsn         : @@${p}StockHsnStr
+    11 : Set : ${p}SGstRate     : @@${p}StockGstRateStr
+    12 : Set : ${p}SSellPrice   : @@${p}StockSellPriceStr
+    13 : Set : ${p}SCostPrice   : @@${p}StockCostPriceStr
+    14 : Set : ${p}SOpenQty     : @@${p}StockOpenQtyStr
+    15 : Set : ${p}SOpenVal     : @@${p}StockOpenValStr
+    16 : Set : ${p}SCloseQty    : @@${p}StockCloseQtyStr
+    17 : Set : ${p}SCloseRate   : @@${p}StockCloseRateStr
+    18 : Set : ${p}SCloseVal    : @@${p}StockCloseValStr
+    19 : Set : ${p}SReorder     : @@${p}StockReorderStr
+    20 : Set : ${p}SPendingPost : Yes
+    21 : Return
+
+[Function: ${p}PostStockItemAfterAccept]
+    Variable : RSLProgressSub : String : ""
+    Variable : RSLRespStatus  : String : ""
+    01 : Set : ${p}SPendingPost : No
+    02 : If  : ##${p}SGuid = ""
+    03 :     Set : ${p}SGuid     : @@${p}SavedStockGuidFormula
+    04 :     Set : ${p}SMasterId : @@${p}SavedStockMasterIdFormula
+    05 :     Set : ${p}SAlterId  : @@${p}SavedStockAlterIdFormula
+    06 :     Set : ${p}SCloseQty : @@${p}SavedStockCloseQtyFormula
+    07 :     Set : ${p}SCloseVal : @@${p}SavedStockCloseValFormula
+    08 : End If
+    09 : Set : RSLProgressSub  : "Syncing Product " + ##${p}SName
+    10 : Start Progress : 1 : "${brandSyncTitle}" : ##${p}SCompany : ##RSLProgressSub
+    11 : Show Progress  : 0
+    12 : Walk Collection : ${p}CloudSingleStockPost
+    13 :     Set : RSLRespStatus : $RSLOkStatus
+    14 : End Walk
+    15 : Show Progress  : 1
+    16 : End Progress
+    17 : Return
+
+[#Form: Ledger]
+    Add : On : Form Accept : First : @@${p}ShouldPostLedgerOnSave : Call : ${p}CaptureLedgerBeforeAccept
+    Add : On : Form Accept : Last  : ##${p}LPendingPost           : Call : ${p}PostLedgerAfterAccept
+
+[Function: ${p}CaptureLedgerBeforeAccept]
+    01 : Set : ${p}LGuid        : $GUID
+    02 : Set : ${p}LCompany     : ##SVCurrentCompany
+    03 : Set : ${p}LName        : $Name
+    04 : Set : ${p}LGroup       : @@${p}LedgerRoleGroupStr
+    05 : Set : ${p}LPhone       : @@${p}LedgerPhoneDirectStr
+    06 : Set : ${p}LEmail       : $EMail
+    07 : Set : ${p}LGstin       : @@${p}LedgerGstinStr
+    08 : Set : ${p}LPan         : $IncomeTaxNumber
+    09 : Set : ${p}LContact     : $LedgerContact
+    10 : Set : ${p}LState       : @@${p}LedgerStateStr
+    11 : Set : ${p}LPincode     : $PinCode
+    12 : Set : ${p}LCreditLimit : @@${p}LedgerCreditLimitStr
+    13 : Set : ${p}LCreditDays  : @@${p}LedgerCreditDaysStr
+    14 : Set : ${p}LOpenBal     : @@${p}LedgerOpenSignedStr
+    15 : Set : ${p}LCloseBal    : @@${p}LedgerCloseSignedStr
+    16 : Set : ${p}LPendingPost : Yes
+    17 : Return
+
+[Function: ${p}PostLedgerAfterAccept]
+    Variable : RSLProgressSub : String : ""
+    Variable : RSLRespStatus  : String : ""
+    01 : Set : ${p}LPendingPost : No
+    02 : If  : ##${p}LGuid = ""
+    03 :     Set : ${p}LGuid     : @@${p}SavedLedgerGuidFormula
+    04 :     Set : ${p}LCloseBal : @@${p}SavedLedgerCloseSignedStr
+    05 : End If
+    06 : Set : RSLProgressSub  : "Syncing Party Ledger " + ##${p}LName
+    07 : Start Progress : 1 : "${brandSyncTitle}" : ##${p}LCompany : ##RSLProgressSub
+    08 : Show Progress  : 0
+    09 : Walk Collection : ${p}CloudSingleLedgerPost
+    10 :     Set : RSLRespStatus : $RSLOkStatus
+    11 : End Walk
+    12 : Show Progress  : 1
+    13 : End Progress
+    14 : Return
 
 [Collection: ${p}JustSavedVoucherColl]
     Type        : Voucher
-    Parm Var    : SVFromDate : Date : "01-04-2000"
-    Parm Var    : SVToDate   : Date : "31-03-2099"
+    Parm Var    : SVCurrentCompany : String : ##${p}VCompany
+    Parm Var    : SVFromDate       : Date   : @@${p}LookupFromDateFormula
+    Parm Var    : SVToDate         : Date   : @@${p}LookupToDateFormula
     Fetch       : MasterID, GUID, AlterID, VoucherNumber, VoucherTypeName, PartyLedgerName, IsOptional
     Filter      : ${p}MatchesJustSavedVch
-    Sort        : @@Default : -$MasterID
+
+[Collection: ${p}CurrentVoucherObjColl]
+    Type        : Voucher
+    Parm Var    : SVCurrentCompany : String : ##${p}VCompany
+    Parm Var    : SVFromDate       : Date   : @@${p}LookupFromDateFormula
+    Parm Var    : SVToDate         : Date   : @@${p}LookupToDateFormula
+    Fetch       : GUID, MasterID, AllInventoryEntries.*, InventoryEntries.*, AllLedgerEntries.*, LedgerEntries.*
+    Filter      : ${p}MatchesCurrentPostVch
+
+[Collection: ${p}CurrentVoucherInvLinesColl]
+    Source Collection : ${p}CurrentVoucherObjColl
+    Walk              : AllInventoryEntries
+    Compute           : RSLItemName   : $StockItemName
+    Compute           : RSLBilledQty  : $$String:$BilledQty
+    Compute           : RSLActualQty  : $$String:$ActualQty
+    Compute           : RSLRate       : $$String:$Rate
+    Compute           : RSLDiscount   : $$String:$Discount
+    Compute           : RSLAmount     : $$String:($$Abs:$Amount)
+    Compute           : RSLGodown     : If Not $$IsEmpty:($BatchAllocations[1].GodownName) Then $BatchAllocations[1].GodownName Else $GodownName
+    Compute           : RSLBatch      : $BatchAllocations[1].BatchName
+    Filter            : ${p}HasNonEmptyItemName
+
+[Collection: ${p}CurrentVoucherBillAllocColl]
+    Source Collection : ${p}CurrentVoucherObjColl
+    Walk              : AllLedgerEntries, BillAllocations
+    Compute           : RSLBillName   : $Name
+    Compute           : RSLBillType   : $BillType
+    Compute           : RSLBillAmount : $$String:($$Abs:$Amount)
+    Filter            : ${p}HasNonEmptyBillName
 
 [Function: ${p}SyncExistingVouchers]
-    Variable : SVCurrentCompany : String
-    Variable : RSLOrigCompany   : String : ""
-    Variable : RSLOpenCompCount : Number : 0
-    Variable : RSLCompIdx       : Number : 0
-    Variable : RSLCompIdxStr    : String : ""
-    Variable : RSLCompVchTotal  : Number : 0
-    Variable : RSLCompFailed    : Number : 0
-    Variable : RSLStepIdx       : Number : 0
-    Variable : RSLSyncedCount   : Number : 0
-    Variable : RSLFailedCount   : Number : 0
-    Variable : RSLDeletedTotal  : Number : 0
-    Variable : RSLRecDeletedStr : String : ""
-    Variable : RSLSyncedStr     : String : ""
-    Variable : RSLFailedStr     : String : ""
-    Variable : RSLDeletedStr    : String : ""
-    Variable : RSLCompCountStr  : String : ""
-    Variable : RSLStepStatus    : String : ""
-    Variable : RSLStepMsg       : String : ""
-    Variable : RSLDisplayMsg    : String : ""
+    Variable : SVCurrentCompany    : String
+    Variable : RSLOrigCompany      : String : ""
+    Variable : RSLOpenCompCount    : Number : 0
+    Variable : RSLCompIdx          : Number : 0
+    Variable : RSLCompIdxStr       : String : ""
+    Variable : RSLCompMastersTotal : Number : 0
+    Variable : RSLCompStockCount   : Number : 0
+    Variable : RSLCompLedCount     : Number : 0
+    Variable : RSLCompVchTotal     : Number : 0
+    Variable : RSLCompFailed       : Number : 0
+    Variable : RSLStepIdx          : Number : 0
+    Variable : RSLSyncedCount      : Number : 0
+    Variable : RSLStockSyncedTotal : Number : 0
+    Variable : RSLLedSyncedTotal   : Number : 0
+    Variable : RSLFailedCount      : Number : 0
+    Variable : RSLDeletedTotal     : Number : 0
+    Variable : RSLRecDeletedStr    : String : ""
+    Variable : RSLSyncedStr        : String : ""
+    Variable : RSLStockSyncedStr   : String : ""
+    Variable : RSLLedSyncedStr     : String : ""
+    Variable : RSLFailedStr        : String : ""
+    Variable : RSLDeletedStr       : String : ""
+    Variable : RSLCompCountStr     : String : ""
+    Variable : RSLStepStatus       : String : ""
+    Variable : RSLStepMsg          : String : ""
+    Variable : RSLDisplayMsg       : String : ""
     01 : Set : RSLOrigCompany   : ##SVCurrentCompany
     02 : Set : RSLOpenCompCount : @@${p}OpenCompCountFormula
     03 : If  : ##RSLOpenCompCount = 0
-    04 :     Msg Box : "${brandSyncTitle}" : "No allowed Tally company is currently open. Open your company in Tally Prime and try again."
+    04 :     Msg Box : "${brandSyncTitle}" : "No allowed Tally company is currently open. Open your company(ies) in Tally Prime (F3) and try again."
     05 :     Return
     06 : End If
-    07 : Walk Collection : ${p}OpenCompaniesColl
-    08 :     Increment : RSLCompIdx
-    09 :     Set : RSLCompIdxStr    : @@${p}CompIdxStrFormula
-    10 :     Set : SVCurrentCompany : $Name
-    11 :     Set : ${p}VCompany     : $Name
-    12 :     Set : ${p}VSyncBatch   : @@${p}SyncBatchFormula
-    13 :     Set : RSLCompVchTotal  : @@${p}CompVchTotalFormula
-    14 :     Set : RSLCompFailed    : 0
-    15 :     Set : RSLStepIdx       : 0
-    16 :     If  : ##RSLCompVchTotal > 0
-    17 :         Start Progress : ##RSLCompVchTotal : "${brandSyncTitle} - Syncing" : ##SVCurrentCompany : "Syncing bills, receipts, payments & ledgers..."
-    18 :         Walk Collection : ${p}ExistingVouchersColl
-    19 :             Set : ${p}VGuid       : $GUID
-    20 :             Set : ${p}VMasterId   : @@${p}FormMasterIdStr
-    21 :             Set : ${p}VAlterId    : @@${p}FormAlterIdStr
-    22 :             Set : ${p}VCompany    : ##SVCurrentCompany
-    23 :             Set : ${p}VVchNo      : $VoucherNumber
-    24 :             Set : ${p}VVchType    : $VoucherTypeName
-    25 :             Set : ${p}VBaseType   : @@${p}FormBaseTypeStr
-    26 :             Set : ${p}VParty      : $PartyLedgerName
-    27 :             Set : ${p}VPartyGroup : @@${p}PartyGroupExpr
-    28 :             Set : ${p}VPhone      : @@${p}PartyPhoneExpr
-    29 :             Set : ${p}VAmount     : @@${p}FormAmountStr
-    30 :             Set : ${p}VDate       : @@${p}FormDateStr
-    31 :             Set : ${p}VDueDate    : @@${p}FormDueDateStr
-    32 :             Set : ${p}VAgstBill   : @@${p}FormAgstBillStr
-    33 :             Set : ${p}VNarration  : @@${p}FormNarrationStr
-    34 :             Set : ${p}VCancelled  : @@${p}FormCancelledStr
-    35 :             Set : ${p}VDeleted    : "No"
-    36 :             Set : ${p}VOptional   : "No"
-    37 :             Set : RSLStepStatus  : ""
-    38 :             Walk Collection : ${p}CloudVoucherPost
-    39 :                 Set : RSLStepStatus : $RSLOkStatus
-    40 :                 Set : RSLStepMsg    : $RSLMessage
-    41 :             End Walk
-    42 :             If : ##RSLStepStatus = "Connected"
-    43 :                 Increment : RSLSyncedCount
-    44 :             Else
-    45 :                 Increment : RSLFailedCount
-    46 :                 Increment : RSLCompFailed
-    47 :             End If
-    48 :             Increment : RSLStepIdx
-    49 :             Show Progress : ##RSLStepIdx
-    50 :         End Walk
-    51 :         End Progress
-    52 :     End If
-    53 :     If  : ##RSLCompFailed = 0
-    54 :         Start Progress : 1 : "${brandSyncTitle} - Reconciling" : ##SVCurrentCompany : "Checking for deleted bills & paid settlements..."
-    55 :         Show Progress  : 0
-    56 :         Set : RSLRecDeletedStr : "0"
-    57 :         Walk Collection : ${p}CloudReconcilePost
-    58 :             Set : RSLStepStatus    : $RSLOkStatus
-    59 :             Set : RSLRecDeletedStr : $RSLDeletedCount
-    60 :         End Walk
-    61 :         If : ##RSLRecDeletedStr != ""
-    62 :             Set : RSLDeletedTotal : @@${p}RecDeletedNumFormula
-    63 :         End If
-    64 :         Show Progress  : 1
-    65 :         End Progress
-    66 :     End If
-    67 : End Walk
-    68 : Set : SVCurrentCompany : ##RSLOrigCompany
-    69 : Set : ${p}VSyncBatch   : ""
-    70 : Set : RSLSyncedStr     : @@${p}SyncedCountFormula
-    71 : Set : RSLFailedStr     : @@${p}FailedCountFormula
-    72 : Set : RSLDeletedStr    : @@${p}DeletedTotalFormula
-    73 : Set : RSLCompCountStr  : @@${p}CompIdxStrFormula
-    74 : If  : ##RSLFailedCount > 0
-    75 :     If : ##RSLStepMsg = ""
-    76 :         Set : RSLDisplayMsg : "Synced " + ##RSLSyncedStr + " voucher(s); " + ##RSLFailedStr + " failed. Run '${menuTestTitle}' to verify connectivity."
-    77 :     Else
-    78 :         Set : RSLDisplayMsg : "Synced " + ##RSLSyncedStr + " voucher(s); " + ##RSLFailedStr + " failed - " + ##RSLStepMsg
-    79 :     End If
-    80 :     Msg Box : "${brandSyncTitle} - Action Needed" : ##RSLDisplayMsg
-    81 : Else
-    82 :     If : ##RSLDeletedTotal > 0
-    83 :         Set : RSLDisplayMsg : "Synced " + ##RSLSyncedStr + " voucher(s) and removed " + ##RSLDeletedStr + " deleted voucher(s) across " + ##RSLCompCountStr + " Tally company(ies)!"
-    84 :     Else
-    85 :         Set : RSLDisplayMsg : "Successfully synced " + ##RSLSyncedStr + " voucher(s) across " + ##RSLCompCountStr + " Tally company(ies) via ${brandSyncTitle}!"
-    86 :     End If
-    87 :     Msg Box : "${brandSyncTitle} - Complete" : ##RSLDisplayMsg
-    88 : End If
-    89 : Return
+    07 : Walk Collection : ${p}CloudPingCheck
+    08 :     Set : RSLStepStatus : $RSLOkStatus
+    09 : End Walk
+    10 : Walk Collection : ${p}OpenCompaniesColl
+    11 :     Increment : RSLCompIdx
+    12 :     Set : RSLCompIdxStr       : @@${p}CompIdxStrFormula
+    13 :     Set : SVCurrentCompany    : $Name
+    14 :     Set : ${p}VCompany        : $Name
+    15 :     Set : ${p}VSyncBatch      : @@${p}SyncBatchFormula
+    16 :     Set : RSLCompStockCount   : @@${p}CompStockTotalFormula
+    17 :     Set : RSLCompLedCount     : @@${p}CompLedTotalFormula
+    18 :     Set : RSLCompMastersTotal : @@${p}CompMastersAnyFormula
+    19 :     If  : ##RSLCompMastersTotal > 0
+    20 :         Start Progress : 1 : "${brandSyncTitle} - Masters" : ##SVCurrentCompany : "Syncing Products, Godowns & Client/Supplier Ledgers..."
+    21 :         Show Progress  : 0
+    22 :         Set : RSLStepStatus : ""
+    23 :         Walk Collection : ${p}CloudBulkMastersPost
+    24 :             Set : RSLStepStatus : $RSLOkStatus
+    25 :             Set : RSLStepMsg    : $RSLMessage
+    26 :         End Walk
+    27 :         If : ##RSLStepStatus = "Connected"
+    28 :             Set : RSLStockSyncedTotal : ##RSLStockSyncedTotal + ##RSLCompStockCount
+    29 :             Set : RSLLedSyncedTotal   : ##RSLLedSyncedTotal + ##RSLCompLedCount
+    30 :         End If
+    31 :         Show Progress  : 1
+    32 :         End Progress
+    33 :     End If
+    34 :     Set : RSLCompVchTotal : @@${p}CompVchTotalFormula
+    35 :     Set : RSLCompFailed   : 0
+    36 :     Set : RSLStepIdx      : 0
+    37 :     If  : ##RSLCompVchTotal > 0
+    38 :         Start Progress : ##RSLCompVchTotal : "${brandSyncTitle} - Vouchers" : ##SVCurrentCompany : "Syncing bills, line items, receipts & settlements..."
+    39 :         Walk Collection : ${p}ExistingVouchersColl
+    40 :             Set : ${p}VGuid       : $GUID
+    41 :             Set : ${p}VMasterId   : @@${p}FormMasterIdStr
+    42 :             Set : ${p}VAlterId    : @@${p}FormAlterIdStr
+    43 :             Set : ${p}VCompany    : ##SVCurrentCompany
+    44 :             Set : ${p}VVchNo      : $VoucherNumber
+    45 :             Set : ${p}VVchType    : $VoucherTypeName
+    46 :             Set : ${p}VBaseType   : @@${p}FormBaseTypeStr
+    47 :             Set : ${p}VParty      : $PartyLedgerName
+    48 :             Set : ${p}VPartyGroup : @@${p}PartyGroupExpr
+    49 :             Set : ${p}VPhone      : @@${p}PartyPhoneExpr
+    50 :             Set : ${p}VAmount     : @@${p}FormAmountStr
+    51 :             Set : ${p}VDate       : @@${p}FormDateStr
+    52 :             Set : ${p}VDateObj    : $Date
+    53 :             Set : ${p}VDueDate    : @@${p}FormDueDateStr
+    54 :             Set : ${p}VAgstBill   : @@${p}FormAgstBillStr
+    55 :             Set : ${p}VNarration  : @@${p}FormNarrationStr
+    56 :             Set : ${p}VCancelled  : @@${p}FormCancelledStr
+    57 :             Set : ${p}VDeleted    : "No"
+    58 :             Set : ${p}VOptional   : "No"
+    59 :             Set : ${p}VInAlter    : "No"
+    60 :             Set : RSLStepStatus  : ""
+    61 :             Walk Collection : ${p}CloudVoucherPost
+    62 :                 Set : RSLStepStatus : $RSLOkStatus
+    63 :                 Set : RSLStepMsg    : $RSLMessage
+    64 :             End Walk
+    65 :             If : ##RSLStepStatus = "Connected"
+    66 :                 Increment : RSLSyncedCount
+    67 :             Else
+    68 :                 Increment : RSLFailedCount
+    69 :                 Increment : RSLCompFailed
+    70 :             End If
+    71 :             Increment : RSLStepIdx
+    72 :             Show Progress : ##RSLStepIdx
+    73 :         End Walk
+    74 :         End Progress
+    75 :     End If
+    76 :     If  : ##RSLCompFailed = 0
+    77 :         Start Progress : 1 : "${brandSyncTitle} - Reconciling" : ##SVCurrentCompany : "Reconciling companies, deleted bills & paid settlements..."
+    78 :         Show Progress  : 0
+    79 :         Set : RSLRecDeletedStr : "0"
+    80 :         Walk Collection : ${p}CloudReconcilePost
+    81 :             Set : RSLStepStatus    : $RSLOkStatus
+    82 :             Set : RSLRecDeletedStr : $RSLDeletedCount
+    83 :         End Walk
+    84 :         If : Not (##RSLRecDeletedStr = "")
+    85 :             Set : RSLDeletedTotal : @@${p}RecDeletedNumFormula
+    86 :         End If
+    87 :         Show Progress  : 1
+    88 :         End Progress
+    89 :     End If
+    90 : End Walk
+    91 : Set : SVCurrentCompany  : ##RSLOrigCompany
+    92 : Set : ${p}VSyncBatch    : ""
+    93 : Set : RSLSyncedStr      : @@${p}SyncedCountFormula
+    94 : Set : RSLStockSyncedStr : @@${p}SyncedStockCountFormula
+    95 : Set : RSLLedSyncedStr   : @@${p}SyncedLedCountFormula
+    96 : Set : RSLFailedStr      : @@${p}FailedCountFormula
+    97 : Set : RSLDeletedStr     : @@${p}DeletedTotalFormula
+    98 : Set : RSLCompCountStr   : @@${p}CompIdxStrFormula
+    99 : If  : ##RSLFailedCount > 0
+   100 :     If : ##RSLStepMsg = ""
+   101 :         Set : RSLDisplayMsg : "Synced " + ##RSLSyncedStr + " voucher(s), " + ##RSLStockSyncedStr + " product(s); " + ##RSLFailedStr + " failed. Run '${menuTestTitle}' to verify connectivity."
+   102 :     Else
+   103 :         Set : RSLDisplayMsg : "Synced " + ##RSLSyncedStr + " voucher(s), " + ##RSLStockSyncedStr + " product(s); " + ##RSLFailedStr + " failed - " + ##RSLStepMsg
+   104 :     End If
+   105 :     Msg Box : "${brandSyncTitle} - Action Needed" : ##RSLDisplayMsg
+   106 : Else
+   107 :     If : ##RSLDeletedTotal > 0
+   108 :         Set : RSLDisplayMsg : "Synced " + ##RSLSyncedStr + " voucher(s), " + ##RSLStockSyncedStr + " product(s), " + ##RSLLedSyncedStr + " ledger(s), and removed " + ##RSLDeletedStr + " deleted bill(s) across " + ##RSLCompCountStr + " Tally company(ies)!"
+   109 :     Else
+   110 :         Set : RSLDisplayMsg : "Successfully synced " + ##RSLSyncedStr + " voucher(s), " + ##RSLStockSyncedStr + " product(s), and " + ##RSLLedSyncedStr + " party ledger(s) across " + ##RSLCompCountStr + " Tally company(ies)!"
+   111 :     End If
+   112 :     Msg Box : "${brandSyncTitle} - Complete" : ##RSLDisplayMsg
+   113 : End If
+   114 : Return
 
 [Collection: ${p}OpenCompaniesColl]
     Type        : Company
-    Fetch       : Name, GUID
+    Fetch       : Name, GUID, StartingFrom
     Filter      : ${p}IsAllowedCompObj
+
+[Collection: ${p}ExistingGodownsColl]
+    Type        : Godown
+    Parm Var    : SVCurrentCompany : String : ##${p}VCompany
+    Fetch       : Name, GUID, Parent, Address
+
+[Collection: ${p}ExistingStockItemsColl]
+    Type        : StockItem
+    Parm Var    : SVCurrentCompany : String : ##${p}VCompany
+    Fetch       : MasterID, GUID, AlterID, Name, Parent, Category, BaseUnits, PartNo
+    Fetch       : OpeningBalance, OpeningValue, ClosingBalance, ClosingRate, ClosingValue, ReorderBase
+    Fetch       : StandardPrice, StandardCost, StandardPriceList.Rate, StandardCostList.Rate
+    Fetch       : HSNDetails.HSNCode, GSTDetails.HSNCode, GSTDetails.StatewiseDetails.RateDetails.GSTRate
+
+[Collection: ${p}ExistingPartyLedgersColl]
+    Type        : Ledger
+    Parm Var    : SVCurrentCompany : String : ##${p}VCompany
+    Fetch       : GUID, Name, Parent, LedgerMobile, LedgerPhone, EMail, PartyGSTIN, GSTIN, IncomeTaxNumber, LedgerContact, LedStateName, StateName, PinCode, CreditLimit, BillCreditPeriod, OpeningBalance, ClosingBalance
+    Filter      : ${p}IsPartyParentGroup
 
 [Collection: ${p}ExistingVouchersColl]
     Type        : Voucher
-    Parm Var    : SVFromDate : Date : "01-04-2000"
-    Parm Var    : SVToDate   : Date : "31-03-2099"
+    Parm Var    : SVCurrentCompany : String : ##${p}VCompany
+    Parm Var    : SVFromDate       : Date   : @@${p}FromDateFormula
+    Parm Var    : SVToDate         : Date   : @@${p}ToDateFormula
     Fetch       : MasterID, GUID, AlterID, Date, VoucherNumber, VoucherTypeName, PartyLedgerName, PartyMobileNo, Amount, BasicDueDateOfPymt, Narration, IsCancelled, IsOptional
     Fetch       : LedgerEntries.Amount, AllLedgerEntries.Amount, LedgerEntries.BillAllocations.Name, AllLedgerEntries.BillAllocations.Name
     Filter      : ${p}SyncableSavedVoucher
@@ -4669,7 +5274,7 @@ ${voucherDeleteCancelDefinitions}
     Variable : RSLPingStatus : String : ""
     Variable : RSLPingMsg    : String : ""
     Variable : RSLDisplayMsg : String : ""
-    01 : Start Progress : 1 : "${brandSyncTitle}" : ##SVCurrentCompany : "Verifying cloud connection..."
+    01 : Start Progress : 1 : "${brandSyncTitle}" : ##SVCurrentCompany : "Verifying cloud connection & open companies..."
     02 : Show Progress  : 0
     03 : Walk Collection : ${p}CloudPingCheck
     04 :     Set : RSLPingStatus : $RSLOkStatus
@@ -4686,7 +5291,7 @@ ${voucherDeleteCancelDefinitions}
     15 :         Msg Box : "${brandSyncTitle} - Action Needed" : ##RSLDisplayMsg
     16 :     Else
     17 :         If : ##RSLPingMsg = ""
-    18 :             Set : RSLDisplayMsg : "Connected via ${brandSyncTitle}! Live voucher & paid-bill sync is active."
+    18 :             Set : RSLDisplayMsg : "Connected via ${brandSyncTitle}! Live voucher, product & multi-company sync is active."
     19 :         Else
     20 :             Set : RSLDisplayMsg : ##RSLPingMsg
     21 :         End If
@@ -4700,7 +5305,31 @@ ${voucherDeleteCancelDefinitions}
     RemoteRequest   : ${p}VoucherJsonReport : UTF-8
     JSON Object Path: "tallyResult:1"
     Header          : "Content-Type: application/json; charset=utf-8"
-    Header          : "User-Agent: TallyPrime-RSL-TDL/2.7"${tokenHeaderLine}
+    Header          : "User-Agent: TallyPrime-RSL-TDL/2.8"${tokenHeaderLine}
+    Fetch           : RSLOkStatus, RSLMessage
+
+[Collection: ${p}CloudSingleStockPost]
+    Data Source     : HTTP JSON : "${mastersUrl}"
+    RemoteRequest   : ${p}SingleStockJsonReport : UTF-8
+    JSON Object Path: "tallyResult:1"
+    Header          : "Content-Type: application/json; charset=utf-8"
+    Header          : "User-Agent: TallyPrime-RSL-TDL/2.8"${tokenHeaderLine}
+    Fetch           : RSLOkStatus, RSLMessage
+
+[Collection: ${p}CloudSingleLedgerPost]
+    Data Source     : HTTP JSON : "${mastersUrl}"
+    RemoteRequest   : ${p}SingleLedgerJsonReport : UTF-8
+    JSON Object Path: "tallyResult:1"
+    Header          : "Content-Type: application/json; charset=utf-8"
+    Header          : "User-Agent: TallyPrime-RSL-TDL/2.8"${tokenHeaderLine}
+    Fetch           : RSLOkStatus, RSLMessage
+
+[Collection: ${p}CloudBulkMastersPost]
+    Data Source     : HTTP JSON : "${mastersUrl}"
+    RemoteRequest   : ${p}BulkCompanyMastersJsonReport : UTF-8
+    JSON Object Path: "tallyResult:1"
+    Header          : "Content-Type: application/json; charset=utf-8"
+    Header          : "User-Agent: TallyPrime-RSL-TDL/2.8"${tokenHeaderLine}
     Fetch           : RSLOkStatus, RSLMessage
 
 [Collection: ${p}CloudReconcilePost]
@@ -4708,7 +5337,7 @@ ${voucherDeleteCancelDefinitions}
     RemoteRequest   : ${p}ReconcileJsonReport : UTF-8
     JSON Object Path: "tallyResult:1"
     Header          : "Content-Type: application/json; charset=utf-8"
-    Header          : "User-Agent: TallyPrime-RSL-TDL/2.7"${tokenHeaderLine}
+    Header          : "User-Agent: TallyPrime-RSL-TDL/2.8"${tokenHeaderLine}
     Fetch           : RSLOkStatus, RSLMessage, RSLDeletedCount
 
 [Collection: ${p}CloudPingCheck]
@@ -4716,15 +5345,16 @@ ${voucherDeleteCancelDefinitions}
     RemoteRequest   : ${p}PingJsonReport : UTF-8
     JSON Object Path: "tallyResult:1"
     Header          : "Content-Type: application/json; charset=utf-8"
-    Header          : "User-Agent: TallyPrime-RSL-TDL/2.7"${tokenHeaderLine}
+    Header          : "User-Agent: TallyPrime-RSL-TDL/2.8"${tokenHeaderLine}
     Fetch           : RSLOkStatus, RSLMessage
 
 [Report: ${p}PingJsonReport]
-    Form        : ${p}PingJsonForm
-    Plain JSON  : Yes
+    Form                : ${p}PingJsonForm
+    Plain JSON          : Yes
+    Export Empty Fields : Yes
 
 [Form: ${p}PingJsonForm]
-    Parts       : ${p}PingJsonPart
+    Parts       : ${p}PingJsonPart, ${p}PingOpenCompsPart
 
 [Part: ${p}PingJsonPart]
     Lines       : ${p}PingJsonLine
@@ -4740,6 +5370,27 @@ ${voucherDeleteCancelDefinitions}
 [Field: ${p}PingCompany]
     Set As      : ##SVCurrentCompany
     JSONTag     : "companyName"
+
+[Part: ${p}PingOpenCompsPart]
+    Lines       : ${p}PingOpenCompLine
+    Repeat      : ${p}PingOpenCompLine : ${p}OpenCompaniesColl
+    Scroll      : Vertical
+
+[Line: ${p}PingOpenCompLine]
+    Fields      : ${p}PingOpenCompName, ${p}PingOpenCompGuid, ${p}PingOpenCompStart
+    JSONTag     : "openCompanies"
+
+[Field: ${p}PingOpenCompName]
+    Set As      : $Name
+    JSONTag     : "name"
+
+[Field: ${p}PingOpenCompGuid]
+    Set As      : $GUID
+    JSONTag     : "guid"
+
+[Field: ${p}PingOpenCompStart]
+    Set As      : @@${p}CompStartDateStr
+    JSONTag     : "startingFrom"
 
 [Report: ${p}ReconcileJsonReport]
     Form                : ${p}ReconcileJsonForm
@@ -4768,13 +5419,393 @@ ${voucherDeleteCancelDefinitions}
     Set As      : ##${p}VSyncBatch
     JSONTag     : "syncBatchId"
 
+[Report: ${p}SingleStockJsonReport]
+    Form                : ${p}SingleStockJsonForm
+    Plain JSON          : Yes
+    Export Empty Fields : Yes
+
+[Form: ${p}SingleStockJsonForm]
+    Parts       : ${p}SingleStockRootPart, ${p}SingleStockBodyPart
+
+[Part: ${p}SingleStockRootPart]
+    Lines       : ${p}SingleStockRootLine
+    Scroll      : Vertical
+
+[Line: ${p}SingleStockRootLine]
+    Fields      : ${p}SMMode, ${p}SMCompany
+
+[Field: ${p}SMMode]
+    Set As      : "masters"
+    JSONTag     : "mode"
+
+[Field: ${p}SMCompany]
+    Set As      : ##${p}SCompany
+    JSONTag     : "companyName"
+
+[Part: ${p}SingleStockBodyPart]
+    Lines       : ${p}SingleStockBodyLine
+    Scroll      : Vertical
+    JSONTag     : "stockItem"
+
+[Line: ${p}SingleStockBodyLine]
+    Fields      : ${p}SMGuid, ${p}SMMasterId, ${p}SMAlterId, ${p}SMName, ${p}SMGroup, ${p}SMCat, ${p}SMUom, ${p}SMPartNo, ${p}SMHsn, ${p}SMGst, ${p}SMSell, ${p}SMCost, ${p}SMOpenQty, ${p}SMOpenVal, ${p}SMCloseQty, ${p}SMCloseRate, ${p}SMCloseVal, ${p}SMReorder
+
+[Field: ${p}SMGuid]
+    Set As      : ##${p}SGuid
+    JSONTag     : "guid"
+
+[Field: ${p}SMMasterId]
+    Set As      : ##${p}SMasterId
+    JSONTag     : "masterId"
+
+[Field: ${p}SMAlterId]
+    Set As      : ##${p}SAlterId
+    JSONTag     : "alterId"
+
+[Field: ${p}SMName]
+    Set As      : ##${p}SName
+    JSONTag     : "name"
+
+[Field: ${p}SMGroup]
+    Set As      : ##${p}SGroup
+    JSONTag     : "stockGroup"
+
+[Field: ${p}SMCat]
+    Set As      : ##${p}SCategory
+    JSONTag     : "stockCategory"
+
+[Field: ${p}SMUom]
+    Set As      : ##${p}SUom
+    JSONTag     : "uom"
+
+[Field: ${p}SMPartNo]
+    Set As      : ##${p}SPartNo
+    JSONTag     : "partNumber"
+
+[Field: ${p}SMHsn]
+    Set As      : ##${p}SHsn
+    JSONTag     : "hsnCode"
+
+[Field: ${p}SMGst]
+    Set As      : ##${p}SGstRate
+    JSONTag     : "gstRatePct"
+
+[Field: ${p}SMSell]
+    Set As      : ##${p}SSellPrice
+    JSONTag     : "sellingPriceRupees"
+
+[Field: ${p}SMCost]
+    Set As      : ##${p}SCostPrice
+    JSONTag     : "costPriceRupees"
+
+[Field: ${p}SMOpenQty]
+    Set As      : ##${p}SOpenQty
+    JSONTag     : "openingQty"
+
+[Field: ${p}SMOpenVal]
+    Set As      : ##${p}SOpenVal
+    JSONTag     : "openingValueRupees"
+
+[Field: ${p}SMCloseQty]
+    Set As      : ##${p}SCloseQty
+    JSONTag     : "closingQty"
+
+[Field: ${p}SMCloseRate]
+    Set As      : ##${p}SCloseRate
+    JSONTag     : "closingRateRupees"
+
+[Field: ${p}SMCloseVal]
+    Set As      : ##${p}SCloseVal
+    JSONTag     : "closingValueRupees"
+
+[Field: ${p}SMReorder]
+    Set As      : ##${p}SReorder
+    JSONTag     : "reorderLevelQty"
+
+[Report: ${p}SingleLedgerJsonReport]
+    Form                : ${p}SingleLedgerJsonForm
+    Plain JSON          : Yes
+    Export Empty Fields : Yes
+
+[Form: ${p}SingleLedgerJsonForm]
+    Parts       : ${p}SingleLedgerRootPart, ${p}SingleLedgerBodyPart
+
+[Part: ${p}SingleLedgerRootPart]
+    Lines       : ${p}SingleLedgerRootLine
+    Scroll      : Vertical
+
+[Line: ${p}SingleLedgerRootLine]
+    Fields      : ${p}LMMode, ${p}LMCompany
+
+[Field: ${p}LMMode]
+    Set As      : "masters"
+    JSONTag     : "mode"
+
+[Field: ${p}LMCompany]
+    Set As      : ##${p}LCompany
+    JSONTag     : "companyName"
+
+[Part: ${p}SingleLedgerBodyPart]
+    Lines       : ${p}SingleLedgerBodyLine
+    Scroll      : Vertical
+    JSONTag     : "partyLedger"
+
+[Line: ${p}SingleLedgerBodyLine]
+    Fields      : ${p}LMGuid, ${p}LMName, ${p}LMGroup, ${p}LMPhone, ${p}LMEmail, ${p}LMGstin, ${p}LMPan, ${p}LMContact, ${p}LMState, ${p}LMPincode, ${p}LMCreditLim, ${p}LMCreditDays, ${p}LMOpenBal, ${p}LMCloseBal
+
+[Field: ${p}LMGuid]
+    Set As      : ##${p}LGuid
+    JSONTag     : "guid"
+
+[Field: ${p}LMName]
+    Set As      : ##${p}LName
+    JSONTag     : "name"
+
+[Field: ${p}LMGroup]
+    Set As      : ##${p}LGroup
+    JSONTag     : "parentGroup"
+
+[Field: ${p}LMPhone]
+    Set As      : ##${p}LPhone
+    JSONTag     : "phone"
+
+[Field: ${p}LMEmail]
+    Set As      : ##${p}LEmail
+    JSONTag     : "email"
+
+[Field: ${p}LMGstin]
+    Set As      : ##${p}LGstin
+    JSONTag     : "gstin"
+
+[Field: ${p}LMPan]
+    Set As      : ##${p}LPan
+    JSONTag     : "pan"
+
+[Field: ${p}LMContact]
+    Set As      : ##${p}LContact
+    JSONTag     : "contactPerson"
+
+[Field: ${p}LMState]
+    Set As      : ##${p}LState
+    JSONTag     : "stateName"
+
+[Field: ${p}LMPincode]
+    Set As      : ##${p}LPincode
+    JSONTag     : "pincode"
+
+[Field: ${p}LMCreditLim]
+    Set As      : ##${p}LCreditLimit
+    JSONTag     : "creditLimitRupees"
+
+[Field: ${p}LMCreditDays]
+    Set As      : ##${p}LCreditDays
+    JSONTag     : "creditDays"
+
+[Field: ${p}LMOpenBal]
+    Set As      : ##${p}LOpenBal
+    JSONTag     : "openingBalanceRupees"
+
+[Field: ${p}LMCloseBal]
+    Set As      : ##${p}LCloseBal
+    JSONTag     : "closingBalanceRupees"
+
+[Report: ${p}BulkCompanyMastersJsonReport]
+    Form                : ${p}BulkCompanyMastersJsonForm
+    Plain JSON          : Yes
+    Export Empty Fields : Yes
+
+[Form: ${p}BulkCompanyMastersJsonForm]
+    Parts       : ${p}BulkMastersHeaderPart, ${p}BulkGodownsPart, ${p}BulkStockItemsPart, ${p}BulkPartyLedgersPart
+
+[Part: ${p}BulkMastersHeaderPart]
+    Lines       : ${p}BulkMastersHeaderLine
+    Scroll      : Vertical
+
+[Line: ${p}BulkMastersHeaderLine]
+    Fields      : ${p}BMMode, ${p}BMCompany
+
+[Field: ${p}BMMode]
+    Set As      : "masters"
+    JSONTag     : "mode"
+
+[Field: ${p}BMCompany]
+    Set As      : ##${p}VCompany
+    JSONTag     : "companyName"
+
+[Part: ${p}BulkGodownsPart]
+    Lines       : ${p}BulkGodownLine
+    Repeat      : ${p}BulkGodownLine : ${p}ExistingGodownsColl
+    Scroll      : Vertical
+
+[Line: ${p}BulkGodownLine]
+    Fields      : ${p}BGGuid, ${p}BGName, ${p}BGParent
+    JSONTag     : "godowns"
+
+[Field: ${p}BGGuid]
+    Set As      : $GUID
+    JSONTag     : "guid"
+
+[Field: ${p}BGName]
+    Set As      : $Name
+    JSONTag     : "name"
+
+[Field: ${p}BGParent]
+    Set As      : $Parent
+    JSONTag     : "parentName"
+
+[Part: ${p}BulkStockItemsPart]
+    Lines       : ${p}BulkStockItemLine
+    Repeat      : ${p}BulkStockItemLine : ${p}ExistingStockItemsColl
+    Scroll      : Vertical
+
+[Line: ${p}BulkStockItemLine]
+    Fields      : ${p}BSGuid, ${p}BSMasterId, ${p}BSAlterId, ${p}BSName, ${p}BSGroup, ${p}BSCat, ${p}BSUom, ${p}BSPartNo, ${p}BSHsn, ${p}BSGst, ${p}BSSell, ${p}BSCost, ${p}BSOpenQty, ${p}BSOpenVal, ${p}BSCloseQty, ${p}BSCloseRate, ${p}BSCloseVal, ${p}BSReorder
+    JSONTag     : "stockItems"
+
+[Field: ${p}BSGuid]
+    Set As      : $GUID
+    JSONTag     : "guid"
+
+[Field: ${p}BSMasterId]
+    Set As      : @@${p}FormMasterIdStr
+    JSONTag     : "masterId"
+
+[Field: ${p}BSAlterId]
+    Set As      : @@${p}FormAlterIdStr
+    JSONTag     : "alterId"
+
+[Field: ${p}BSName]
+    Set As      : $Name
+    JSONTag     : "name"
+
+[Field: ${p}BSGroup]
+    Set As      : $Parent
+    JSONTag     : "stockGroup"
+
+[Field: ${p}BSCat]
+    Set As      : $Category
+    JSONTag     : "stockCategory"
+
+[Field: ${p}BSUom]
+    Set As      : $BaseUnits
+    JSONTag     : "uom"
+
+[Field: ${p}BSPartNo]
+    Set As      : $PartNo
+    JSONTag     : "partNumber"
+
+[Field: ${p}BSHsn]
+    Set As      : @@${p}StockHsnStr
+    JSONTag     : "hsnCode"
+
+[Field: ${p}BSGst]
+    Set As      : @@${p}StockGstRateStr
+    JSONTag     : "gstRatePct"
+
+[Field: ${p}BSSell]
+    Set As      : @@${p}StockSellPriceStr
+    JSONTag     : "sellingPriceRupees"
+
+[Field: ${p}BSCost]
+    Set As      : @@${p}StockCostPriceStr
+    JSONTag     : "costPriceRupees"
+
+[Field: ${p}BSOpenQty]
+    Set As      : @@${p}StockOpenQtyStr
+    JSONTag     : "openingQty"
+
+[Field: ${p}BSOpenVal]
+    Set As      : @@${p}StockOpenValStr
+    JSONTag     : "openingValueRupees"
+
+[Field: ${p}BSCloseQty]
+    Set As      : @@${p}StockCloseQtyStr
+    JSONTag     : "closingQty"
+
+[Field: ${p}BSCloseRate]
+    Set As      : @@${p}StockCloseRateStr
+    JSONTag     : "closingRateRupees"
+
+[Field: ${p}BSCloseVal]
+    Set As      : @@${p}StockCloseValStr
+    JSONTag     : "closingValueRupees"
+
+[Field: ${p}BSReorder]
+    Set As      : @@${p}StockReorderStr
+    JSONTag     : "reorderLevelQty"
+
+[Part: ${p}BulkPartyLedgersPart]
+    Lines       : ${p}BulkPartyLedgerLine
+    Repeat      : ${p}BulkPartyLedgerLine : ${p}ExistingPartyLedgersColl
+    Scroll      : Vertical
+
+[Line: ${p}BulkPartyLedgerLine]
+    Fields      : ${p}BLGuid, ${p}BLName, ${p}BLGroup, ${p}BLPhone, ${p}BLEmail, ${p}BLGstin, ${p}BLPan, ${p}BLContact, ${p}BLState, ${p}BLPincode, ${p}BLCreditLim, ${p}BLCreditDays, ${p}BLOpenBal, ${p}BLCloseBal
+    JSONTag     : "partyLedgers"
+
+[Field: ${p}BLGuid]
+    Set As      : $GUID
+    JSONTag     : "guid"
+
+[Field: ${p}BLName]
+    Set As      : $Name
+    JSONTag     : "name"
+
+[Field: ${p}BLGroup]
+    Set As      : @@${p}LedgerRoleGroupStr
+    JSONTag     : "parentGroup"
+
+[Field: ${p}BLPhone]
+    Set As      : @@${p}LedgerPhoneDirectStr
+    JSONTag     : "phone"
+
+[Field: ${p}BLEmail]
+    Set As      : $EMail
+    JSONTag     : "email"
+
+[Field: ${p}BLGstin]
+    Set As      : @@${p}LedgerGstinStr
+    JSONTag     : "gstin"
+
+[Field: ${p}BLPan]
+    Set As      : $IncomeTaxNumber
+    JSONTag     : "pan"
+
+[Field: ${p}BLContact]
+    Set As      : $LedgerContact
+    JSONTag     : "contactPerson"
+
+[Field: ${p}BLState]
+    Set As      : @@${p}LedgerStateStr
+    JSONTag     : "stateName"
+
+[Field: ${p}BLPincode]
+    Set As      : $PinCode
+    JSONTag     : "pincode"
+
+[Field: ${p}BLCreditLim]
+    Set As      : @@${p}LedgerCreditLimitStr
+    JSONTag     : "creditLimitRupees"
+
+[Field: ${p}BLCreditDays]
+    Set As      : @@${p}LedgerCreditDaysStr
+    JSONTag     : "creditDays"
+
+[Field: ${p}BLOpenBal]
+    Set As      : @@${p}LedgerOpenSignedStr
+    JSONTag     : "openingBalanceRupees"
+
+[Field: ${p}BLCloseBal]
+    Set As      : @@${p}LedgerCloseSignedStr
+    JSONTag     : "closingBalanceRupees"
+
 [Report: ${p}VoucherJsonReport]
     Form                : ${p}VoucherJsonForm
     Plain JSON          : Yes
     Export Empty Fields : Yes
 
 [Form: ${p}VoucherJsonForm]
-    Parts       : ${p}VoucherJsonPart
+    Parts       : ${p}VoucherJsonPart, ${p}VoucherItemsJsonPart, ${p}VoucherBillsJsonPart
     JSONTag     : "bill"
 
 [Part: ${p}VoucherJsonPart]
@@ -4782,7 +5813,7 @@ ${voucherDeleteCancelDefinitions}
     Scroll      : Vertical
 
 [Line: ${p}VoucherJsonLine]
-    Fields      : ${p}Guid, ${p}MasterId, ${p}AlterId, ${p}Company, ${p}VchNo, ${p}VchType, ${p}BaseType, ${p}Party, ${p}PartyGroup, ${p}Phone, ${p}Amount, ${p}Date, ${p}DueDate, ${p}AgstBill, ${p}NarrationField, ${p}Cancelled, ${p}Deleted, ${p}Optional, ${p}SyncBatch
+    Fields      : ${p}Guid, ${p}MasterId, ${p}AlterId, ${p}Company, ${p}VchNo, ${p}VchType, ${p}BaseType, ${p}Party, ${p}PartyGroup, ${p}Phone, ${p}Amount, ${p}Date, ${p}DueDate, ${p}AgstBill, ${p}NarrationField, ${p}Cancelled, ${p}Deleted, ${p}Optional, ${p}InAlterField, ${p}SyncBatch
 
 [Field: ${p}Guid]
     Set As      : ##${p}VGuid
@@ -4856,9 +5887,75 @@ ${voucherDeleteCancelDefinitions}
     Set As      : ##${p}VOptional
     JSONTag     : "isOptional"
 
+[Field: ${p}InAlterField]
+    Set As      : ##${p}VInAlter
+    JSONTag     : "inAlterMode"
+
 [Field: ${p}SyncBatch]
     Set As      : ##${p}VSyncBatch
     JSONTag     : "syncBatchId"
+
+[Part: ${p}VoucherItemsJsonPart]
+    Lines       : ${p}VoucherItemJsonLine
+    Repeat      : ${p}VoucherItemJsonLine : ${p}CurrentVoucherInvLinesColl
+    Scroll      : Vertical
+
+[Line: ${p}VoucherItemJsonLine]
+    Fields      : ${p}VIItemName, ${p}VIBilledQty, ${p}VIActualQty, ${p}VIRate, ${p}VIDisc, ${p}VIAmt, ${p}VIGodown, ${p}VIBatch
+    JSONTag     : "lineItems"
+
+[Field: ${p}VIItemName]
+    Set As      : $RSLItemName
+    JSONTag     : "itemName"
+
+[Field: ${p}VIBilledQty]
+    Set As      : $RSLBilledQty
+    JSONTag     : "billedQty"
+
+[Field: ${p}VIActualQty]
+    Set As      : $RSLActualQty
+    JSONTag     : "actualQty"
+
+[Field: ${p}VIRate]
+    Set As      : $RSLRate
+    JSONTag     : "rate"
+
+[Field: ${p}VIDisc]
+    Set As      : $RSLDiscount
+    JSONTag     : "discount"
+
+[Field: ${p}VIAmt]
+    Set As      : $RSLAmount
+    JSONTag     : "amount"
+
+[Field: ${p}VIGodown]
+    Set As      : $RSLGodown
+    JSONTag     : "godownName"
+
+[Field: ${p}VIBatch]
+    Set As      : $RSLBatch
+    JSONTag     : "batchName"
+
+[Part: ${p}VoucherBillsJsonPart]
+    Lines       : ${p}VoucherBillJsonLine
+    Repeat      : ${p}VoucherBillJsonLine : ${p}CurrentVoucherBillAllocColl
+    Scroll      : Vertical
+
+[Line: ${p}VoucherBillJsonLine]
+    Fields      : ${p}VBBillName, ${p}VBBillType, ${p}VBBillAmt
+    JSONTag     : "billAllocations"
+
+[Field: ${p}VBBillName]
+    Set As      : $RSLBillName
+    JSONTag     : "billName"
+
+[Field: ${p}VBBillType]
+    Set As      : $RSLBillType
+    JSONTag     : "billType"
+
+[Field: ${p}VBBillAmt]
+    Set As      : $RSLBillAmount
+    JSONTag     : "amount"
 `;
 }
 
@@ -4902,7 +5999,7 @@ import os from "node:os";
 import path from "node:path";
 import zlib from "node:zlib";
 
-const AGENT_VERSION = "2.5.0";
+const AGENT_VERSION = "2.6.0";
 const DEFAULT_SERVER_URL = ${JSON.stringify(defaultServer)};
 
 function parseCliFlags(argv) {
@@ -5444,6 +6541,7 @@ async function main() {
       tallyHost,
       tallyPort,
       lastAlterId: 0,
+      companyAlterIds: {},
       exportedPdfAlterIds: {},
       tdlPath: flags["tdl-path"] || null,
       webhookToken: flags["webhook-token"] || null,
@@ -5468,6 +6566,7 @@ async function main() {
   if (flags["tally-port"]) state.tallyPort = tallyPort;
   if (flags["tdl-path"]) state.tdlPath = flags["tdl-path"];
   if (flags["webhook-token"]) state.webhookToken = flags["webhook-token"];
+  if (!state.companyAlterIds) state.companyAlterIds = {};
   if (!state.exportedPdfAlterIds) state.exportedPdfAlterIds = {};
   saveState(state);
 
@@ -5483,6 +6582,7 @@ async function main() {
         tallyHost: state.tallyHost,
         tallyPort: state.tallyPort,
         activeCompanyName: openInfo.companies.join(", ") || null,
+        openCompanies: openInfo.companies,
         lastAlterId: state.lastAlterId || 0,
         lastErrorMessage: openInfo.error,
         agentVersion: AGENT_VERSION,
@@ -5518,17 +6618,20 @@ async function main() {
             voucherPdfs,
           });
           const maxAlter = extractMaxAlterId(xml);
-          if (maxAlter > (state.lastAlterId || 0) || voucherPdfs.length > 0) {
+          const prevCompAlter = Number(state.companyAlterIds[companyName] || 0);
+          if (maxAlter > prevCompAlter || maxAlter > (state.lastAlterId || 0) || voucherPdfs.length > 0) {
+            if (maxAlter > prevCompAlter) state.companyAlterIds[companyName] = maxAlter;
             if (maxAlter > (state.lastAlterId || 0)) state.lastAlterId = maxAlter;
             saveState(state);
           }
           if (
             (syncRes.upserted ?? 0) > 0 ||
             (syncRes.deletedCount ?? 0) > 0 ||
-            (syncRes.stockItemsUpserted ?? 0) > 0
+            (syncRes.stockItemsUpserted ?? 0) > 0 ||
+            (syncRes.partiesUpserted ?? 0) > 0
           ) {
             console.log(
-              \`[RSL Connector] [\${companyName}] Synced \${syncRes.upserted ?? 0} bill(s), \${syncRes.stockItemsUpserted ?? 0} stock item(s), \${voucherPdfs.length} native Tally PDF(s), removed \${syncRes.deletedCount ?? 0} deleted bill(s)\`
+              \`[RSL Connector] [\${companyName}] Synced \${syncRes.upserted ?? 0} bill(s), \${syncRes.stockItemsUpserted ?? 0} product(s), \${syncRes.partiesUpserted ?? 0} party ledger(s), \${voucherPdfs.length} native Tally PDF(s), removed \${syncRes.deletedCount ?? 0} deleted bill(s)\`
             );
           }
         }
@@ -5666,6 +6769,7 @@ export interface IncomingTallyBillItem {
   voucherDate?: string;
   dueDate?: string;
   alterId?: number;
+  inAlterMode?: boolean;
   isCancelled?: boolean;
   isDeleted?: boolean;
   syncBatchId?: string;
@@ -5702,6 +6806,12 @@ function toCompanySlugGuid(companyName: string): string {
   return `comp_${companyName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
 }
 
+function isAutoGeneratedVoucherNumberPlaceholder(vchNo: string): boolean {
+  return /(?:-AUTO$|^VCH-\d+$|^(?:SALES|RECEIPT|PAYMENT|PURCHASE|CREDITNOTE|DEBITNOTE)-\d+$)/i.test(
+    vchNo.trim()
+  );
+}
+
 function resolveCanonicalVoucherGuid(
   db: ReturnType<typeof tenantDataDb>,
   companyId: string,
@@ -5710,65 +6820,146 @@ function resolveCanonicalVoucherGuid(
   rawMasterId: string | undefined,
   voucherType: string,
   voucherNumber: string,
-  partyName?: string
-): string {
+  partyName?: string,
+  opts?: {
+    inAlterMode?: boolean;
+    isAuthoritativeSource?: boolean;
+    isMutationFlag?: boolean;
+  }
+): { guid: string; collidedWithDifferentBillNumber: boolean } {
   const trimmed = rawGuid?.trim() ?? "";
   const cleanMasterId = (rawMasterId?.replace(/\D/g, "") ?? "").replace(/^0+$/, "");
+  const normIncomingVchNo = voucherNumber.trim().toLowerCase();
+  const canReassignVoucherNumber = Boolean(
+    opts?.inAlterMode || opts?.isAuthoritativeSource || opts?.isMutationFlag
+  );
+
+  let collidedWithDifferentBillNumber = false;
 
   if (trimmed) {
     const scoped = `${companyGuid}::${trimmed}`;
     const existingScoped = db
-      .select({ id: tenantDataSchema.tallyVouchers.id })
+      .select({
+        id: tenantDataSchema.tallyVouchers.id,
+        voucherNumber: tenantDataSchema.tallyVouchers.voucherNumber,
+      })
       .from(tenantDataSchema.tallyVouchers)
       .where(eq(tenantDataSchema.tallyVouchers.guid, scoped))
       .get();
     if (existingScoped) {
-      return scoped;
+      const existingNormNo = existingScoped.voucherNumber.trim().toLowerCase();
+      if (
+        existingNormNo === normIncomingVchNo ||
+        canReassignVoucherNumber ||
+        isAutoGeneratedVoucherNumberPlaceholder(existingScoped.voucherNumber)
+      ) {
+        return { guid: scoped, collidedWithDifferentBillNumber: false };
+      }
+      // Non-Destructive Bill Number Collision Shield:
+      // An older .tdl (<= v2.7) in Create Mode accidentally sent an earlier bill's GUID (e.g. Bill #8)
+      // when creating Bill #9. NEVER overwrite Bill #8 — allocate a separate canonical key for Bill #9!
+      collidedWithDifferentBillNumber = true;
     }
 
-    const existingRaw = db
-      .select({
-        id: tenantDataSchema.tallyVouchers.id,
-        companyId: tenantDataSchema.tallyVouchers.companyId,
-      })
-      .from(tenantDataSchema.tallyVouchers)
-      .where(eq(tenantDataSchema.tallyVouchers.guid, trimmed))
-      .get();
-    if (existingRaw) {
-      return existingRaw.companyId === companyId ? trimmed : scoped;
-    }
-
-    // If this voucher was previously saved without GUID under its MasterID, upgrade its GUID in place!
-    if (cleanMasterId) {
-      const prevByMaster = db
+    if (!collidedWithDifferentBillNumber) {
+      const existingRaw = db
         .select({
           id: tenantDataSchema.tallyVouchers.id,
-          guid: tenantDataSchema.tallyVouchers.guid,
+          companyId: tenantDataSchema.tallyVouchers.companyId,
+          voucherNumber: tenantDataSchema.tallyVouchers.voucherNumber,
         })
+        .from(tenantDataSchema.tallyVouchers)
+        .where(eq(tenantDataSchema.tallyVouchers.guid, trimmed))
+        .get();
+      if (existingRaw) {
+        if (existingRaw.companyId !== companyId) {
+          return { guid: scoped, collidedWithDifferentBillNumber: false };
+        }
+        const existingNormNo = existingRaw.voucherNumber.trim().toLowerCase();
+        if (
+          existingNormNo === normIncomingVchNo ||
+          canReassignVoucherNumber ||
+          isAutoGeneratedVoucherNumberPlaceholder(existingRaw.voucherNumber)
+        ) {
+          return { guid: trimmed, collidedWithDifferentBillNumber: false };
+        }
+        collidedWithDifferentBillNumber = true;
+      }
+    }
+
+    if (!collidedWithDifferentBillNumber) {
+      // Check if trimmed GUID is already used by another company (to decide trimmed vs scoped on upgrade)
+      const targetUpgradeGuid = db
+        .select({ id: tenantDataSchema.tallyVouchers.id })
+        .from(tenantDataSchema.tallyVouchers)
+        .where(eq(tenantDataSchema.tallyVouchers.guid, trimmed))
+        .get()
+        ? scoped
+        : trimmed;
+
+      // Upgrade 1: If this voucher was previously saved without GUID under its MasterID, upgrade its GUID in place!
+      if (cleanMasterId) {
+        const prevByMaster = db
+          .select({
+            id: tenantDataSchema.tallyVouchers.id,
+            guid: tenantDataSchema.tallyVouchers.guid,
+            voucherNumber: tenantDataSchema.tallyVouchers.voucherNumber,
+          })
+          .from(tenantDataSchema.tallyVouchers)
+          .where(
+            and(
+              eq(tenantDataSchema.tallyVouchers.companyId, companyId),
+              eq(tenantDataSchema.tallyVouchers.masterId, cleanMasterId)
+            )
+          )
+          .get();
+        if (
+          prevByMaster &&
+          (prevByMaster.guid.startsWith("mid_") || prevByMaster.guid.startsWith("vch_")) &&
+          (prevByMaster.voucherNumber.trim().toLowerCase() === normIncomingVchNo ||
+            canReassignVoucherNumber ||
+            isAutoGeneratedVoucherNumberPlaceholder(prevByMaster.voucherNumber))
+        ) {
+          db.update(tenantDataSchema.tallyVouchers)
+            .set({ guid: targetUpgradeGuid })
+            .where(eq(tenantDataSchema.tallyVouchers.id, prevByMaster.id))
+            .run();
+          return { guid: targetUpgradeGuid, collidedWithDifferentBillNumber: false };
+        }
+      }
+
+      // Upgrade 2: If this voucher was previously saved under a fallback vch_ key (e.g. protected by Collision Shield
+      // or created before GUID arrived), seamlessly upgrade its GUID in place so zero duplicates occur on Sync All Now!
+      const fallbackVchKey = `vch_${companyId}_${voucherType}_${voucherNumber}`;
+      const prevByFallbackVch = db
+        .select({ id: tenantDataSchema.tallyVouchers.id })
         .from(tenantDataSchema.tallyVouchers)
         .where(
           and(
             eq(tenantDataSchema.tallyVouchers.companyId, companyId),
-            eq(tenantDataSchema.tallyVouchers.masterId, cleanMasterId)
+            eq(tenantDataSchema.tallyVouchers.guid, fallbackVchKey)
           )
         )
         .get();
-      if (prevByMaster && (prevByMaster.guid.startsWith("mid_") || prevByMaster.guid.startsWith("vch_"))) {
+      if (prevByFallbackVch) {
         db.update(tenantDataSchema.tallyVouchers)
-          .set({ guid: trimmed })
-          .where(eq(tenantDataSchema.tallyVouchers.id, prevByMaster.id))
+          .set({ guid: targetUpgradeGuid })
+          .where(eq(tenantDataSchema.tallyVouchers.id, prevByFallbackVch.id))
           .run();
-        return trimmed;
+        return { guid: targetUpgradeGuid, collidedWithDifferentBillNumber: false };
       }
-    }
 
-    return trimmed;
+      return { guid: targetUpgradeGuid, collidedWithDifferentBillNumber: false };
+    }
   }
 
-  // Fallback 1: Tally MasterID is strictly unique per voucher within a company
-  if (cleanMasterId) {
+  // Fallback 1: Tally MasterID is strictly unique per voucher within a company (unless collidedWithDifferentBillNumber)
+  if (!collidedWithDifferentBillNumber && cleanMasterId) {
     const existingByMaster = db
-      .select({ guid: tenantDataSchema.tallyVouchers.guid })
+      .select({
+        guid: tenantDataSchema.tallyVouchers.guid,
+        voucherNumber: tenantDataSchema.tallyVouchers.voucherNumber,
+      })
       .from(tenantDataSchema.tallyVouchers)
       .where(
         and(
@@ -5778,12 +6969,24 @@ function resolveCanonicalVoucherGuid(
       )
       .get();
     if (existingByMaster) {
-      return existingByMaster.guid;
+      const existingNormNo = existingByMaster.voucherNumber.trim().toLowerCase();
+      if (
+        existingNormNo === normIncomingVchNo ||
+        canReassignVoucherNumber ||
+        isAutoGeneratedVoucherNumberPlaceholder(existingByMaster.voucherNumber)
+      ) {
+        return { guid: existingByMaster.guid, collidedWithDifferentBillNumber: false };
+      }
+      collidedWithDifferentBillNumber = true;
+    } else {
+      return {
+        guid: `mid_${companyId}_${cleanMasterId}`,
+        collidedWithDifferentBillNumber: false,
+      };
     }
-    return `mid_${companyId}_${cleanMasterId}`;
   }
 
-  // Fallback 2: No GUID and no MasterID — never let unnumbered or cross-party bills overwrite an existing saved bill!
+  // Fallback 2: No GUID / collided stale GUID — never let unnumbered or cross-party bills overwrite an existing saved bill!
   const baseKey = `vch_${companyId}_${voucherType}_${voucherNumber}`;
   const existingBase = db
     .select({
@@ -5796,7 +6999,7 @@ function resolveCanonicalVoucherGuid(
     .get();
 
   if (!existingBase) {
-    return baseKey;
+    return { guid: baseKey, collidedWithDifferentBillNumber };
   }
 
   const isAutoPlaceholder = /(?:-AUTO$|^VCH-\d+$)/i.test(voucherNumber.trim());
@@ -5807,7 +7010,7 @@ function resolveCanonicalVoucherGuid(
     existingBase.partyName.trim().toLowerCase() === cleanParty;
 
   if (isAutoPlaceholder) {
-    return `${baseKey}_${newId().slice(-6)}`;
+    return { guid: `${baseKey}_${newId().slice(-6)}`, collidedWithDifferentBillNumber };
   }
 
   if (!sameParty) {
@@ -5822,12 +7025,12 @@ function resolveCanonicalVoucherGuid(
       .where(eq(tenantDataSchema.tallyVouchers.guid, partyKey))
       .get();
     if (!existingPartyRow || existingPartyRow.partyName.trim().toLowerCase() === cleanParty) {
-      return partyKey;
+      return { guid: partyKey, collidedWithDifferentBillNumber };
     }
-    return `${partyKey}_${newId().slice(-6)}`;
+    return { guid: `${partyKey}_${newId().slice(-6)}`, collidedWithDifferentBillNumber };
   }
 
-  return baseKey;
+  return { guid: baseKey, collidedWithDifferentBillNumber };
 }
 
 function findExistingVoucherForMutation(
@@ -5947,11 +7150,24 @@ export function reconcileTallyCompanySnapshot(params: {
 
   const db = tenantDataDb({ workspaceId: params.workspaceId });
   const companyGuid = toCompanySlugGuid(params.companyName);
-  const company = db
+  let company = db
     .select()
     .from(tenantDataSchema.tallyCompanies)
     .where(eq(tenantDataSchema.tallyCompanies.companyGuid, companyGuid))
     .get();
+
+  if (!company && params.companyName.trim() && params.companyName.trim() !== "Primary Tally Company") {
+    registerTallyCompaniesForWorkspace({
+      workspaceId: params.workspaceId,
+      companies: [params.companyName.trim()],
+      updateLastSyncedAt: true,
+    });
+    company = db
+      .select()
+      .from(tenantDataSchema.tallyCompanies)
+      .where(eq(tenantDataSchema.tallyCompanies.companyGuid, companyGuid))
+      .get();
+  }
 
   if (!company) {
     return { deletedCount: 0, ignoredCompany: false, deletedVoucherNumbers: [] };
@@ -6043,6 +7259,13 @@ export function reconcileTallyCompanySnapshot(params: {
       itemIds: Array.from(affectedInventoryItemIds),
       now,
     });
+  }
+
+  if (deletedVoucherNumbers.length === 0) {
+    db.update(tenantDataSchema.tallyCompanies)
+      .set({ lastSyncedAt: now })
+      .where(eq(tenantDataSchema.tallyCompanies.id, company.id))
+      .run();
   }
 
   if (deletedVoucherNumbers.length > 0) {
@@ -6191,6 +7414,8 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
   upserted: number;
   deletedCount: number;
   stockItemsUpserted: number;
+  godownsUpserted: number;
+  partiesUpserted: number;
   ignoredCompanyCount: number;
   queuedJobs: number;
   skippedOptionalCount: number;
@@ -6244,23 +7469,30 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
   let skippedOptionalCount = 0;
   let ignoredCompanyCount = 0;
   let stockItemsUpserted = 0;
+  let godownsUpserted = 0;
+  let partiesUpserted = 0;
+  let isMastersModePayload = false;
   let detectedCompanyName: string | null = params.fullCompanySnapshot?.companyName?.trim() || null;
   let maxAlterId = 0;
   let xmlHasExplicitDateSpan: boolean | undefined = params.fullCompanySnapshot?.hasExplicitDateSpan;
+  const isXmlPayload = typeof params.rawPayload === "string" && params.rawPayload.trim().startsWith("<");
 
-  if (typeof params.rawPayload === "string" && params.rawPayload.trim().startsWith("<")) {
-    if (/<(?:STOCKITEM|GODOWN|LEDGER|BILL)(?:\s|>)/i.test(params.rawPayload)) {
+  if (isXmlPayload) {
+    const rawXmlStr = params.rawPayload as string;
+    if (/<(?:STOCKITEM|GODOWN|LEDGER|BILL)(?:\s|>)/i.test(rawXmlStr)) {
       const mOut = ingestTallyMastersXmlForWorkspace({
         workspaceId: params.workspaceId,
-        rawXml: params.rawPayload,
+        rawXml: rawXmlStr,
         fallbackCompanyName: params.fullCompanySnapshot?.companyName || defaultCompanyName,
         isCompanyAllowed: (c) => isTallyCompanyAllowed(c, routing),
       });
       stockItemsUpserted += mOut.stockItemsUpserted;
+      godownsUpserted += mOut.godownsUpserted;
+      partiesUpserted += mOut.partiesUpserted;
     }
 
     const parsedXml = parseTallyXmlEnvelope(
-      params.rawPayload,
+      rawXmlStr,
       params.fullCompanySnapshot?.companyName || defaultCompanyName
     );
     skippedOptionalCount = parsedXml.skippedOptionalCount;
@@ -6317,6 +7549,28 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         ? (JSON.parse(params.rawPayload) as Record<string, unknown>)
         : params.rawPayload;
 
+    if (Array.isArray(obj.openCompanies) && obj.openCompanies.length > 0) {
+      registerTallyCompaniesForWorkspace({
+        workspaceId: params.workspaceId,
+        companies: obj.openCompanies as Array<string | { name?: string; guid?: string; startingFrom?: string }>,
+        updateLastSyncedAt: true,
+      });
+    }
+
+    const objMode = typeof obj.mode === "string" ? obj.mode.trim().toLowerCase() : "";
+    if (objMode === "masters") {
+      isMastersModePayload = true;
+      const topComp = typeof obj.companyName === "string" ? obj.companyName.replace(/[\x00-\x1F]+/g, "").trim() : "";
+      if (topComp && topComp !== "Primary Tally Company") {
+        if (!detectedCompanyName) detectedCompanyName = topComp;
+        registerTallyCompaniesForWorkspace({
+          workspaceId: params.workspaceId,
+          companies: [topComp],
+          updateLastSyncedAt: true,
+        });
+      }
+    }
+
     if (typeof obj.mastersXml === "string" && obj.mastersXml.trim().startsWith("<")) {
       const mOut = ingestTallyMastersXmlForWorkspace({
         workspaceId: params.workspaceId,
@@ -6328,6 +7582,32 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         isCompanyAllowed: (c) => isTallyCompanyAllowed(c, routing),
       });
       stockItemsUpserted += mOut.stockItemsUpserted;
+      godownsUpserted += mOut.godownsUpserted;
+      partiesUpserted += mOut.partiesUpserted;
+    }
+
+    if (
+      isMastersModePayload ||
+      obj.stockItems !== undefined ||
+      obj.stockItem !== undefined ||
+      obj.godowns !== undefined ||
+      obj.godown !== undefined ||
+      obj.partyLedgers !== undefined ||
+      obj.partyLedger !== undefined ||
+      obj.billClearances !== undefined
+    ) {
+      const jmOut = ingestTallyMastersJsonForWorkspace({
+        workspaceId: params.workspaceId,
+        payload: obj,
+        fallbackCompanyName:
+          (typeof obj.companyName === "string" && obj.companyName.replace(/[\x00-\x1F]+/g, "").trim()) ||
+          params.fullCompanySnapshot?.companyName ||
+          defaultCompanyName,
+        isCompanyAllowed: (c) => isTallyCompanyAllowed(c, routing),
+      });
+      stockItemsUpserted += jmOut.stockItemsUpserted;
+      godownsUpserted += jmOut.godownsUpserted;
+      partiesUpserted += jmOut.partiesUpserted;
     }
 
     if (Array.isArray(obj.voucherPdfs)) {
@@ -6346,16 +7626,18 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
       }
     }
 
-    const hasInlineVoucherFields = Boolean(
-      obj.voucherNumber ||
-        obj.billNumber ||
-        obj.invoiceNumber ||
-        obj.partyName ||
-        obj.customerName ||
-        obj.amountRupees !== undefined ||
-        obj.amount !== undefined ||
-        obj.guid
-    );
+    const hasInlineVoucherFields =
+      !isMastersModePayload &&
+      Boolean(
+        obj.voucherNumber ||
+          obj.billNumber ||
+          obj.invoiceNumber ||
+          obj.partyName ||
+          obj.customerName ||
+          obj.amountRupees !== undefined ||
+          obj.amount !== undefined ||
+          obj.guid
+      );
 
     const rawList: Array<Record<string, unknown>> = Array.isArray(obj.bills)
       ? (obj.bills as Array<Record<string, unknown>>)
@@ -6368,7 +7650,9 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
             : [];
 
     for (const entry of rawList) {
-      const compName = entry.companyName ? String(entry.companyName).trim() : "";
+      const compName = entry.companyName
+        ? String(entry.companyName).replace(/[\x00-\x1F]+/g, "").trim()
+        : "";
       const effectiveComp = compName || defaultCompanyName;
       if (compName && !detectedCompanyName) detectedCompanyName = compName;
 
@@ -6386,6 +7670,7 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         continue;
       }
 
+      const inAlterMode = /^(yes|true|1)$/i.test(String(entry.inAlterMode ?? ""));
       const isDeleted =
         /^(yes|true|1|deleted|delete)$/i.test(String(entry.isDeleted ?? "")) ||
         /^delete$/i.test(String(entry.action ?? ""));
@@ -6394,7 +7679,9 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
 
       const rawTypeCandidate = String(
         entry.baseVoucherType ?? entry.voucherType ?? entry.type ?? "Sales"
-      ).trim();
+      )
+        .replace(/[\x00-\x1F]+/g, "")
+        .trim();
       if (
         /^(contra|journal|memorandum|reversing\s*journal|stock\s*journal|physical\s*stock|sales\s*order|purchase\s*order|delivery\s*note|receipt\s*note|rejections\s*in|rejections\s*out)$/i.test(
           rawTypeCandidate
@@ -6434,39 +7721,7 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         }
       }
 
-      const rawJsonLines = Array.isArray(entry.lineItems)
-        ? (entry.lineItems as Array<Record<string, unknown>>)
-        : Array.isArray(entry.items)
-          ? (entry.items as Array<Record<string, unknown>>)
-          : [];
-      const parsedJsonLineItems: ParsedTallyVoucherLineItem[] = [];
-      for (const li of rawJsonLines) {
-        const itemName = String(li.itemName ?? li.stockItemName ?? li.name ?? "").trim();
-        if (!itemName) continue;
-        const billedQty = Math.abs(Number(li.billedQty ?? li.qty ?? li.quantity ?? 0));
-        if (!Number.isFinite(billedQty) || billedQty <= 0) continue;
-        const rateRupees = Math.max(0, Number(li.rateRupees ?? li.rate ?? 0) || 0);
-        const discountPct = Math.max(0, Math.min(100, Number(li.discountPct ?? li.discount ?? 0) || 0));
-        const gstRatePct = Math.max(0, Math.min(100, Number(li.gstRatePct ?? li.gstRate ?? 0) || 0));
-        const explicitLineAmt = Number(li.amountRupees ?? li.amount ?? 0);
-        const lineAmountRupees =
-          Number.isFinite(explicitLineAmt) && explicitLineAmt > 0
-            ? explicitLineAmt
-            : Math.round(billedQty * rateRupees * (1 - discountPct / 100) * 100) / 100;
-        parsedJsonLineItems.push({
-          itemName,
-          godownName: li.godownName ? String(li.godownName).trim() : undefined,
-          batchName: li.batchName ? String(li.batchName).trim() : undefined,
-          hsnCode: li.hsnCode ? String(li.hsnCode).trim() : undefined,
-          uom: li.uom ? String(li.uom).trim().toUpperCase() : undefined,
-          billedQty,
-          actualQty: Number(li.actualQty ?? billedQty) || billedQty,
-          rateRupees,
-          discountPct,
-          gstRatePct,
-          amountRupees: lineAmountRupees,
-        });
-      }
+      const parsedJsonLineItems = parseJsonVoucherLineItems(entry.lineItems ?? entry.items);
 
       if (amountRupees <= 0 && parsedJsonLineItems.length > 0) {
         amountRupees =
@@ -6477,7 +7732,9 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
       const rawMasterIdStr = entry.masterId
         ? String(entry.masterId).replace(/\D/g, "").replace(/^0+$/, "")
         : "";
-      const rawPartyName = String(entry.partyName ?? entry.customerName ?? "").trim();
+      const rawPartyName = String(entry.partyName ?? entry.customerName ?? "")
+        .replace(/[\x00-\x1F]+/g, "")
+        .trim();
       let voucherNumber = String(
         entry.voucherNumber ?? entry.billNumber ?? entry.invoiceNumber ?? ""
       ).trim();
@@ -6517,12 +7774,18 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
       const parsedBillAllocations: ParsedTallyBillAllocation[] = [];
       if (Array.isArray(entry.billAllocations)) {
         for (const ba of entry.billAllocations as Array<Record<string, unknown>>) {
-          const bName = String(ba.billName ?? ba.name ?? "").trim();
-          if (!bName) continue;
+          const bName = String(ba.billName ?? ba.name ?? "")
+            .replace(/[\x00-\x1F]+/g, "")
+            .trim();
+          if (!bName || /^not\s*applicable$/i.test(bName)) continue;
+          const rawBillAmtRupees =
+            ba.amountRupees !== undefined || ba.amount !== undefined
+              ? parseTallyNumericAmount(String(ba.amountRupees ?? ba.amount ?? ""))
+              : amountRupees;
           const bAmtPaise =
             ba.amountPaise !== undefined
               ? Math.max(0, Math.round(Number(ba.amountPaise) || 0))
-              : rupeesToPaise(Math.max(0, Number(ba.amountRupees ?? ba.amount ?? amountRupees) || 0));
+              : rupeesToPaise(Math.max(0, rawBillAmtRupees));
           if (bAmtPaise <= 0) continue;
           parsedBillAllocations.push({
             billName: bName,
@@ -6552,11 +7815,20 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         : entry.remarks
           ? String(entry.remarks).trim()
           : undefined;
-      const rawLedgerAcctStr = entry.ledgerAccountName
-        ? String(entry.ledgerAccountName).trim()
+      const cleanedLedgerAcct = entry.ledgerAccountName
+        ? String(entry.ledgerAccountName).replace(/[\x00-\x1F]+/g, "").trim()
         : entry.bankOrCashLedger
-          ? String(entry.bankOrCashLedger).trim()
+          ? String(entry.bankOrCashLedger).replace(/[\x00-\x1F]+/g, "").trim()
+          : "";
+      const rawLedgerAcctStr =
+        cleanedLedgerAcct && !/^not\s*applicable$/i.test(cleanedLedgerAcct)
+          ? cleanedLedgerAcct
           : undefined;
+      const cleanedParentGroup = entry.partyParentGroup
+        ? String(entry.partyParentGroup).replace(/[\x00-\x1F]+/g, "").trim()
+        : entry.ledgerGroup
+          ? String(entry.ledgerGroup).replace(/[\x00-\x1F]+/g, "").trim()
+          : "";
 
       const syncBatchId = entry.syncBatchId ? String(entry.syncBatchId).trim() : undefined;
       const inlinePdfB64 =
@@ -6576,10 +7848,9 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
           entry.baseVoucherType ? String(entry.baseVoucherType) : undefined
         ),
         partyName: rawPartyName || "Customer",
-        partyParentGroup: entry.partyParentGroup
-          ? String(entry.partyParentGroup)
-          : entry.ledgerGroup
-            ? String(entry.ledgerGroup)
+        partyParentGroup:
+          cleanedParentGroup && !/^not\s*applicable$/i.test(cleanedParentGroup)
+            ? cleanedParentGroup
             : undefined,
         partyPhone: entry.partyPhone
           ? String(entry.partyPhone)
@@ -6598,6 +7869,7 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         voucherDate: entry.voucherDate ? String(entry.voucherDate) : undefined,
         dueDate: entry.dueDate ? String(entry.dueDate) : undefined,
         alterId: alterIdVal > 0 ? alterIdVal : undefined,
+        inAlterMode,
         isCancelled,
         isDeleted,
         syncBatchId: syncBatchId || undefined,
@@ -6645,6 +7917,9 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
     items.length === 0 &&
     deletedCount === 0 &&
     stockItemsUpserted === 0 &&
+    godownsUpserted === 0 &&
+    partiesUpserted === 0 &&
+    !isMastersModePayload &&
     incomingPdfPayloads.length === 0 &&
     !params.fullCompanySnapshot
   ) {
@@ -6653,6 +7928,8 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         upserted: 0,
         deletedCount: 0,
         stockItemsUpserted: 0,
+        godownsUpserted: 0,
+        partiesUpserted: 0,
         ignoredCompanyCount,
         queuedJobs: 0,
         skippedOptionalCount,
@@ -6765,7 +8042,7 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
 
     touchedCompanyIds.add(company.id);
 
-    const guid = resolveCanonicalVoucherGuid(
+    const { guid, collidedWithDifferentBillNumber } = resolveCanonicalVoucherGuid(
       db,
       company.id,
       companyGuid,
@@ -6773,7 +8050,13 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
       item.masterId,
       item.voucherType,
       item.voucherNumber,
-      item.partyName
+      item.partyName,
+      {
+        inAlterMode: item.inAlterMode,
+        isAuthoritativeSource:
+          isXmlPayload || Boolean(item.syncBatchId || params.fullCompanySnapshot),
+        isMutationFlag: Boolean(item.isCancelled || item.isDeleted),
+      }
     );
 
     const existingRow = db
@@ -6838,7 +8121,9 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
           : vDate + 15 * 86400_000
         : null;
 
-    const resolvedMasterId = item.masterId || existingRow?.masterId || null;
+    const resolvedMasterId = collidedWithDifferentBillNumber
+      ? null
+      : item.masterId || existingRow?.masterId || null;
     const resolvedCurrency = item.originalCurrency || existingRow?.originalCurrency || "INR";
     const resolvedOrigMinor =
       item.originalAmountMinor !== undefined
@@ -7080,8 +8365,9 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
     }
   }
 
-  const totalMutated = savedVouchers.length + deletedCount + stockItemsUpserted;
-  if (totalMutated > 0) {
+  const totalMutated =
+    savedVouchers.length + deletedCount + stockItemsUpserted + godownsUpserted + partiesUpserted;
+  if (totalMutated > 0 || isMastersModePayload) {
     db.insert(tenantDataSchema.syncRuns)
       .values({
         id: newEntityId("sync", params.workspaceId, now),
@@ -7096,10 +8382,14 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
 
     if (params.sourceLabel !== "agent") {
       const endpoint = getOrCreateTallyWebhookEndpoint(params.workspaceId);
+      const addedEvents = Math.max(
+        1,
+        savedVouchers.length + deletedCount + (stockItemsUpserted + partiesUpserted + godownsUpserted > 0 ? 1 : 0)
+      );
       ctrl
         .update(controlSchema.tallyWebhookEndpoints)
         .set({
-          eventsReceivedCount: endpoint.eventsReceivedCount + savedVouchers.length + deletedCount,
+          eventsReceivedCount: endpoint.eventsReceivedCount + addedEvents,
           lastEventAt: now,
           ...(params.sourceIp ? { lastSourceIp: params.sourceIp.slice(0, 120) } : {}),
           ...(params.userAgent ? { lastUserAgent: params.userAgent.slice(0, 180) } : {}),
@@ -7154,7 +8444,11 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
       correlationId,
       durationMs: 9,
       summary: `Synced ${savedVouchers.length} Tally bill(s)${
-        stockItemsUpserted > 0 ? `, ${stockItemsUpserted} stock item(s)` : ""
+        stockItemsUpserted > 0 ? `, ${stockItemsUpserted} product(s)` : ""
+      }${
+        partiesUpserted > 0 ? `, ${partiesUpserted} party ledger(s)` : ""
+      }${
+        godownsUpserted > 0 ? `, ${godownsUpserted} godown(s)` : ""
       }${
         deletedCount > 0 ? `, removed ${deletedCount} deleted bill(s)` : ""
       } via ${params.sourceLabel ?? "webhook"} (${queuedJobs} WhatsApp message(s) queued)`,
@@ -7165,6 +8459,8 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
     upserted: savedVouchers.length,
     deletedCount,
     stockItemsUpserted,
+    godownsUpserted,
+    partiesUpserted,
     ignoredCompanyCount,
     queuedJobs,
     skippedOptionalCount,
@@ -7505,6 +8801,14 @@ export async function syncLocalTallyPort9000ForWorkspace(params: {
 
   const routing = getTallyCompanyRoutingConfig(params.workspaceId);
   const allowedOpenCompanies = openCompanies.filter((c) => isTallyCompanyAllowed(c, routing));
+
+  if (allowedOpenCompanies.length > 0) {
+    registerTallyCompaniesForWorkspace({
+      workspaceId: params.workspaceId,
+      companies: allowedOpenCompanies,
+      updateLastSyncedAt: true,
+    });
+  }
 
   await syncLocalTallyInventoryMastersFromPort9000({
     workspaceId: params.workspaceId,

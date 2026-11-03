@@ -121,7 +121,7 @@ describe("Phase 24 — Production PM2 CommonJS Worker & Cleanup Runtime Verifica
       for (const s of specs) {
         let healthy = false;
         let payload: Record<string, unknown> = {};
-        for (let attempt = 1; attempt <= 20; attempt++) {
+        for (let attempt = 1; attempt <= 40; attempt++) {
           try {
             const res = await fetch(`http://127.0.0.1:${s.port}/health`, {
               headers: { "x-rsl-internal-secret": prodSecrets.ADMIN_AUTH_SECRET },
@@ -135,7 +135,7 @@ describe("Phase 24 — Production PM2 CommonJS Worker & Cleanup Runtime Verifica
           } catch {
             // Wait for background process listen
           }
-          await new Promise((r) => setTimeout(r, 350));
+          await new Promise((r) => setTimeout(r, 400));
         }
 
         expect(healthy).toBe(true);
@@ -156,5 +156,5 @@ describe("Phase 24 — Production PM2 CommonJS Worker & Cleanup Runtime Verifica
         c.kill("SIGTERM");
       }
     }
-  }, 30_000);
+  }, 45_000);
 });

@@ -745,7 +745,7 @@ export function TallyConnectStudio({
           {isLocalDev && normalizedLocalBase && (
             <div className="rounded-xl border border-sky-200/90 bg-sky-50/75 px-3.5 py-2.5 text-[11px] leading-relaxed text-sky-950">
               <strong>Local Environment Notice:</strong> You are running locally. The{" "}
-              <code className="font-mono">.tdl v2.5</code> add-on automatically uses{" "}
+              <code className="font-mono">.tdl v2.8</code> add-on automatically uses{" "}
               <code className="font-mono font-semibold">{normalizedLocalBase}</code> (IPv4{" "}
               <code className="font-mono">127.0.0.1</code>) when{" "}
               <strong>This PC (127.0.0.1:4500)</strong> is selected so Tally Prime&rsquo;s Windows
@@ -837,7 +837,7 @@ export function TallyConnectStudio({
                   outdatedTdl?.isOutdated ? "font-bold text-amber-700" : "text-zinc-500"
                 }`}
               >
-                {webhookEndpoint.lastUserAgent || "TallyPrime-RSL-TDL/2.7"}
+                {webhookEndpoint.lastUserAgent || "TallyPrime-RSL-TDL/2.8"}
                 {outdatedTdl?.isOutdated ? ` (Update to v${outdatedTdl.latestVersion})` : ""}
               </div>
             </div>
@@ -1175,17 +1175,17 @@ export function TallyConnectStudio({
 
       {/* 4. DETAILED SETUP GUIDE — TWO CONNECTION METHODS SIDE-BY-SIDE */}
       <div id="setup-guide" className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        {/* METHOD A: PERSONALIZED TALLY PRIME .TDL ADD-ON (v2.7) */}
+        {/* METHOD A: PERSONALIZED TALLY PRIME .TDL ADD-ON (v2.8) */}
         <SectionCard
           title={`Method A — ${personalBrandTitle} Add-On (${personalTdlFilename})`}
-          subtitle="Instant post-commit push on Sales, Receipt, Payment, Credit/Debit Note, Purchase + Auto Paid-in-Tally Sync"
-          action={<StatusPill label="v2.7 • Paid-in-Tally + GUID Safe" tone="emerald" showDot={false} />}
+          subtitle="Instant real-time sync on Bills, Receipts, Products (Stock Items), Client Ledgers, Multi-Company & Paid-in-Tally"
+          action={<StatusPill label="v2.8 • Bills + Products + Multi-Company" tone="emerald" showDot={false} />}
         >
           <div className="space-y-4 text-xs">
             {canManageTally && (
               <div className="flex flex-wrap items-center gap-2">
                 <a href={tdlDownloadHref} className="rsl-btn-primary text-xs">
-                  Download {personalTdlFilename} (v2.7 •{" "}
+                  Download {personalTdlFilename} (v2.8 •{" "}
                   {targetMode === "local" ? "127.0.0.1:4500" : `${workspaceSlug}.tally.${primaryDomain}`}
                   )
                 </a>
@@ -1244,22 +1244,27 @@ export function TallyConnectStudio({
                   , and press <strong>Ctrl + A</strong>.
                 </li>
                 <li>
-                  <strong>Step A — Test Connection:</strong> On <strong>Gateway of Tally</strong>,
-                  click <strong>&ldquo;{menuTestLabel}&rdquo;</strong>. Tally will verify{" "}
-                  <code className="font-mono text-emerald-800">{cleanWebhookEndpoint}</code> and pop
-                  up <strong>{personalBrandTitle} — Connected</strong>.
+                  <strong>Step A — Test Connection &amp; Register Open Companies:</strong> On{" "}
+                  <strong>Gateway of Tally</strong>, click{" "}
+                  <strong>&ldquo;{menuTestLabel}&rdquo;</strong>. Tally verifies{" "}
+                  <code className="font-mono text-emerald-800">{cleanWebhookEndpoint}</code>,
+                  automatically registers every open Tally company, and pops up{" "}
+                  <strong>{personalBrandTitle} — Connected</strong>.
                 </li>
                 <li>
-                  <strong>Step B — Sync &amp; Reconcile All Existing Bills &amp; Receipts:</strong> Click{" "}
-                  <strong>&ldquo;{menuSyncLabel}&rdquo;</strong> on Gateway of Tally (or
-                  press <code className="font-mono">Alt + R</code> in Day Book) to sync all saved
-                  bills, receipts, payments, and settlements!
+                  <strong>Step B — Sync All Products, Ledgers, Bills &amp; Multi-Company Books:</strong>{" "}
+                  Click <strong>&ldquo;{menuSyncLabel}&rdquo;</strong> on Gateway of Tally (or
+                  press <code className="font-mono">Alt + R</code> in Day Book) to sync all Godowns,
+                  Stock Items (Products), Client &amp; Supplier Ledgers, Bills, and Receipts across
+                  every open Tally company in one click!
                 </li>
                 <li>
-                  <strong>Step C — Live Paid-in-Tally, Update, Cancel &amp; Delete:</strong> Every Sales
-                  (F8), Receipt (F6), Payment (F5), Purchase (F9), Credit Note (Alt+F6), or Debit Note (Alt+F5) saved with{" "}
-                  <strong>Ctrl + A</strong>, altered, cancelled with <strong>Alt + X</strong>, or
-                  deleted with <strong>Alt + D</strong> updates your Client Ledgers &amp; Paid status live!
+                  <strong>Step C — Live Products, Ledgers, Bills, Paid-in-Tally &amp; Delete:</strong>{" "}
+                  Creating or altering any <strong>Stock Item</strong> or <strong>Party Ledger</strong>{" "}
+                  (even via <code className="font-mono">Alt + C</code> inside a bill!) or saving any
+                  Sales (F8), Receipt (F6), Payment (F5), Purchase (F9), Credit Note (Alt+F6), or
+                  Debit Note (Alt+F5) with <strong>Ctrl + A</strong> syncs live without ever
+                  overwriting earlier bills!
                 </li>
               </ol>
             </div>
@@ -1268,8 +1273,8 @@ export function TallyConnectStudio({
 
         {/* METHOD B: LOCAL PORT-9000 XML PULL & WINDOWS PC CONNECTOR */}
         <SectionCard
-          title={`Method B — Tally Port 9000 & Windows Connector v2.5 (${devices.length} Paired)`}
-          subtitle="Recommended for Remote Cloud • Syncs Client Ledgers, Inventory, Native Tally PDFs + OTA .tdl updates"
+          title={`Method B — Tally Port 9000 & Windows Connector v2.6 (${devices.length} Paired)`}
+          subtitle="Recommended for Remote Cloud • Syncs Multi-Company Ledgers, Inventory, Native Tally PDFs + OTA .tdl updates"
           action={
             canManageTally ? (
               <div className="flex flex-wrap items-center gap-1.5">
@@ -1404,8 +1409,8 @@ export function TallyConnectStudio({
               </div>
               {devices.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/50 p-4 text-zinc-500">
-                  No Windows PC paired yet. Use Method A (.tdl v2.6) for instant voucher push, or
-                  pair an office PC above for continuous Port 9000 + Inventory + native Tally PDF cloud sync.
+                  No Windows PC paired yet. Use Method A (.tdl v2.8) for instant voucher, product &amp; ledger push, or
+                  pair an office PC above for continuous Port 9000 + Multi-Company + native Tally PDF cloud sync.
                 </div>
               ) : (
                 <div className="divide-y divide-zinc-200/80 rounded-xl border border-zinc-200/90 bg-white">
@@ -1453,6 +1458,112 @@ export function TallyConnectStudio({
         </SectionCard>
       </div>
 
+      {/* 4B. REQUIRED TALLY PRIME F11 / F12 SETTINGS & MULTI-COMPANY CHECKLIST */}
+      <div id="tally-setup-guide">
+        <SectionCard
+          title="Required Tally Prime Settings (F11 / F12 / F3) — Step-by-Step Operations Guide"
+          subtitle="Follow these exact Tally Prime keystrokes once so Products (Stock Items), Selling Prices, Multiple Companies, and Paid-in-Tally Ledgers sync automatically"
+          action={
+            <a
+              href="/guides/tally-sync-and-import"
+              target="_blank"
+              rel="noreferrer"
+              className="rsl-btn-secondary py-1 text-xs"
+            >
+              Open Full Printable Tally Guide →
+            </a>
+          }
+        >
+          <div className="grid grid-cols-1 gap-3.5 text-xs md:grid-cols-2 xl:grid-cols-3">
+            <div className="rounded-xl border border-emerald-200/85 bg-emerald-50/55 p-4">
+              <div className="font-bold text-slate-900">
+                1. Reload {personalTdlFilename} (v2.8) — Zero Bill Overwrite
+              </div>
+              <p className="mt-1.5 leading-relaxed text-zinc-700">
+                Download <strong>{personalTdlFilename} (v2.8)</strong> above and overwrite your
+                existing <code className="font-mono">.tdl</code> file. In Tally Prime, press{" "}
+                <strong>F1 (Help) → TDLs &amp; Add-Ons → F4 (Manage Local TDLs) → Ctrl + A</strong>.
+                Version 2.8 guarantees sequential bills (e.g. Bill #8 then Bill #9) always capture
+                their own unique Tally MasterID &amp; GUID and never overwrite earlier bills.
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/65 p-4">
+              <div className="font-bold text-slate-900">
+                2. Direct Product (Stock Item) Import — F11 &amp; F12 Rates
+              </div>
+              <p className="mt-1.5 leading-relaxed text-zinc-700">
+                In Tally Prime, press <strong>F11 (Features)</strong> → set{" "}
+                <strong>Maintain Inventory = Yes</strong> and{" "}
+                <strong>Enable Goods and Services Tax (GST) = Yes</strong>. When creating/editing a
+                product (<strong>Create → Stock Item</strong> or{" "}
+                <code className="font-mono">Alt + C</code> inside a bill), press{" "}
+                <strong>F12 (Configure)</strong> → set{" "}
+                <strong>Provide Standard Buying and Selling Rates = Yes</strong>. Every{" "}
+                <strong>Ctrl + A</strong> syncs the Product, UOM, HSN, GST %, Selling Price, and
+                Opening Stock directly to <Link href="/inventory" className="font-semibold text-emerald-700 underline">Inventory</Link>!
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/65 p-4">
+              <div className="font-bold text-slate-900">
+                3. Multi-Company Sync — Open All Companies via F3
+              </div>
+              <p className="mt-1.5 leading-relaxed text-zinc-700">
+                Tally Prime exports data for companies currently <strong>open in memory</strong>. If
+                you manage 2+ companies or split financial years, press{" "}
+                <strong>F3 (Company) → Select Company</strong> in Tally Prime to open each company
+                you want synced, then click <strong>&ldquo;{menuSyncLabel}&rdquo;</strong> once.
+                Every open company is detected, isolated, and selectable in the{" "}
+                <strong>Tally Company</strong> bar at the top of the portal.
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/65 p-4">
+              <div className="font-bold text-slate-900">
+                4. Client Ledgers &amp; Auto Paid-in-Tally — F11 Bill-Wise
+              </div>
+              <p className="mt-1.5 leading-relaxed text-zinc-700">
+                Press <strong>F11 → Enable Bill-wise entry = Yes</strong>. Inside each Customer /
+                Supplier Ledger (<strong>Alter → Ledger</strong>), set{" "}
+                <strong>Maintain balances bill-by-bill = Yes</strong>, enter{" "}
+                <strong>Default credit period</strong>, press{" "}
+                <strong>F12 → Provide Contact Details = Yes</strong>, and enter their 10-digit{" "}
+                <strong>Mobile no.</strong> When recording an <strong>F6 Receipt</strong> or{" "}
+                <strong>F5 Payment</strong>, choose <strong>Agst Ref</strong> and pick the bill # to
+                mark it Paid automatically.
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/65 p-4">
+              <div className="font-bold text-slate-900">
+                5. Instant Sync for Existing Products &amp; Ledgers
+              </div>
+              <p className="mt-1.5 leading-relaxed text-zinc-700">
+                Already created hundreds of Stock Items, Godowns, and Party Ledgers in Tally before
+                installing <code className="font-mono">.tdl v2.8</code>? Just click{" "}
+                <strong>&ldquo;{menuSyncLabel}&rdquo;</strong> on Gateway of Tally once — v2.8
+                uploads all existing Godowns, Products, Party Ledgers, and Bills per open company in
+                seconds!
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/65 p-4">
+              <div className="font-bold text-slate-900">
+                6. Untouched Tally PDF Invoices — Port 9000
+              </div>
+              <p className="mt-1.5 leading-relaxed text-zinc-700">
+                To attach your exact Tally-printed Tax Invoice PDF (with logo, GST table &amp;
+                e-Invoice QR) on WhatsApp, press{" "}
+                <strong>F1 → Settings → Connectivity → Client/Server Configuration</strong> → set{" "}
+                <strong>TallyPrime acts as = Both</strong> and <strong>Port = 9000</strong>, and run
+                your 1-Click Windows Connector (<code className="font-mono">{personalInstallerFilename}</code>).
+              </p>
+            </div>
+          </div>
+        </SectionCard>
+      </div>
+
       {/* 5. TROUBLESHOOTING GUIDE: "ENDPOINT VERIFIED, WHY DIDN'T MY BILL REFLECT?" */}
       <SectionCard
         title="Troubleshooting Checklist — “Endpoint Verified, Why Didn’t My Tally Bill Reflect?”"
@@ -1462,11 +1573,11 @@ export function TallyConnectStudio({
           <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/60 p-3.5">
             <div className="flex items-center gap-2 font-semibold text-slate-900">
               <HelpCircle className="h-4 w-4 shrink-0 text-emerald-600" />
-              <span>1. Reload .tdl v2.7 in Tally Memory</span>
+              <span>1. Reload .tdl v2.8 in Tally Memory</span>
             </div>
             <p className="mt-1.5 leading-relaxed text-zinc-600">
               Check <strong>Last Client Source</strong> above — it must show{" "}
-              <code className="font-mono text-slate-900">TallyPrime-RSL-TDL/2.7</code>. Overwrite{" "}
+              <code className="font-mono text-slate-900">TallyPrime-RSL-TDL/2.8</code>. Overwrite{" "}
               <code className="font-mono text-slate-900">{personalTdlFilename}</code> and press{" "}
               <strong>F1 → TDLs &amp; Add-Ons → F4 → Ctrl + A</strong> (press <code className="font-mono">Esc</code>{" "}
               if any old dialog is open).
@@ -1624,9 +1735,9 @@ export function TallyConnectStudio({
               <Activity className="h-4 w-4 shrink-0 text-zinc-400" />
               <span>
                 No voucher sync batches recorded yet. Load{" "}
-                <code className="font-mono text-slate-800">{personalTdlFilename}</code> (v2.7) in
+                <code className="font-mono text-slate-800">{personalTdlFilename}</code> (v2.8) in
                 Tally Prime and click <strong>&ldquo;{menuSyncLabel}&rdquo;</strong> on
-                Gateway of Tally, or save a new Sales bill with{" "}
+                Gateway of Tally, or save a new Sales bill or Stock Item with{" "}
                 <code className="font-mono">Ctrl + A</code>.
               </span>
             </div>

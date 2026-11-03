@@ -145,20 +145,25 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
   },
   {
     routePrefix: "/tally/parties",
-    title: "Managing Client & Supplier Ledgers, Running Balances & Ageing",
+    title: "Managing Client & Supplier Ledgers, Multi-Company Balances & Ageing",
     summary:
       "Track every Sundry Debtor (Customer) and Sundry Creditor (Supplier) synced from Tally Prime with chronological T-account running balances, bill-wise settlements, credit limit monitoring, and PDF statements.",
     estimatedTime: "4 min walkthrough",
     guideSlug: "tally-sync-and-import",
     prerequisites: [
       "Unlock 'All-in-One Tally Prime Sync' in Plans & Wallet.",
-      "Sync vouchers & party masters via your personalized <business>-rsl-sync.tdl v2.7 add-on, Windows Connector v2.5, or Tally XML/CSV import.",
+      "Sync vouchers & party masters via your personalized <business>-rsl-sync.tdl v2.8 add-on, Windows Connector v2.6, or Tally XML/CSV import.",
     ],
     steps: [
       {
-        title: "Filter Debtors, Creditors & 5-Bucket Receivables Ageing",
+        title: "Switch Tally Companies & Filter Debtors, Creditors & 5-Bucket Ageing",
         detail:
-          "Switch between Sundry Debtors (Clients), Sundry Creditors (Suppliers), and 0–15, 16–30, 31–60, 61–90, or 90+ day ageing buckets to spot overdue accounts and credit-limit breaches immediately.",
+          "Use the top Tally Company bar to isolate any synced company (or view All Companies), then filter Sundry Debtors (Clients), Sundry Creditors (Suppliers), and 0–15 to 90+ day ageing buckets.",
+      },
+      {
+        title: "Real-Time Ledger Sync on Ctrl + A in Tally Prime",
+        detail:
+          "With <business>-rsl-sync.tdl v2.8 loaded, creating or altering any Customer/Supplier Ledger in Tally Prime (including pressing Alt + C inside a voucher) pushes their GSTIN, PAN, +91 mobile number, Credit Days, Credit Limit, and Opening Balance live.",
       },
       {
         title: "Open Any Client for T-Account Running Balance & Bill-Wise Trail",
@@ -172,19 +177,19 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       },
     ],
     commonMistakes: [
-      "Expecting an invoice paid in Tally to stay unpaid — ensure Receipts/Payments in Tally use 'Agst Ref' against the bill number (or same party ledger for automatic FIFO settlement).",
+      "Expecting an invoice paid in Tally to stay unpaid — ensure F11 -> Enable Bill-wise entry = Yes and Receipts/Payments use 'Agst Ref' against the bill number (or same party ledger for automatic FIFO settlement).",
     ],
   },
   {
     routePrefix: "/tally",
-    title: "Connecting Tally Prime (.tdl v2.7 + Port 9000) & Auto Paid-in-Tally Sync",
+    title: "Connecting Tally Prime (.tdl v2.8 + Port 9000), Products, Multi-Company & Paid Sync",
     summary:
-      "Sync Tally Prime live without overwriting past bills, automatically mark invoices Paid when settled in Tally, preserve your 100% untouched Tally-printed PDF invoice, and automate WhatsApp bills & reminders.",
+      "Sync Tally Prime Bills, Products (Stock Items), Client Ledgers, and Multiple Companies live — with zero bill overwrites, automatic Paid-in-Tally settlements, and 100% untouched Tally-printed PDF invoices.",
     estimatedTime: "8 min setup",
     guideSlug: "tally-sync-and-import",
     prerequisites: [
       "Unlock 'All-in-One Tally Prime Sync' (and 'WhatsApp Business Messaging' for automated WhatsApp delivery) in Plans & Wallet.",
-      "Save each customer's 10-digit Mobile No. inside their Tally Prime Party Ledger (Gateway of Tally -> Alter -> Ledger -> press F12 -> Provide Contact Details: Yes -> Mobile no. -> Ctrl + A).",
+      "In Tally Prime, press F11 (Features) -> set Maintain Inventory = Yes, Enable Bill-wise entry = Yes, and Enable Goods and Services Tax (GST) = Yes.",
     ],
     steps: [
       {
@@ -193,73 +198,75 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
           "Open the 'Connect Tally Prime' tab on this page, confirm SSL Status shows Active, and click 'Run Live Endpoint Check' to send a safe test ping without adding fake bills.",
       },
       {
-        title: "Step 2 — Enable Local XML Server Port 9000 Inside Tally Prime",
+        title: "Step 2 — Enable F12 Contact Details & Standard Product Rates in Tally Prime",
+        detail:
+          "Inside Customer/Supplier Ledgers (Alter -> Ledger), press F12 -> set 'Provide Contact Details' = Yes and enter their 10-digit Mobile no. Inside Stock Items (Create/Alter -> Stock Item), press F12 -> set 'Provide Standard Buying and Selling Rates' = Yes so Selling Price, HSN, and GST % sync automatically.",
+      },
+      {
+        title: "Step 3 — Enable Local XML Server Port 9000 Inside Tally Prime",
         detail:
           "In Tally Prime on your Windows PC, press F1 (Help) -> Settings -> Connectivity -> Client/Server Configuration. Set 'TallyPrime acts as' = Both, 'Enable ODBC' = Yes, and 'Port' = 9000, then press Ctrl + A (restart Tally if prompted). Test http://127.0.0.1:9000 in Chrome.",
-        tip: "Port 9000 lets RapidShift export Tally Prime's exact native printed Voucher PDF (%PDF-1.x) AND sync your Client/Supplier Ledgers, Stock Items, Godowns, and Batch balances automatically!",
+        tip: "Port 9000 lets RapidShift export Tally Prime's exact native printed Voucher PDF (%PDF-1.x) AND sync multi-company masters continuously via Windows Connector v2.6.",
       },
       {
-        title: "Step 3 — Download Your Personalized '<business>-rsl-sync.tdl' (v2.7)",
+        title: "Step 4 — Download & Load '<business>-rsl-sync.tdl' (v2.8) via F1 -> TDLs -> F4",
         detail:
-          "In Windows File Explorer, enable View -> Show -> File name extensions. Click 'Download Personalized .tdl v2.7' and save it inside C:\\TallyPrime\\<your-business>-rsl-sync.tdl (overwriting any older copy without letting Chrome add ' (1)').",
+          "Save C:\\TallyPrime\\<your-business>-rsl-sync.tdl (overwriting any older copy without ' (1)'). In Tally Prime, press F1 -> TDLs & Add-Ons -> F4 (Manage Local TDLs), set 'Load selected TDL files on startup' = Yes, enter the path, set 'Load TDL' = Yes, and press Ctrl + A.",
       },
       {
-        title: "Step 4 — Load .tdl v2.7 in Tally Prime (F1 -> TDLs & Add-Ons -> F4)",
+        title: "Step 5 — Open All Companies (F3) & Click '<Your Business> & RSL Sync - Sync All Now'",
         detail:
-          "In Tally Prime, press F1 -> TDLs & Add-Ons -> F4 (Manage Local TDLs). Set 'Load selected TDL files on startup' = Yes, enter C:\\TallyPrime\\<your-business>-rsl-sync.tdl, set 'Load TDL' = Yes, and press Ctrl + A. Confirm status says 'Loaded'.",
-      },
-      {
-        title: "Step 5 — Click '<Your Business> & RSL Sync - Connection Test' & 'Sync All Now'",
-        detail:
-          "On Gateway of Tally, you will see your business name right in the menu ('<Your Business> & RSL Sync - Connection Test' and '<Your Business> & RSL Sync - Sync All Now'). Click Connection Test first, then click Sync All Now once! Optionally run your personalized 1-Click Windows Setup (.bat) for background native PDF + Ledger + Stock sync.",
+          "If you manage multiple Tally companies, open them via F3 (Company) -> Select Company. On Gateway of Tally, click '<Your Business> & RSL Sync - Connection Test' and then '<Your Business> & RSL Sync - Sync All Now' to import all Godowns, Products, Party Ledgers, and Bills across every open company.",
       },
       {
         title: "Step 6 — Create Your 'tally_tax_invoice_pdf' Instant WhatsApp Rule",
         detail:
-          "Load & sync starter templates in WhatsApp & Templates first, then on this page create an Instant Rule: Trigger = 'Sales', Template = 'tally_tax_invoice_pdf' (DOCUMENT PDF header), and click Create Rule. Scheduled Overdue Reminder rules automatically cancel as soon as a bill is marked Paid in Tally!",
+          "Load & sync starter templates in WhatsApp & Templates first, then create an Instant Rule: Trigger = 'Sales', Template = 'tally_tax_invoice_pdf' (DOCUMENT PDF header), and click Create Rule. Scheduled Overdue Reminder rules automatically cancel as soon as a bill is marked Paid in Tally!",
       },
     ],
     commonMistakes: [
-      "Leaving 'Mobile no.' blank inside the customer's Party Ledger in Tally Prime — without a mobile number on the party ledger, Tally syncs the bill to your dashboard but WhatsApp has no phone number to message.",
-      "Letting Windows save a second download with ' (1).tdl' while Tally Prime F4 still points to the old file.",
-      "Selecting a text-only template instead of 'tally_tax_invoice_pdf' when you want Tally's printed PDF attached.",
+      "Leaving an older .tdl (v2.7 or earlier) loaded in Tally Prime RAM — always press F1 -> TDLs & Add-Ons -> F4 -> Ctrl + A after overwriting <business>-rsl-sync.tdl so v2.8 loads.",
+      "Expecting closed Tally companies to sync — press F3 -> Select Company in Tally Prime so every active company is open in memory before clicking Sync All Now.",
+      "Leaving 'Mobile no.' blank inside the customer's Party Ledger in Tally Prime — without a mobile number on the party ledger, WhatsApp has no phone number to message.",
     ],
   },
   {
     routePrefix: "/inventory",
-    title: "Using Tally Inventory, Godown Stock, Batch Expiry & Reorder Intelligence",
+    title: "Using Direct Tally Product Sync, Godowns, Batch Expiry & Multi-Company Stock",
     summary:
-      "Track live closing stock, stock valuation, godown & batch expiry balances, fast vs. non-moving dead stock (30/60/90+ days), and share 1-click WhatsApp item quotes.",
+      "Import Tally Prime Stock Items & Godowns live on Ctrl + A (including Alt + C inside bills), track multi-company stock valuation, batch expiry, reorder shortfalls, and share WhatsApp quotes.",
     estimatedTime: "5 min walkthrough",
     guideSlug: "tally-sync-and-import",
     prerequisites: [
-      "Unlock 'Tally Prime Sync & Payment Reminders' in Plans & Wallet.",
-      "Pair Windows Connector v2.4 (or sync Port 9000 / upload Tally Masters XML or CSV) to populate opening stock items, godowns, and standard selling/cost rates.",
+      "Unlock 'All-in-One Tally Prime Sync' in Plans & Wallet.",
+      "Load <business>-rsl-sync.tdl v2.8 in Tally Prime (or pair Windows Connector v2.6) and enable F11 -> Maintain Inventory = Yes.",
     ],
     steps: [
       {
-        title: "Sync Stock Items & Godowns from Tally Prime or Upload Masters XML / CSV",
+        title: "Direct Real-Time Product Sync from Tally Prime (Ctrl + A or Alt + C)",
         detail:
-          "Open 'Add SKU / Sync & Import' (or run Windows Connector v2.4) to import Tally StockItem, Godown, and Party Credit Limit masters in seconds.",
+          "With .tdl v2.8 loaded, creating or editing any Stock Item in Tally Prime (Gateway of Tally -> Create/Alter -> Stock Item, or pressing Alt + C right inside a Sales/Purchase bill) pushes the Product, UOM, Stock Group, HSN, GST %, Standard Selling/Cost Rate, and Opening Qty directly here.",
+        tip: "Inside Tally's Stock Item screen, press F12 -> set 'Provide Standard Buying and Selling Rates' = Yes so your default Selling Price syncs automatically.",
       },
       {
-        title: "Automatic Stock Updates Whenever Bills Are Created, Edited, or Cancelled",
+        title: "Bulk Import Existing Tally Products, Godowns & Multi-Company Stock",
         detail:
-          "Every Sales invoice deducts stock, Credit Note or Purchase voucher adds stock, and cancelling/deleting a bill automatically restores exact quantities across your Stock Summary and Godowns!",
+          "Click '<Your Business> & RSL Sync - Sync All Now' on Gateway of Tally (or run Windows Connector v2.6 / upload Tally Masters XML) to import all existing Godowns and Stock Items across every open Tally company.",
       },
       {
-        title: "Check Reorder Shortfalls & 60+ Day Dead Stock Capital Lock",
+        title: "Automatic Line-Item Stock Updates on Every Bill, Edit, Cancel or Delete",
         detail:
-          "Switch to 'Reorder & Dead Stock' to see items below reorder level alongside slow/inactive inventory tying up working capital for 30, 60, or 90+ days.",
+          "Every Sales invoice deducts stock, Credit Note or Purchase voucher adds stock, and cancelling (Alt + X) or deleting (Alt + D) a bill automatically restores exact quantities across your Stock Summary and Godowns.",
       },
       {
-        title: "Share Instant WhatsApp Price Quotes from Your Live Stock Register",
+        title: "Check Reorder Shortfalls, 60+ Day Dead Stock & Share WhatsApp Quotes",
         detail:
-          "Use the search bar in 'Stock Summary & Price List' to check available stock, HSN, and GST rate on phone calls, and click 'Quote on WhatsApp' to share instant availability & pricing.",
+          "Filter by Tally Company at the top, inspect 'Reorder & Dead Stock' for items below reorder level or idle 60+ days, and click 'Quote on WhatsApp' on any SKU.",
       },
     ],
     commonMistakes: [
-      "Importing only Sales Vouchers without Opening Balances — import Tally StockItem masters (or set Opening Qty on the item) so Closing Qty = Opening + Inward - Outward matches Tally's Stock Summary.",
+      "Forgetting to enable F12 -> 'Provide Standard Buying and Selling Rates = Yes' in Tally's Stock Item screen when you want pre-filled Selling & Cost rates synced before the first invoice.",
+      "Importing only Sales Vouchers without syncing Masters — click '<Your Business> & RSL Sync - Sync All Now' once so Opening Stock balances match Tally's Stock Summary.",
     ],
   },
   {
@@ -441,7 +448,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       {
         title: "Inspect or Rotate Your Workspace Tally Webhook Token (tlwh_...)",
         detail:
-          "View live Tally event/ping counters. Only rotate the Tally token if compromised — after rotating, re-download .tdl v2.5 in Tally Prime -> F4 so Tally uses the new token.",
+          "View live Tally event/ping counters. Only rotate the Tally token if compromised — after rotating, re-download .tdl v2.8 in Tally Prime -> F4 so Tally uses the new token.",
       },
       {
         title: "Issue Scoped Live (rsl_live_) or Test (rsl_test_) REST API Keys",

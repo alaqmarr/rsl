@@ -10,6 +10,7 @@ import {
   isTallyCompanyAllowed,
   LATEST_TALLY_TDL_VERSION,
   recordAgentSyncSuccess,
+  registerTallyCompaniesForWorkspace,
   saveNativeTallyVoucherPdf,
   verifyAgentSignedRequest,
 } from "@rsl/tally";
@@ -75,7 +76,17 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    if (parsed.companyName?.trim()) {
+      registerTallyCompaniesForWorkspace({
+        workspaceId: verified.workspaceId,
+        companies: [parsed.companyName.trim()],
+        updateLastSyncedAt: true,
+      });
+    }
+
     let extraStockItemsUpserted = 0;
+    let extraGodownsUpserted = 0;
+    let extraPartiesUpserted = 0;
     const hasExplicitVoucherXml = Boolean(parsed.rawXml?.trim() || parsed.rawContent?.trim());
     if (parsed.mastersXml?.trim() && hasExplicitVoucherXml) {
       const routing = getTallyCompanyRoutingConfig(verified.workspaceId);
@@ -86,6 +97,8 @@ export async function POST(req: NextRequest) {
         isCompanyAllowed: (c) => isTallyCompanyAllowed(c, routing),
       });
       extraStockItemsUpserted += mOut.stockItemsUpserted;
+      extraGodownsUpserted += mOut.godownsUpserted;
+      extraPartiesUpserted += mOut.partiesUpserted;
     }
 
     const payloadToIngest = parsed.rawXml || parsed.rawContent || rawBody;
@@ -116,6 +129,8 @@ export async function POST(req: NextRequest) {
       ok: true,
       upserted: out.upserted,
       stockItemsUpserted: out.stockItemsUpserted + extraStockItemsUpserted,
+      godownsUpserted: out.godownsUpserted + extraGodownsUpserted,
+      partiesUpserted: out.partiesUpserted + extraPartiesUpserted,
       deletedCount: out.deletedCount,
       ignoredCompanyCount: out.ignoredCompanyCount,
       skippedOptionalCount: out.skippedOptionalCount,

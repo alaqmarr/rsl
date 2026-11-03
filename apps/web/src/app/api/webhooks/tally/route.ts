@@ -19,6 +19,7 @@ import {
   reconcileTallySyncBatch,
   recordTallyWebhookError,
   recordTallyWebhookPing,
+  registerTallyCompaniesForWorkspace,
   saveNativeTallyVoucherPdf,
 } from "@rsl/tally";
 import { controlDb, ingressDb } from "@rsl/tenancy";
@@ -490,6 +491,7 @@ export async function POST(req: NextRequest) {
     // Parse JSON metadata if body is JSON
     let isPingPayload = modeParam === "ping";
     let pingCompanyName = "";
+    let pingOpenCompanies: Array<string | { name?: string; guid?: string; startingFrom?: string }> = [];
     let reconcilePayload: { companyName: string; syncBatchId: string } | null = null;
 
     if (rawBody.trim().startsWith("{")) {
@@ -499,7 +501,12 @@ export async function POST(req: NextRequest) {
           isPingPayload = true;
         }
         if (typeof parsedProbe.companyName === "string") {
-          pingCompanyName = parsedProbe.companyName.trim();
+          pingCompanyName = parsedProbe.companyName.replace(/[\x00-\x1F]+/g, "").trim();
+        }
+        if (Array.isArray(parsedProbe.openCompanies)) {
+          pingOpenCompanies = parsedProbe.openCompanies as Array<
+            string | { name?: string; guid?: string; startingFrom?: string }
+          >;
         }
         if (
           parsedProbe.mode === "reconcile" &&
@@ -507,7 +514,7 @@ export async function POST(req: NextRequest) {
           typeof parsedProbe.syncBatchId === "string"
         ) {
           reconcilePayload = {
-            companyName: parsedProbe.companyName.trim(),
+            companyName: parsedProbe.companyName.replace(/[\x00-\x1F]+/g, "").trim(),
             syncBatchId: parsedProbe.syncBatchId.trim(),
           };
         }
@@ -525,11 +532,34 @@ export async function POST(req: NextRequest) {
           })
         : null;
 
+      const companiesToRegister = [
+        ...pingOpenCompanies,
+        ...(pingCompanyName ? [pingCompanyName] : []),
+      ];
+      const regOut =
+        companiesToRegister.length > 0
+          ? registerTallyCompaniesForWorkspace({
+              workspaceId: caller.workspaceId,
+              companies: companiesToRegister,
+              updateLastSyncedAt: true,
+            })
+          : { registeredCompanies: [] as Array<{ id: string; name: string; companyGuid: string }>, ignoredCount: 0 };
+
       const wsBrand = getWorkspaceBranding(caller.workspaceId);
       const displayBrandTitle = buildTallyDisplayBrandTitle(wsBrand.name);
-      const okMsg = pingCompanyName
-        ? `Connected via ${displayBrandTitle}! Tally company '${pingCompanyName}' is verified and live.`
-        : `Connected via ${displayBrandTitle}! Tally webhook endpoint verified and ready.`;
+      const registeredNames = regOut.registeredCompanies.map((c) => c.name);
+      const verifiedNames =
+        registeredNames.length > 0
+          ? registeredNames
+          : pingCompanyName
+            ? [pingCompanyName]
+            : [];
+      const okMsg =
+        verifiedNames.length > 1
+          ? `Connected via ${displayBrandTitle}! Verified ${verifiedNames.length} open Tally companies (${verifiedNames.join(", ")}).`
+          : verifiedNames.length === 1
+            ? `Connected via ${displayBrandTitle}! Tally company '${verifiedNames[0]}' is verified and live.`
+            : `Connected via ${displayBrandTitle}! Tally webhook endpoint verified and ready.`;
 
       return NextResponse.json(
         {
@@ -538,7 +568,9 @@ export async function POST(req: NextRequest) {
           status: "handshake_verified",
           workspaceId: caller.workspaceId,
           displayBrandTitle,
-          companyName: pingCompanyName || null,
+          companyName: verifiedNames[0] || pingCompanyName || null,
+          openCompanies: verifiedNames,
+          openCompaniesRegistered: regOut.registeredCompanies.length,
           pingsReceivedCount: pingInfo?.pingsReceivedCount ?? 1,
           verifiedAt: new Date(now).toISOString(),
           message: okMsg,
@@ -657,15 +689,34 @@ export async function POST(req: NextRequest) {
       await flushInlineTallyOutboxIfNoRedis(caller.workspaceId);
     }
 
-    const syncMsg = `Synced ${result.upserted} voucher(s)${
-      result.deletedCount > 0 ? `, removed ${result.deletedCount} deleted` : ""
-    } to RapidShift Labs (${result.queuedJobs} WhatsApp job(s) queued).`;
+    const mastersSummaryParts: string[] = [];
+    if (result.stockItemsUpserted > 0) {
+      mastersSummaryParts.push(`${result.stockItemsUpserted} product(s)`);
+    }
+    if (result.partiesUpserted > 0) {
+      mastersSummaryParts.push(`${result.partiesUpserted} party ledger(s)`);
+    }
+    if (result.godownsUpserted > 0) {
+      mastersSummaryParts.push(`${result.godownsUpserted} godown(s)`);
+    }
+
+    const syncMsg =
+      result.upserted === 0 && result.deletedCount === 0 && mastersSummaryParts.length > 0
+        ? `Synced ${mastersSummaryParts.join(", ")} to RapidShift Labs.`
+        : `Synced ${result.upserted} voucher(s)${
+            mastersSummaryParts.length > 0 ? `, ${mastersSummaryParts.join(", ")}` : ""
+          }${
+            result.deletedCount > 0 ? `, removed ${result.deletedCount} deleted` : ""
+          } to RapidShift Labs (${result.queuedJobs} WhatsApp job(s) queued).`;
     return NextResponse.json(
       {
         ...buildTallyResultFields("Connected", syncMsg, userAgent, result.deletedCount),
         workspaceId: caller.workspaceId,
         upsertedBills: result.upserted,
         deletedBills: result.deletedCount,
+        stockItemsUpserted: result.stockItemsUpserted,
+        godownsUpserted: result.godownsUpserted,
+        partiesUpserted: result.partiesUpserted,
         ignoredCompanyBills: result.ignoredCompanyCount,
         skippedOptionalBills: result.skippedOptionalCount,
         queuedWhatsAppJobs: result.queuedJobs,

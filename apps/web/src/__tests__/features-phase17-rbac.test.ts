@@ -322,7 +322,7 @@ describe("Phase 17 Suite (Client SSL Queue, -₹200 Overdraft, Native Tally PDF 
       sha256: string;
     };
     expect(manifestJson.ok).toBe(true);
-    expect(manifestJson.tdlVersion).toBe("2.7");
+    expect(manifestJson.tdlVersion).toBe("2.8");
     expect(manifestJson.sha256).toHaveLength(64);
 
     const latestTdlRes = await tallyWebhookGet(
@@ -332,7 +332,7 @@ describe("Phase 17 Suite (Client SSL Queue, -₹200 Overdraft, Native Tally PDF 
     );
     expect(latestTdlRes.status).toBe(200);
     const latestTdlText = await latestTdlRes.text();
-    expect(latestTdlText).toContain("TallyPrime-RSL-TDL/2.7");
+    expect(latestTdlText).toContain("TallyPrime-RSL-TDL/2.8");
 
     const connector = generateStandaloneTallyConnectorMjs({
       serverUrl: "https://zerocolon.tally.rapidshiftlabs.in",

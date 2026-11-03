@@ -18,7 +18,7 @@ interface AgentStateFile {
   pairedAt: string;
 }
 
-const AGENT_VERSION = "2.4.0";
+const AGENT_VERSION = "2.5.0";
 const VOUCHER_CHUNK_SIZE = 20;
 const DEFAULT_CLOUD_URL = "https://app.rapidshiftlabs.in";
 const STATE_PATH =
@@ -555,7 +555,12 @@ function extractMaxAlterId(xml: string): number {
 
 async function sendSignedHeartbeat(
   state: AgentStateFile,
-  probe: { reachable: boolean; companyName: string | null; errorMessage: string | null }
+  probe: {
+    reachable: boolean;
+    companyName: string | null;
+    openCompanies?: string[];
+    errorMessage: string | null;
+  }
 ): Promise<void> {
   const body = JSON.stringify({
     agentVersion: AGENT_VERSION,
@@ -564,6 +569,7 @@ async function sendSignedHeartbeat(
     tallyHost: state.tallyHost,
     tallyPort: state.tallyPort,
     activeCompanyName: probe.companyName,
+    openCompanies: probe.openCompanies ?? [],
     lastAlterId: state.lastAlterId,
     lastErrorMessage: probe.errorMessage,
     hostname: os.hostname(),
@@ -731,6 +737,7 @@ async function main() {
     await sendSignedHeartbeat(state!, {
       reachable: openComp.reachable,
       companyName: openComp.companies.join(", ") || null,
+      openCompanies: openComp.companies,
       errorMessage: openComp.errorMessage,
     }).catch((err) =>
       console.error("[rsl-tally-agent] Heartbeat warning:", err instanceof Error ? err.message : err)
@@ -754,8 +761,44 @@ async function main() {
 
       const allBlocks = probe.xml.match(/<VOUCHER(?:\s[^>]*)?>[\s\S]*?<\/VOUCHER>/gi) ?? [];
       const hasVouchers = allBlocks.length > 0;
-      // Circuit Breaker (P0-01): Never send a 0-voucher snapshot on company-close / Tally restart!
-      if (!hasVouchers) continue;
+      if (!hasVouchers) {
+        // Circuit Breaker (P0-01): Never send fullSnapshot:true on 0 vouchers,
+        // BUT still sync Stock Items, Godowns & Party Ledgers for 0-voucher companies!
+        if (fullReconcilePass) {
+          const mastersOnlyXml = await fetchTallyStockItemsXml(
+            state!.tallyHost,
+            state!.tallyPort,
+            companyName || undefined
+          );
+          if (mastersOnlyXml) {
+            const mastersDigest = crypto
+              .createHash("sha256")
+              .update(mastersOnlyXml)
+              .digest("hex");
+            const mastersKey = `${companyName || "__active__"}::masters`;
+            if (lastDigestByCompany.get(mastersKey) !== mastersDigest) {
+              await pushTallyXmlToCloud({
+                state: state!,
+                xmlContent: "",
+                mastersXml: mastersOnlyXml,
+                companyName: probe.companyName || companyName || null,
+                fullSnapshot: false,
+                voucherPdfs: [],
+              })
+                .then(() => {
+                  lastDigestByCompany.set(mastersKey, mastersDigest);
+                })
+                .catch((mErr) =>
+                  console.warn(
+                    "[rsl-tally-agent] Masters-only sync warning:",
+                    mErr instanceof Error ? mErr.message : mErr
+                  )
+                );
+            }
+          }
+        }
+        continue;
+      }
 
       const digest = crypto.createHash("sha256").update(probe.xml).digest("hex");
       const key = companyName || "__active__";

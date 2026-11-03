@@ -381,6 +381,105 @@ export function extractInventoryLineItemsFromVoucherXml(
   return lines;
 }
 
+function cleanTallySystemString(raw?: unknown): string {
+  if (raw === undefined || raw === null) return "";
+  const cleaned = String(raw).replace(/^[\x00-\x1f]+/, "").trim();
+  if (/^not\s*applicable$/i.test(cleaned) || /^end\s*of\s*list$/i.test(cleaned)) {
+    return "";
+  }
+  return cleaned;
+}
+
+/**
+ * Parses voucher `lineItems` from JSON payloads (including `.tdl v2.8` strings such as
+ * `"10 PCS"`, `"1850.00/PCS"`, `"-18500.00"` as well as plain JSON numbers).
+ */
+export function parseJsonVoucherLineItems(rawList: unknown): ParsedTallyVoucherLineItem[] {
+  if (!Array.isArray(rawList)) return [];
+  const parsed: ParsedTallyVoucherLineItem[] = [];
+
+  for (const rawEntry of rawList) {
+    if (!rawEntry || typeof rawEntry !== "object") continue;
+    const li = rawEntry as Record<string, unknown>;
+    const itemName = cleanTallySystemString(li.itemName ?? li.stockItemName ?? li.name);
+    if (!itemName) continue;
+
+    const rawBilled = li.billedQty ?? li.qty ?? li.quantity ?? "";
+    const rawActual = li.actualQty ?? rawBilled;
+    const billedParsed =
+      typeof rawBilled === "number"
+        ? { qty: roundQty(Math.abs(rawBilled)), uom: "" }
+        : parseTallyQuantityAndUom(String(rawBilled));
+    const actualParsed =
+      typeof rawActual === "number"
+        ? { qty: roundQty(Math.abs(rawActual)), uom: "" }
+        : parseTallyQuantityAndUom(String(rawActual));
+
+    const billedQty = billedParsed.qty > 0 ? billedParsed.qty : actualParsed.qty;
+    const actualQty = actualParsed.qty > 0 ? actualParsed.qty : billedQty;
+    const explicitUom = cleanTallySystemString(li.uom ?? li.baseUnits).toUpperCase();
+    const uom = explicitUom || billedParsed.uom || actualParsed.uom || "PCS";
+
+    const rawRate = li.rateRupees ?? li.rate ?? 0;
+    const rateRupees =
+      typeof rawRate === "number" && Number.isFinite(rawRate)
+        ? Math.max(0, Math.round(Math.abs(rawRate) * 100) / 100)
+        : parseTallyRateNumber(String(rawRate));
+
+    const rawDisc = li.discountPct ?? li.discount ?? 0;
+    const discountPct = Math.max(
+      0,
+      Math.min(
+        100,
+        typeof rawDisc === "number" && Number.isFinite(rawDisc)
+          ? Math.abs(rawDisc)
+          : parseTallyRateNumber(String(rawDisc))
+      )
+    );
+
+    const rawGst = li.gstRatePct ?? li.gstRate ?? 0;
+    const parsedGst =
+      typeof rawGst === "number" && Number.isFinite(rawGst)
+        ? Math.abs(rawGst)
+        : parseTallyRateNumber(String(rawGst));
+    const gstRatePct = parsedGst > 0 ? Math.min(50, parsedGst) : 18;
+
+    const rawAmt = li.amountRupees ?? li.amount ?? 0;
+    const explicitAmt =
+      typeof rawAmt === "number" && Number.isFinite(rawAmt)
+        ? Math.round(Math.abs(rawAmt) * 100) / 100
+        : Math.abs(parseTallySignedRupees(String(rawAmt)));
+
+    const amountRupees =
+      explicitAmt > 0
+        ? explicitAmt
+        : Math.round(billedQty * rateRupees * (1 - discountPct / 100) * 100) / 100;
+
+    if (billedQty <= 0 && amountRupees <= 0) continue;
+
+    parsed.push({
+      itemName,
+      godownName: cleanTallySystemString(li.godownName) || "Main Location",
+      batchName: cleanTallySystemString(li.batchName) || "Primary Batch",
+      hsnCode: cleanTallySystemString(li.hsnCode) || undefined,
+      uom,
+      billedQty: billedQty > 0 ? billedQty : 1,
+      actualQty: actualQty > 0 ? actualQty : billedQty > 0 ? billedQty : 1,
+      rateRupees:
+        rateRupees > 0
+          ? rateRupees
+          : billedQty > 0
+            ? Math.round((amountRupees / billedQty) * 100) / 100
+            : amountRupees,
+      discountPct,
+      gstRatePct,
+      amountRupees,
+    });
+  }
+
+  return parsed;
+}
+
 /**
  * Parses `<STOCKITEM>`, `<GODOWN>`, and `<LEDGER>` master blocks from a Tally Prime XML envelope.
  */
@@ -1212,13 +1311,45 @@ export function collectVoucherStockItemIdsBeforeDelete(
   );
 }
 
-/**
- * Ingests `<STOCKITEM>`, `<GODOWN>`, and `<LEDGER>` masters from Tally XML into the tenant DB.
- */
-export function ingestTallyMastersXmlForWorkspace(params: {
+function resolveMastersDefaultCompanyName(
+  db: ReturnType<typeof tenantDataDb>,
+  workspaceId: string,
+  fallbackCompanyName?: string
+): string {
+  const ctrl = controlDb();
+  const ws = ctrl
+    .select({ defaultTallyCompany: controlSchema.workspaces.defaultTallyCompany })
+    .from(controlSchema.workspaces)
+    .where(eq(controlSchema.workspaces.id, workspaceId))
+    .get();
+  const existingCompanies = db
+    .select({ name: tenantDataSchema.tallyCompanies.name })
+    .from(tenantDataSchema.tallyCompanies)
+    .all();
+  const explicitFallback =
+    fallbackCompanyName?.trim() && fallbackCompanyName.trim() !== "Primary Tally Company"
+      ? fallbackCompanyName.trim()
+      : "";
+  return (
+    explicitFallback ||
+    ws?.defaultTallyCompany?.trim() ||
+    (existingCompanies.length === 1
+      ? existingCompanies[0]!.name
+      : fallbackCompanyName?.trim() || "Primary Tally Company")
+  );
+}
+
+function upsertParsedTallyMastersForWorkspace(params: {
+  db: ReturnType<typeof tenantDataDb>;
   workspaceId: string;
-  rawXml: string;
-  fallbackCompanyName?: string;
+  defaultCompany: string;
+  parsed: {
+    detectedCompanyName: string | null;
+    stockItems: ParsedTallyStockItemMaster[];
+    godowns: ParsedTallyGodownMaster[];
+    partyLedgers: ParsedTallyPartyLedgerMaster[];
+    billClearances: ParsedTallyBillMasterClearance[];
+  };
   isCompanyAllowed?: (companyName: string) => boolean;
 }): {
   stockItemsUpserted: number;
@@ -1227,30 +1358,7 @@ export function ingestTallyMastersXmlForWorkspace(params: {
   billClearancesApplied: number;
   detectedCompanyName: string | null;
 } {
-  const db = tenantDataDb({ workspaceId: params.workspaceId });
-  const ctrl = controlDb();
-  const ws = ctrl
-    .select({ defaultTallyCompany: controlSchema.workspaces.defaultTallyCompany })
-    .from(controlSchema.workspaces)
-    .where(eq(controlSchema.workspaces.id, params.workspaceId))
-    .get();
-  const existingCompanies = db
-    .select({ name: tenantDataSchema.tallyCompanies.name })
-    .from(tenantDataSchema.tallyCompanies)
-    .all();
-  const explicitFallback =
-    params.fallbackCompanyName?.trim() &&
-    params.fallbackCompanyName.trim() !== "Primary Tally Company"
-      ? params.fallbackCompanyName.trim()
-      : "";
-  const defaultCompany =
-    explicitFallback ||
-    ws?.defaultTallyCompany?.trim() ||
-    (existingCompanies.length === 1
-      ? existingCompanies[0]!.name
-      : params.fallbackCompanyName?.trim() || "Primary Tally Company");
-
-  const parsed = parseTallyMastersXmlEnvelope(params.rawXml, defaultCompany);
+  const { db, parsed, defaultCompany } = params;
   if (
     parsed.stockItems.length === 0 &&
     parsed.godowns.length === 0 &&
@@ -1588,6 +1696,352 @@ export function ingestTallyMastersXmlForWorkspace(params: {
     billClearancesApplied,
     detectedCompanyName: parsed.detectedCompanyName,
   };
+}
+
+/**
+ * Ingests `<STOCKITEM>`, `<GODOWN>`, and `<LEDGER>` masters from Tally XML into the tenant DB.
+ */
+export function ingestTallyMastersXmlForWorkspace(params: {
+  workspaceId: string;
+  rawXml: string;
+  fallbackCompanyName?: string;
+  isCompanyAllowed?: (companyName: string) => boolean;
+}): {
+  stockItemsUpserted: number;
+  godownsUpserted: number;
+  partiesUpserted: number;
+  billClearancesApplied: number;
+  detectedCompanyName: string | null;
+} {
+  const db = tenantDataDb({ workspaceId: params.workspaceId });
+  const defaultCompany = resolveMastersDefaultCompanyName(
+    db,
+    params.workspaceId,
+    params.fallbackCompanyName
+  );
+  const parsed = parseTallyMastersXmlEnvelope(params.rawXml, defaultCompany);
+  return upsertParsedTallyMastersForWorkspace({
+    db,
+    workspaceId: params.workspaceId,
+    defaultCompany,
+    parsed,
+    isCompanyAllowed: params.isCompanyAllowed,
+  });
+}
+
+/**
+ * Ingests Stock Items (Products), Godowns, Party Ledgers, and Bill Clearances directly from
+ * `.tdl v2.8` JSON reports (`mode: "masters"`, `[#Form: Stock Item]`, `[#Form: Ledger]`, or `Sync All Now`).
+ */
+export function ingestTallyMastersJsonForWorkspace(params: {
+  workspaceId: string;
+  payload: Record<string, unknown>;
+  fallbackCompanyName?: string;
+  isCompanyAllowed?: (companyName: string) => boolean;
+}): {
+  stockItemsUpserted: number;
+  godownsUpserted: number;
+  partiesUpserted: number;
+  billClearancesApplied: number;
+  detectedCompanyName: string | null;
+} {
+  const db = tenantDataDb({ workspaceId: params.workspaceId });
+  const topCompany = cleanTallySystemString(params.payload.companyName);
+  const defaultCompany = resolveMastersDefaultCompanyName(
+    db,
+    params.workspaceId,
+    topCompany || params.fallbackCompanyName
+  );
+
+  const rawStockList: Array<Record<string, unknown>> = Array.isArray(params.payload.stockItems)
+    ? (params.payload.stockItems as Array<Record<string, unknown>>)
+    : params.payload.stockItem && typeof params.payload.stockItem === "object"
+      ? [params.payload.stockItem as Record<string, unknown>]
+      : [];
+
+  const rawGodownList: Array<Record<string, unknown>> = Array.isArray(params.payload.godowns)
+    ? (params.payload.godowns as Array<Record<string, unknown>>)
+    : params.payload.godown && typeof params.payload.godown === "object"
+      ? [params.payload.godown as Record<string, unknown>]
+      : [];
+
+  const rawPartyList: Array<Record<string, unknown>> = Array.isArray(params.payload.partyLedgers)
+    ? (params.payload.partyLedgers as Array<Record<string, unknown>>)
+    : params.payload.partyLedger && typeof params.payload.partyLedger === "object"
+      ? [params.payload.partyLedger as Record<string, unknown>]
+      : [];
+
+  const rawClearanceList: Array<Record<string, unknown>> = Array.isArray(
+    params.payload.billClearances
+  )
+    ? (params.payload.billClearances as Array<Record<string, unknown>>)
+    : [];
+
+  let detectedCompanyName: string | null = topCompany || null;
+  const stockItems: ParsedTallyStockItemMaster[] = [];
+  const godowns: ParsedTallyGodownMaster[] = [];
+  const partyLedgers: ParsedTallyPartyLedgerMaster[] = [];
+  const billClearances: ParsedTallyBillMasterClearance[] = [];
+
+  for (const g of rawGodownList) {
+    if (!g || typeof g !== "object") continue;
+    const name = cleanTallySystemString(g.name ?? g.godownName);
+    if (!name) continue;
+    const cName = cleanTallySystemString(g.companyName) || topCompany || defaultCompany;
+    if (!detectedCompanyName && cName) detectedCompanyName = cName;
+    godowns.push({
+      guid: cleanTallySystemString(g.guid) || undefined,
+      companyName: cName,
+      name,
+      parentName: cleanTallySystemString(g.parentName ?? g.parent) || "Primary",
+      address: cleanTallySystemString(g.address) || undefined,
+    });
+  }
+
+  for (const si of rawStockList) {
+    if (!si || typeof si !== "object") continue;
+    const name = cleanTallySystemString(si.name ?? si.itemName ?? si.stockItemName);
+    if (!name) continue;
+    const cName = cleanTallySystemString(si.companyName) || topCompany || defaultCompany;
+    if (!detectedCompanyName && cName) detectedCompanyName = cName;
+
+    const guid = cleanTallySystemString(si.guid) || undefined;
+    const masterId = String(si.masterId ?? "").replace(/\D/g, "").replace(/^0+$/, "") || undefined;
+    const alterId = Number(String(si.alterId ?? "0").replace(/\D/g, "") || 0) || undefined;
+    const partNumber = cleanTallySystemString(si.partNumber ?? si.partNo) || undefined;
+    const skuCode = cleanTallySystemString(si.skuCode ?? si.alias) || partNumber;
+    const stockGroup = cleanTallySystemString(si.stockGroup ?? si.parent) || "Primary";
+    const stockCategory = cleanTallySystemString(si.stockCategory ?? si.category) || undefined;
+    const baseUnits = cleanTallySystemString(si.uom ?? si.baseUnits).toUpperCase();
+
+    const rawOpen = si.openingQty ?? si.openingBalance ?? "";
+    const rawClose = si.closingQty ?? si.closingBalance ?? "";
+    const hasExplicitOpen = rawOpen !== undefined && rawOpen !== null && String(rawOpen).trim() !== "";
+    const openParsed =
+      typeof rawOpen === "number"
+        ? { qty: roundQty(rawOpen), uom: "" }
+        : parseTallyQuantityAndUom(String(rawOpen), true);
+    const closeParsed =
+      typeof rawClose === "number"
+        ? { qty: roundQty(rawClose), uom: "" }
+        : parseTallyQuantityAndUom(String(rawClose), true);
+
+    const uom = baseUnits || closeParsed.uom || openParsed.uom || "PCS";
+    const openingQty = hasExplicitOpen ? openParsed.qty : closeParsed.qty;
+    const closingQty = closeParsed.qty;
+
+    const rawOpenValAbs = Math.abs(
+      parseTallySignedRupees(String(si.openingValueRupees ?? si.openingValue ?? 0))
+    );
+    const openingValueRupees = openingQty < 0 ? -rawOpenValAbs : rawOpenValAbs;
+
+    const closingRateRupees = parseTallyRateNumber(
+      String(si.closingRateRupees ?? si.closingRate ?? 0)
+    );
+    const rawCloseValAbs = Math.abs(
+      parseTallySignedRupees(String(si.closingValueRupees ?? si.closingValue ?? 0))
+    );
+    const computedCloseVal =
+      rawCloseValAbs > 0
+        ? rawCloseValAbs
+        : Math.round(Math.abs(closingQty) * closingRateRupees * 100) / 100;
+    const closingValueRupees = closingQty < 0 ? -computedCloseVal : computedCloseVal;
+
+    const sellingPriceRupees = parseTallyRateNumber(
+      String(si.sellingPriceRupees ?? si.standardPrice ?? si.sellingPrice ?? 0)
+    );
+    const parsedCostPrice = parseTallyRateNumber(
+      String(si.costPriceRupees ?? si.standardCost ?? si.costPrice ?? 0)
+    );
+    const costPriceRupees = parsedCostPrice > 0 ? parsedCostPrice : closingRateRupees;
+
+    const reorderParsed = parseTallyQuantityAndUom(
+      String(si.reorderLevelQty ?? si.reorderBase ?? si.reorderLevel ?? 0)
+    );
+    const minOrderParsed = parseTallyQuantityAndUom(
+      String(si.minOrderQty ?? si.minOrderBase ?? 0)
+    );
+
+    const hsnCode = cleanTallySystemString(si.hsnCode) || undefined;
+    const parsedGst = parseTallyRateNumber(String(si.gstRatePct ?? si.gstRate ?? 0));
+    const gstRatePct = parsedGst > 0 ? Math.min(50, parsedGst) : 18;
+
+    const batches: ParsedTallyStockBatchAllocation[] = [];
+    const rawBatchesSource = Array.isArray(si.batches)
+      ? (si.batches as Array<Record<string, unknown>>)
+      : Array.isArray(si.godownAllocations)
+        ? (si.godownAllocations as Array<Record<string, unknown>>)
+        : null;
+    if (rawBatchesSource) {
+      for (const rawB of rawBatchesSource) {
+        if (!rawB || typeof rawB !== "object") continue;
+        const bGodown = cleanTallySystemString(rawB.godownName) || "Main Location";
+        const bBatch = cleanTallySystemString(rawB.batchName) || "Primary Batch";
+        const bClose =
+          typeof rawB.closingQty === "number"
+            ? { qty: roundQty(rawB.closingQty), uom: "" }
+            : parseTallyQuantityAndUom(
+                String(rawB.closingQty ?? rawB.closingBalance ?? rawB.qty ?? rawB.quantity ?? 0),
+                true
+              );
+        const bValAbs = Math.abs(
+          parseTallySignedRupees(String(rawB.closingValueRupees ?? rawB.closingValue ?? 0))
+        );
+        batches.push({
+          godownName: bGodown,
+          batchName: bBatch,
+          mfgDate: parseTallyDateNullable(cleanTallySystemString(rawB.mfgDate)),
+          expiryDate: parseTallyDateNullable(
+            cleanTallySystemString(rawB.expiryDate ?? rawB.expiryPeriod)
+          ),
+          closingQty: bClose.qty,
+          closingValueRupees:
+            bClose.qty < 0
+              ? -(bValAbs || Math.abs(bClose.qty) * closingRateRupees)
+              : bValAbs || bClose.qty * closingRateRupees,
+        });
+      }
+    } else if (si.godownName || si.batchName || si.expiryDate) {
+      batches.push({
+        godownName: cleanTallySystemString(si.godownName) || "Main Location",
+        batchName: cleanTallySystemString(si.batchName) || "Primary Batch",
+        mfgDate: parseTallyDateNullable(cleanTallySystemString(si.mfgDate)),
+        expiryDate: parseTallyDateNullable(cleanTallySystemString(si.expiryDate)),
+        closingQty,
+        closingValueRupees,
+      });
+    }
+
+    stockItems.push({
+      guid,
+      masterId,
+      companyName: cName,
+      name,
+      skuCode,
+      partNumber,
+      stockGroup,
+      stockCategory,
+      uom,
+      hsnCode,
+      gstRatePct,
+      sellingPriceRupees,
+      costPriceRupees,
+      openingQty,
+      openingValueRupees,
+      closingQty,
+      closingRateRupees:
+        closingRateRupees > 0
+          ? closingRateRupees
+          : closingQty !== 0
+            ? Math.round((Math.abs(closingValueRupees) / Math.abs(closingQty)) * 100) / 100
+            : costPriceRupees,
+      closingValueRupees,
+      reorderLevelQty: reorderParsed.qty,
+      minOrderQty: minOrderParsed.qty,
+      alterId,
+      batches,
+    });
+  }
+
+  for (const pl of rawPartyList) {
+    if (!pl || typeof pl !== "object") continue;
+    const name = cleanTallySystemString(pl.name ?? pl.partyName ?? pl.ledgerName);
+    if (!name) continue;
+    const cName = cleanTallySystemString(pl.companyName) || topCompany || defaultCompany;
+    if (!detectedCompanyName && cName) detectedCompanyName = cName;
+
+    const rawGroup = cleanTallySystemString(
+      pl.parentGroup ?? pl.parent ?? pl.isCreditor ?? "Sundry Debtors"
+    );
+    const parentGroup =
+      /creditor|^yes$|^true$/i.test(rawGroup) && !/debtor/i.test(rawGroup)
+        ? "Sundry Creditors"
+        : "Sundry Debtors";
+
+    const creditPeriodStr = cleanTallySystemString(pl.creditDays ?? pl.creditPeriod);
+    const creditDaysMatch = creditPeriodStr.match(/(\d{1,4})/);
+    const creditDays = creditDaysMatch ? Number(creditDaysMatch[1]) : 0;
+
+    const parseJsonPartyBalance = (rslSignedField: unknown, tallyRawField: unknown): number => {
+      if (
+        rslSignedField !== undefined &&
+        rslSignedField !== null &&
+        String(rslSignedField).trim() !== ""
+      ) {
+        const str = String(rslSignedField).trim();
+        const num = parseTallySignedRupees(str);
+        if (/\bdr\b/i.test(str)) return Math.abs(num);
+        if (/\bcr\b/i.test(str)) return -Math.abs(num);
+        return num;
+      }
+      if (
+        tallyRawField !== undefined &&
+        tallyRawField !== null &&
+        String(tallyRawField).trim() !== ""
+      ) {
+        const str = String(tallyRawField).trim();
+        const num = parseTallySignedRupees(str);
+        if (/\bdr\b/i.test(str)) return Math.abs(num);
+        if (/\bcr\b/i.test(str)) return -Math.abs(num);
+        // Raw Tally Amount convention: negative (-X) = Debit (Receivable +X), positive (+X) = Credit (Payable -X)
+        return -num;
+      }
+      return 0;
+    };
+
+    partyLedgers.push({
+      guid: cleanTallySystemString(pl.guid) || undefined,
+      companyName: cName,
+      name,
+      parentGroup,
+      phone: cleanTallySystemString(pl.phone ?? pl.mobile ?? pl.partyPhone) || undefined,
+      email: cleanTallySystemString(pl.email) || undefined,
+      gstin: cleanTallySystemString(pl.gstin ?? pl.partyGstin) || undefined,
+      pan: cleanTallySystemString(pl.pan) || undefined,
+      contactPerson: cleanTallySystemString(pl.contactPerson) || undefined,
+      stateName: cleanTallySystemString(pl.stateName ?? pl.state) || undefined,
+      pincode: cleanTallySystemString(pl.pincode) || undefined,
+      address: cleanTallySystemString(pl.address) || undefined,
+      creditLimitRupees: Math.abs(
+        parseTallySignedRupees(String(pl.creditLimitRupees ?? pl.creditLimit ?? 0))
+      ),
+      creditDays,
+      openingBalanceRupees: parseJsonPartyBalance(pl.openingBalanceRupees, pl.openingBalance),
+      closingBalanceRupees: parseJsonPartyBalance(pl.closingBalanceRupees, pl.closingBalance),
+    });
+  }
+
+  for (const bc of rawClearanceList) {
+    if (!bc || typeof bc !== "object") continue;
+    const billName = cleanTallySystemString(bc.billName ?? bc.name);
+    if (!billName) continue;
+    const cName = cleanTallySystemString(bc.companyName) || topCompany || defaultCompany;
+    billClearances.push({
+      billName,
+      partyName: cleanTallySystemString(bc.partyName ?? bc.parent),
+      companyName: cName,
+      openingBalanceRupees: Math.abs(
+        parseTallySignedRupees(String(bc.openingBalanceRupees ?? bc.openingBalance ?? 0))
+      ),
+      closingBalanceRupees: Math.abs(
+        parseTallySignedRupees(String(bc.closingBalanceRupees ?? bc.closingBalance ?? 0))
+      ),
+    });
+  }
+
+  return upsertParsedTallyMastersForWorkspace({
+    db,
+    workspaceId: params.workspaceId,
+    defaultCompany,
+    parsed: {
+      detectedCompanyName,
+      stockItems,
+      godowns,
+      partyLedgers,
+      billClearances,
+    },
+    isCompanyAllowed: params.isCompanyAllowed,
+  });
 }
 
 /**
@@ -2219,7 +2673,10 @@ ${messagesXml}
 /**
  * BizAnalyst & Livekeeping-Inspired Workspace Inventory & Stock Intelligence Summary
  */
-export function getWorkspaceInventorySummary(workspaceId: string) {
+export function getWorkspaceInventorySummary(
+  workspaceId: string,
+  companyIdFilter?: string
+) {
   const db = tenantDataDb({ workspaceId });
   const now = Date.now();
   const dayMs = 86_400_000;
@@ -2227,27 +2684,40 @@ export function getWorkspaceInventorySummary(workspaceId: string) {
   const companies = db
     .select()
     .from(tenantDataSchema.tallyCompanies)
-    .orderBy(desc(tenantDataSchema.tallyCompanies.createdAt))
+    .orderBy(desc(tenantDataSchema.tallyCompanies.lastSyncedAt))
     .all();
   const companyMap = new Map(companies.map((c) => [c.id, c.name]));
+  const activeCompanyFilter =
+    companyIdFilter && companyIdFilter !== "all" && companyMap.has(companyIdFilter)
+      ? companyIdFilter
+      : null;
 
-  const godowns = db
+  const allGodowns = db
     .select()
     .from(tenantDataSchema.tallyGodowns)
     .orderBy(tenantDataSchema.tallyGodowns.name)
     .all();
+  const godowns = activeCompanyFilter
+    ? allGodowns.filter((g) => g.companyId === activeCompanyFilter)
+    : allGodowns;
 
-  const rawItems = db
+  const allItems = db
     .select()
     .from(tenantDataSchema.tallyStockItems)
     .orderBy(desc(tenantDataSchema.tallyStockItems.closingValuePaise))
     .all();
+  const rawItems = activeCompanyFilter
+    ? allItems.filter((i) => i.companyId === activeCompanyFilter)
+    : allItems;
 
-  const rawBalances = db
+  const allBalances = db
     .select()
     .from(tenantDataSchema.tallyStockBalances)
     .orderBy(tenantDataSchema.tallyStockBalances.godownName)
     .all();
+  const rawBalances = activeCompanyFilter
+    ? allBalances.filter((b) => b.companyId === activeCompanyFilter)
+    : allBalances;
 
   const rawVouchers = db
     .select({
@@ -2259,19 +2729,25 @@ export function getWorkspaceInventorySummary(workspaceId: string) {
     .all();
   const voucherNoMap = new Map(rawVouchers.map((v) => [v.id, v]));
 
-  const rawMovements = db
+  const allMovements = db
     .select()
     .from(tenantDataSchema.tallyVoucherItems)
     .orderBy(desc(tenantDataSchema.tallyVoucherItems.voucherDate))
     .limit(250)
     .all();
+  const rawMovements = activeCompanyFilter
+    ? allMovements.filter((m) => m.companyId === activeCompanyFilter)
+    : allMovements;
 
-  const parties = db
+  const allParties = db
     .select()
     .from(tenantDataSchema.tallyParties)
     .orderBy(desc(tenantDataSchema.tallyParties.closingBalancePaise))
     .limit(100)
     .all();
+  const parties = activeCompanyFilter
+    ? allParties.filter((p) => p.companyId === activeCompanyFilter)
+    : allParties;
 
   const balancesByItem = new Map<string, typeof rawBalances>();
   for (const b of rawBalances) {

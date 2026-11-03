@@ -28,6 +28,7 @@ import {
   buildWorkspaceTdlFilename,
   detectOutdatedTdlVersion,
   getTallyWorkspaceSummary,
+  LATEST_TALLY_TDL_VERSION,
   probeLocalTallyPort9000,
 } from "@rsl/tally";
 import {
@@ -134,14 +135,19 @@ export default async function TallySyncPage({
   const isWalletOverdraftExhausted = walletBalancePaise <= MIN_WALLET_BALANCE_PAISE;
 
   const companyNameById = new Map(tally.companies.map((c) => [c.id, c.name]));
+  const deviceSplitCompanyNames = tally.devices.flatMap((d) =>
+    (d.activeCompanyName ?? "")
+      .replace(/\s*\(\+\d+\s+more\)$/i, "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean)
+  );
   const knownCompanyNames = Array.from(
     new Set(
       [
         ...tally.companies.map((c) => c.name),
         ...(localPortProbe?.openCompanies ?? []),
-        ...tally.devices
-          .map((d) => d.activeCompanyName)
-          .filter((name): name is string => Boolean(name && name.trim())),
+        ...deviceSplitCompanyNames,
         ...(session.workspace.defaultTallyCompany ? [session.workspace.defaultTallyCompany] : []),
       ].filter(Boolean)
     )
@@ -172,17 +178,41 @@ export default async function TallySyncPage({
   const billQuery = sp.q?.trim() || "";
   const nowMs = Date.now();
 
-  const overdueCount = tally.vouchers.filter((v) => {
+  const companyScopedVouchers =
+    selectedCompanyId === "all"
+      ? tally.vouchers
+      : tally.vouchers.filter((v) => v.companyId === selectedCompanyId);
+
+  const scopedTotalBilledPaise = companyScopedVouchers
+    .filter((v) => v.voucherType === "Sales" && v.paymentStatus !== "cancelled")
+    .reduce((sum, v) => sum + v.amountPaise, 0);
+  const scopedTotalCollectedPaise = companyScopedVouchers
+    .filter((v) => v.paymentStatus !== "cancelled")
+    .reduce(
+      (sum, v) =>
+        sum +
+        (v.voucherType === "Receipt"
+          ? v.amountPaise
+          : v.voucherType === "Sales"
+            ? v.directPaidPaise
+            : 0),
+      0
+    );
+  const scopedTotalPendingPaise = companyScopedVouchers
+    .filter((v) => v.voucherType === "Sales" && v.paymentStatus !== "cancelled")
+    .reduce((sum, v) => sum + Math.max(0, v.amountPaise - v.paidAmountPaise), 0);
+
+  const overdueCount = companyScopedVouchers.filter((v) => {
     if (v.paymentStatus === "cancelled") return false;
     const bal = Math.max(0, v.amountPaise - v.paidAmountPaise);
     return bal > 0 && v.dueDate !== null && v.dueDate < nowMs;
   }).length;
-  const unpaidCount = tally.vouchers.filter((v) => {
+  const unpaidCount = companyScopedVouchers.filter((v) => {
     if (v.paymentStatus === "cancelled") return false;
     return Math.max(0, v.amountPaise - v.paidAmountPaise) > 0;
   }).length;
-  const paidCount = tally.vouchers.filter((v) => v.paymentStatus === "paid").length;
-  const cancelledCount = tally.vouchers.filter((v) => v.paymentStatus === "cancelled").length;
+  const paidCount = companyScopedVouchers.filter((v) => v.paymentStatus === "paid").length;
+  const cancelledCount = companyScopedVouchers.filter((v) => v.paymentStatus === "cancelled").length;
 
   const filteredVouchers = tally.vouchers.filter((v) => {
     const isCancelled = v.paymentStatus === "cancelled";
@@ -221,11 +251,11 @@ export default async function TallySyncPage({
   const navTabs = [
     {
       key: "bills" as const,
-      label: `Bills & Receipts (${tally.vouchers.length})`,
+      label: `Bills & Receipts (${companyScopedVouchers.length})`,
     },
     {
       key: "connect" as const,
-      label: "Connect Tally Prime (.tdl & Webhook)",
+      label: "Connect Tally Prime (.tdl & Setup Guide)",
     },
     {
       key: "rules" as const,
@@ -245,9 +275,11 @@ export default async function TallySyncPage({
     <div className="w-full space-y-6">
       <TallySuiteNav
         activeSection="vouchers"
-        vouchersCount={tally.vouchers.length}
+        vouchersCount={companyScopedVouchers.length}
         partiesCount={tally.totals.partiesCount}
         stockItemsCount={tally.totals.stockItemsCount}
+        companies={tally.companies}
+        selectedCompanyId={selectedCompanyId}
       />
 
       <PageHeader
@@ -262,18 +294,26 @@ export default async function TallySyncPage({
         subtitle={`Sync Tally Prime sales bills, receipts, supplier payments, client ledgers, and stock to ${endpoints.primaryDomain} — bills marked Paid in Tally update automatically, with "${tallyBrandTitle}" inside Tally Prime.`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <ActionLink href="/tally/parties" spinnerSize="xs" className="rsl-btn-secondary">
+            <ActionLink
+              href={`/tally/parties${selectedCompanyId !== "all" ? `?company=${encodeURIComponent(selectedCompanyId)}` : ""}`}
+              spinnerSize="xs"
+              className="rsl-btn-secondary"
+            >
               <Users className="mr-1.5 inline h-3.5 w-3.5" />
               Client Ledgers ({tally.totals.partiesCount})
             </ActionLink>
-            <ActionLink href="/inventory" spinnerSize="xs" className="rsl-btn-secondary">
+            <ActionLink
+              href={`/inventory${selectedCompanyId !== "all" ? `?company=${encodeURIComponent(selectedCompanyId)}` : ""}`}
+              spinnerSize="xs"
+              className="rsl-btn-secondary"
+            >
               <Package className="mr-1.5 inline h-3.5 w-3.5" />
               Inventory &amp; Stock ({tally.totals.stockItemsCount})
             </ActionLink>
             {canManageTally && (
               <>
                 <a href={topTdlDownloadHref} className="rsl-btn-primary">
-                  Download {tdlFilename} (v2.7)
+                  Download {tdlFilename} (v{LATEST_TALLY_TDL_VERSION})
                 </a>
                 <a href={topConnectorDownloadHref} className="rsl-btn-secondary">
                   Download Windows Connector
@@ -389,28 +429,28 @@ export default async function TallySyncPage({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Total Sales Billed"
-          value={formatInr(tally.totals.totalBilledPaise)}
-          sublabel={`${tally.vouchers.length} synced bills • ${tally.totals.nativePdfCount} exact Tally PDF(s)`}
+          value={formatInr(scopedTotalBilledPaise)}
+          sublabel={`${companyScopedVouchers.length} synced bills • ${tally.totals.nativePdfCount} exact Tally PDF(s)`}
           icon={<FileSpreadsheet className="h-4 w-4" />}
         />
         <MetricCard
           label="Total Collected"
-          value={formatInr(tally.totals.totalCollectedPaise)}
+          value={formatInr(scopedTotalCollectedPaise)}
           sublabel="Paid bills & payment receipts"
           accent="emerald"
           icon={<IndianRupee className="h-4 w-4" />}
         />
         <MetricCard
           label="Pending Customer Balance"
-          value={formatInr(tally.totals.totalPendingPaise)}
+          value={formatInr(scopedTotalPendingPaise)}
           sublabel="Unpaid & partially paid sales bills"
-          accent={tally.totals.totalPendingPaise > 0 ? "amber" : "default"}
+          accent={scopedTotalPendingPaise > 0 ? "amber" : "default"}
           icon={<Clock className="h-4 w-4" />}
         />
         <MetricCard
           label="Live Tally Connection"
           value={tally.webhookLiveStatus.label}
-          sublabel={`${tally.webhookEndpoint.eventsReceivedCount} webhook • ${tally.connectionOverview.connectedPcCount}/${tally.devices.length} PC live`}
+          sublabel={`${tally.companies.length} company(ies) • ${tally.webhookEndpoint.eventsReceivedCount} webhook • ${tally.connectionOverview.connectedPcCount}/${tally.devices.length} PC live`}
           accent={
             tally.connectionOverview.overallState === "live_connected"
               ? "emerald"
@@ -430,7 +470,7 @@ export default async function TallySyncPage({
             return (
               <ActionLink
                 key={t.key}
-                href={`/tally?tab=${t.key}`}
+                href={`/tally?tab=${t.key}${selectedCompanyId !== "all" ? `&company=${encodeURIComponent(selectedCompanyId)}` : ""}`}
                 spinnerSize="xs"
                 className={`rounded-xl px-4 py-2 text-xs font-semibold transition ${
                   active
@@ -477,7 +517,7 @@ export default async function TallySyncPage({
               <div className="flex flex-wrap items-center gap-1.5">
                 {(
                   [
-                    { key: "all", label: `All (${tally.vouchers.length})`, show: true },
+                    { key: "all", label: `All (${companyScopedVouchers.length})`, show: true },
                     { key: "overdue", label: `Overdue (${overdueCount})`, show: true },
                     { key: "unpaid", label: `Pending (${unpaidCount})`, show: true },
                     { key: "paid", label: `Paid (${paidCount})`, show: true },
@@ -559,8 +599,8 @@ export default async function TallySyncPage({
                 title="No Tally bills or receipts yet"
                 description={
                   localPortProbe?.reachable && canManageTally
-                    ? `Tally Prime is open on this PC (Company: ${localPortProbe.activeCompanyName || "Active"} • ${localPortProbe.voucherCount} bill(s)). Click 'Fetch Bills from Tally Now' in the green bar above to pull your saved invoices and native Tally PDFs in 1 click, or load ${tdlFilename} (v2.7).`
-                    : `Connect Tally Prime via our personalized ${tdlFilename} (v2.7) add-on, pair the Windows Connector, or upload an XML/CSV export to get started.`
+                    ? `Tally Prime is open on this PC (Company: ${localPortProbe.activeCompanyName || "Active"} • ${localPortProbe.voucherCount} bill(s)). Click 'Fetch Bills from Tally Now' in the green bar above to pull your saved invoices and native Tally PDFs in 1 click, or load ${tdlFilename} (v${LATEST_TALLY_TDL_VERSION}).`
+                    : `Connect Tally Prime via our personalized ${tdlFilename} (v${LATEST_TALLY_TDL_VERSION}) add-on, pair the Windows Connector, or upload an XML/CSV export to get started.`
                 }
                 actionLabel={canManageTally ? "Connect Tally Prime" : "View Connection Guide"}
                 actionHref="/tally?tab=connect"
@@ -633,7 +673,7 @@ export default async function TallySyncPage({
                           )}
                           <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
                             <span>{v.partyPhoneE164 || "No phone added"}</span>
-                            {compName && tally.companies.length > 1 && (
+                            {compName && (
                               <span className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
                                 <Building2 className="h-2.5 w-2.5" />
                                 {compName}

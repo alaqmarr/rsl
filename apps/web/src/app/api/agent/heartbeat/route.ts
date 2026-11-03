@@ -33,6 +33,9 @@ export async function POST(req: NextRequest) {
         bodyObj.activeCompanyName === null || typeof bodyObj.activeCompanyName === "string"
           ? (bodyObj.activeCompanyName as string | null)
           : undefined,
+      openCompanies: Array.isArray(bodyObj.openCompanies)
+        ? bodyObj.openCompanies.map((c) => String(c))
+        : undefined,
       lastAlterId: typeof bodyObj.lastAlterId === "number" ? bodyObj.lastAlterId : undefined,
       lastErrorMessage:
         bodyObj.lastErrorMessage === null || typeof bodyObj.lastErrorMessage === "string"
