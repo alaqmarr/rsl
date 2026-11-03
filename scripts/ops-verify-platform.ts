@@ -273,21 +273,38 @@ async function main() {
   );
 
   const localChecks = [
-    { name: "rsl-web (4500)", url: "http://127.0.0.1:4500/api/health" },
-    { name: "rsl-admin (4501)", url: "http://127.0.0.1:4501/api/health" },
-    { name: "rsl-admin /setup (4501)", url: "http://127.0.0.1:4501/setup" },
-    { name: "rsl-docs (4502)", url: "http://127.0.0.1:4502/api/health" },
-    { name: "rsl-worker-realtime (4510)", url: "http://127.0.0.1:4510/health" },
-    { name: "rsl-worker-bulk (4511)", url: "http://127.0.0.1:4511/health" },
-    { name: "rsl-worker-maintenance (4512)", url: "http://127.0.0.1:4512/health" },
-    { name: "rsl-cleanup (4520)", url: "http://127.0.0.1:4520/health" },
+    { name: "rsl-web (4500)", pm2Name: "rsl-web", url: "http://127.0.0.1:4500/api/health" },
+    { name: "rsl-admin (4501)", pm2Name: "rsl-admin", url: "http://127.0.0.1:4501/api/health" },
+    { name: "rsl-admin /setup (4501)", pm2Name: "rsl-admin", url: "http://127.0.0.1:4501/setup" },
+    { name: "rsl-docs (4502)", pm2Name: "rsl-docs", url: "http://127.0.0.1:4502/api/health" },
+    { name: "rsl-worker-realtime (4510)", pm2Name: "rsl-worker-realtime", url: "http://127.0.0.1:4510/health" },
+    { name: "rsl-worker-bulk (4511)", pm2Name: "rsl-worker-bulk", url: "http://127.0.0.1:4511/health" },
+    { name: "rsl-worker-maintenance (4512)", pm2Name: "rsl-worker-maintenance", url: "http://127.0.0.1:4512/health" },
+    { name: "rsl-cleanup (4520)", pm2Name: "rsl-cleanup", url: "http://127.0.0.1:4520/health" },
   ];
   for (const svc of localChecks) {
-    const res = await checkPublicHttpsUrl(svc.url);
+    let res = await checkPublicHttpsUrl(svc.url);
+    if (res.status === null) {
+      await new Promise((r) => setTimeout(r, 1500));
+      res = await checkPublicHttpsUrl(svc.url);
+    }
     const ok = res.status !== null && res.status >= 200 && res.status < 400;
     console.log(
       `  ${ok ? "✓" : "⨯"} ${svc.name.padEnd(30)} -> ${ok ? `HTTP ${res.status} OK` : `UNREACHABLE (${res.error || "down"})`}`
     );
+    if (!ok) {
+      const errLogPath = path.join(env.LOG_DIR, "pm2", `${svc.pm2Name}.err.log`);
+      if (fs.existsSync(errLogPath)) {
+        const tail = fs
+          .readFileSync(errLogPath, "utf8")
+          .split(/\r?\n/)
+          .filter((l) => l.trim().length > 0)
+          .slice(-10);
+        for (const line of tail) {
+          console.log(`      [err.log] ${line}`);
+        }
+      }
+    }
   }
 
   // 3. Core Platform Subdomains — DNS + Origin Cert + Live Public HTTPS

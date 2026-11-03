@@ -71,6 +71,11 @@ ensure_env_key() {
 ensure_env_key "SETUP_SUBDOMAIN" "setup"
 ensure_env_key "SETUP_URL" "https://setup.${PRIMARY_DOMAIN}"
 ensure_env_key "SETUP_BOOTSTRAP_TOKEN" "$(openssl rand -hex 24)"
+ensure_env_key "BETTER_AUTH_SECRET" "$(openssl rand -base64 32)"
+ensure_env_key "ADMIN_AUTH_SECRET" "$(openssl rand -base64 32)"
+ensure_env_key "KMS_MASTER_KEY" "$(openssl rand -base64 32)"
+ensure_env_key "BACKUP_SIGNING_KEY" "$(openssl rand -base64 32)"
+ensure_env_key "API_KEY_PEPPER" "$(openssl rand -base64 32)"
 ensure_env_key "SSL_ACME_EMAIL" "ssl-ops@${PRIMARY_DOMAIN}"
 ensure_env_key "SSL_PROVISION_MODE" "certbot_webroot"
 ensure_env_key "SSL_PROVISION_COMMAND" "/usr/local/bin/rsl-provision-client-ssl"
@@ -142,9 +147,9 @@ if command -v nginx >/dev/null 2>&1 && [ -f "$APP_DIR/infra/nginx/rsl-marketing.
 fi
 
 echo "==> [4/7] Installing workspace dependencies..."
-pnpm install --frozen-lockfile || pnpm install
+NODE_ENV=development pnpm install --prod=false --frozen-lockfile || NODE_ENV=development pnpm install --prod=false
 
-echo "==> [5/7] Building docs search index, typechecking & building Next.js apps..."
+echo "==> [5/7] Building docs search index, runtime workers, typechecking & building Next.js apps..."
 pnpm docs:lint
 pnpm docs:build
 pnpm typecheck
@@ -153,6 +158,13 @@ pnpm build
 for app_name in web admin docs; do
   if [ ! -f "$APP_DIR/apps/${app_name}/.next/BUILD_ID" ]; then
     echo "ERROR: Build verification failed — missing apps/${app_name}/.next/BUILD_ID. Aborting PM2 reload to keep running services safe."
+    exit 1
+  fi
+done
+
+for bundle_name in worker.cjs cleanup.cjs; do
+  if [ ! -f "$APP_DIR/apps/worker/dist/${bundle_name}" ]; then
+    echo "ERROR: Build verification failed — missing apps/worker/dist/${bundle_name}. Aborting PM2 reload."
     exit 1
   fi
 done

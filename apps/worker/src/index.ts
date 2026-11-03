@@ -41,17 +41,19 @@ import {
 
 const env = getEnv();
 
-Sentry.init({
-  dsn: env.SENTRY_DSN_WORKER || undefined,
-  environment: env.NODE_ENV,
-  tracesSampleRate: env.NODE_ENV === "production" ? 0.2 : 1.0,
-});
+if (env.SENTRY_DSN_WORKER) {
+  Sentry.init({
+    dsn: env.SENTRY_DSN_WORKER,
+    environment: env.NODE_ENV,
+    tracesSampleRate: env.NODE_ENV === "production" ? 0.2 : 1.0,
+  });
+}
 
 const logger = getDiagnosticLogger("worker");
 
 function parseSelectedLanes(): Set<WorkerLane> {
   const arg = process.argv.find((a) => a.startsWith("--lane="));
-  const raw = arg ? arg.split("=")[1] : "all";
+  const raw = (arg ? arg.split("=")[1] ?? "" : process.env.WORKER_LANE || "all").trim();
   if (raw === "realtime" || raw === "bulk" || raw === "maintenance") {
     return new Set([raw]);
   }
@@ -360,69 +362,11 @@ function runDailyHashAnchoring() {
 
 async function startWorker() {
   const lanes = parseSelectedLanes();
-  registerStandardJobHandlers();
-  try {
-    sweepDueSslProvisioningJobs();
-  } catch {
-    // Non-blocking startup SSL check
-  }
-
-  const bullWorkers: Worker[] = [];
-  const redisConn = getRedisConnection();
-
-  if (redisConn && isRedisConfigured()) {
-    for (const def of Object.values(QUEUE_REGISTRY)) {
-      if (!lanes.has(def.lane)) continue;
-      const w = new Worker(
-        def.name,
-        async (job) => {
-          const parsed = JobEnvelopeSchema.parse(job.data);
-          await processDueSqliteOutboxForTenant(parsed.tenantId);
-        },
-        {
-          connection: redisConn,
-          concurrency: def.concurrency,
-        }
-      );
-      w.on("failed", (job, err) => {
-        Sentry.captureException(err, {
-          tags: { queue: def.name, jobId: job?.id ?? "unknown" },
-        });
-        logger.error({ queue: def.name, jobId: job?.id, err: err.message }, "BullMQ job failed");
-      });
-      bullWorkers.push(w);
-    }
-  }
-
-  const jobs: Cron[] = [];
-
-  // Sweep durable outbox every 3 seconds so Tally bills trigger WhatsApp messages immediately
-  jobs.push(
-    new Cron("*/3 * * * * *", { protect: true }, async () => {
-      await sweepActiveTenantOutboxes();
-    })
-  );
-
-  if (lanes.has("maintenance")) {
-    // Checkpoint WAL & refresh disk usage every 30 minutes
-    jobs.push(
-      new Cron("*/30 * * * *", { protect: true }, async () => {
-        await runScheduledMaintenance();
-      })
-    );
-
-    // Anchor tenant audit log chains daily at 00:05 IST
-    jobs.push(
-      new Cron("5 0 * * *", { timezone: "Asia/Kolkata", protect: true }, () => {
-        runDailyHashAnchoring();
-      })
-    );
-  }
-
   const laneList = Array.from(lanes).join(", ");
   const healthPort = resolveWorkerHealthPort();
   let isDraining = false;
 
+  // Bind loopback health endpoint immediately so PM2 / ops:verify probes never time out during queue attach
   const healthServer = http.createServer((req, res) => {
     if (req.url === "/health" || req.url === "/api/health") {
       const providedSecret = String(req.headers["x-rsl-internal-secret"] || "");
@@ -475,11 +419,81 @@ async function startWorker() {
     res.end();
   });
 
-  healthServer.listen(healthPort, "127.0.0.1", () => {
-    if (typeof process.send === "function") {
-      process.send("ready");
-    }
+  await new Promise<void>((resolve, reject) => {
+    healthServer.once("error", reject);
+    healthServer.listen(healthPort, "127.0.0.1", () => {
+      healthServer.removeListener("error", reject);
+      if (typeof process.send === "function") {
+        process.send("ready");
+      }
+      resolve();
+    });
   });
+
+  registerStandardJobHandlers();
+
+  const bullWorkers: Worker[] = [];
+  const redisConn = getRedisConnection();
+
+  if (redisConn && isRedisConfigured()) {
+    for (const def of Object.values(QUEUE_REGISTRY)) {
+      if (!lanes.has(def.lane)) continue;
+      const w = new Worker(
+        def.name,
+        async (job) => {
+          const parsed = JobEnvelopeSchema.parse(job.data);
+          await processDueSqliteOutboxForTenant(parsed.tenantId);
+        },
+        {
+          connection: redisConn,
+          concurrency: def.concurrency,
+        }
+      );
+      w.on("failed", (job, err) => {
+        Sentry.captureException(err, {
+          tags: { queue: def.name, jobId: job?.id ?? "unknown" },
+        });
+        logger.error({ queue: def.name, jobId: job?.id, err: err.message }, "BullMQ job failed");
+      });
+      w.on("error", (err) => {
+        logger.warn({ queue: def.name, err: err.message }, "BullMQ worker connection warning");
+      });
+      bullWorkers.push(w);
+    }
+  }
+
+  const jobs: Cron[] = [];
+
+  // Sweep durable outbox every 3 seconds so Tally bills trigger WhatsApp messages immediately
+  jobs.push(
+    new Cron("*/3 * * * * *", { protect: true }, async () => {
+      await sweepActiveTenantOutboxes();
+    })
+  );
+
+  if (lanes.has("maintenance")) {
+    setImmediate(() => {
+      try {
+        sweepDueSslProvisioningJobs();
+      } catch {
+        // Non-blocking startup SSL check
+      }
+    });
+
+    // Checkpoint WAL & refresh disk usage every 30 minutes
+    jobs.push(
+      new Cron("*/30 * * * *", { protect: true }, async () => {
+        await runScheduledMaintenance();
+      })
+    );
+
+    // Anchor tenant audit log chains daily at 00:05 IST
+    jobs.push(
+      new Cron("5 0 * * *", { timezone: "Asia/Kolkata", protect: true }, () => {
+        runDailyHashAnchoring();
+      })
+    );
+  }
 
   logger.info(
     { lanes: laneList, healthPort, redisEnabled: isRedisConfigured() },

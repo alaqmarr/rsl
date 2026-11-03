@@ -3,9 +3,9 @@
 // 1. ALL ports are strictly within 4500–4600 (4500, 4501, 4502, 4510, 4511, 4512, 4520).
 // 2. Every process is isolated in namespace "rsl-marketing" with explicit rsl-* names
 //    and isolated logs under LOG_DIR/pm2 so other PM2 apps on the server are NEVER touched.
-// 3. Direct Node execution (zero `pnpm` shell wrappers) so SIGINT/SIGTERM reaches Node cleanly
-//    without leaving orphaned child processes during reload or shutdown.
-// 4. Automatically loads root .env (/opt/rslmarketing/.env) into all 7 RSL services.
+// 3. Direct Node execution of pre-compiled CommonJS bundles (`apps/worker/dist/*.cjs`)
+//    and Next.js binaries (zero `pnpm` or `tsx` child wrappers, zero `.mjs` fork issues).
+// 4. Automatically loads root .env into all 7 RSL services.
 
 const path = require("node:path");
 const fs = require("node:fs");
@@ -37,10 +37,8 @@ const NEXT_DOCS_BIN = resolveNodeBinScript("next/dist/bin/next", [
   path.join(REPO_ROOT, "apps", "docs"),
   REPO_ROOT,
 ]);
-const TSX_CLI_BIN = resolveNodeBinScript("tsx/dist/cli.mjs", [
-  path.join(REPO_ROOT, "apps", "worker"),
-  REPO_ROOT,
-]);
+const WORKER_DIST_BIN = path.join(REPO_ROOT, "apps", "worker", "dist", "worker.cjs");
+const CLEANUP_DIST_BIN = path.join(REPO_ROOT, "apps", "worker", "dist", "cleanup.cjs");
 
 function parseRootDotEnv(envFilePath) {
   const parsed = {};
@@ -76,6 +74,7 @@ fs.mkdirSync(PM2_LOG_DIR, { recursive: true });
 const sharedEnv = {
   ...fileEnv,
   NODE_ENV: "production",
+  RSL_APP_DIR: REPO_ROOT,
   PRIMARY_DOMAIN: process.env.PRIMARY_DOMAIN || fileEnv.PRIMARY_DOMAIN || "rapidshiftlabs.in",
   APP_URL: process.env.APP_URL || fileEnv.APP_URL || "https://app.rapidshiftlabs.in",
   ADMIN_URL: process.env.ADMIN_URL || fileEnv.ADMIN_URL || "https://admin.rapidshiftlabs.in",
@@ -140,38 +139,40 @@ module.exports = {
     {
       ...sharedPm2Fields("rsl-worker-realtime", "512M"),
       cwd: path.join(REPO_ROOT, "apps", "worker"),
-      script: TSX_CLI_BIN,
-      args: "src/index.ts --lane=realtime --health-port=4510",
+      script: WORKER_DIST_BIN,
+      args: "--lane=realtime --health-port=4510",
       env: {
         ...sharedEnv,
+        WORKER_LANE: "realtime",
         WORKER_HEALTH_PORT: 4510,
       },
     },
     {
       ...sharedPm2Fields("rsl-worker-bulk", "512M"),
       cwd: path.join(REPO_ROOT, "apps", "worker"),
-      script: TSX_CLI_BIN,
-      args: "src/index.ts --lane=bulk --health-port=4511",
+      script: WORKER_DIST_BIN,
+      args: "--lane=bulk --health-port=4511",
       env: {
         ...sharedEnv,
+        WORKER_LANE: "bulk",
         WORKER_HEALTH_PORT: 4511,
       },
     },
     {
       ...sharedPm2Fields("rsl-worker-maintenance", "384M"),
       cwd: path.join(REPO_ROOT, "apps", "worker"),
-      script: TSX_CLI_BIN,
-      args: "src/index.ts --lane=maintenance --health-port=4512",
+      script: WORKER_DIST_BIN,
+      args: "--lane=maintenance --health-port=4512",
       env: {
         ...sharedEnv,
+        WORKER_LANE: "maintenance",
         WORKER_HEALTH_PORT: 4512,
       },
     },
     {
       ...sharedPm2Fields("rsl-cleanup", "256M"),
       cwd: REPO_ROOT,
-      script: TSX_CLI_BIN,
-      args: "infra/pm2/rsl-cleanup-service.ts",
+      script: CLEANUP_DIST_BIN,
       env: {
         ...sharedEnv,
         CLEANUP_SERVICE_PORT: 4520,

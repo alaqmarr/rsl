@@ -74,6 +74,9 @@ export function getRedisConnection(): IORedis | null {
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
     });
+    redisClient.on("error", () => {
+      // Handled per-operation / retried automatically by IORedis; prevent unhandled EventEmitter crash
+    });
   }
   return redisClient;
 }

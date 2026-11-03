@@ -12,11 +12,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const REPO_ROOT = process.env.RSL_APP_DIR
+  ? path.resolve(process.env.RSL_APP_DIR)
+  : path.resolve(__dirname, "..", "..");
 const ECOSYSTEM_PATH = path.join(REPO_ROOT, "infra", "pm2", "ecosystem.config.cjs");
+const requireCjs = createRequire(import.meta.url);
 
 function loadRootDotEnvIntoProcess() {
   const envFile = path.join(REPO_ROOT, ".env");
@@ -54,6 +58,12 @@ const RSL_PM2_APPS = [
 const RSL_ONLY_CSV = RSL_PM2_APPS.join(",");
 const PM2_BIN = process.platform === "win32" ? "pm2.cmd" : "pm2";
 
+function resolvePm2LogDir() {
+  const raw = process.env.LOG_DIR || ".rsl-logs";
+  const logRoot = path.isAbsolute(raw) ? raw : path.resolve(REPO_ROOT, raw);
+  return path.join(logRoot, "pm2");
+}
+
 function assertSafePort(port) {
   if (!Number.isInteger(port) || port < PORT_MIN || port > PORT_MAX) {
     throw new Error(`Refusing to inspect port ${port}: outside 4500-4600 range!`);
@@ -85,7 +95,22 @@ function getPm2ProcessList() {
   }
 }
 
-function assertNextBuildsPresent() {
+function ensureRuntimeBundlesPresent() {
+  const workerBundle = path.join(REPO_ROOT, "apps", "worker", "dist", "worker.cjs");
+  const cleanupBundle = path.join(REPO_ROOT, "apps", "worker", "dist", "cleanup.cjs");
+  if (!fs.existsSync(workerBundle) || !fs.existsSync(cleanupBundle)) {
+    console.log("[rsl-pm2] Building worker & cleanup CommonJS runtime bundles...");
+    const res = spawnSync(process.execPath, [path.join(REPO_ROOT, "scripts", "build-runtime-services.mjs")], {
+      cwd: REPO_ROOT,
+      stdio: "inherit",
+    });
+    if (res.status !== 0) {
+      throw new Error("[rsl-pm2] Failed to build runtime services (scripts/build-runtime-services.mjs).");
+    }
+  }
+}
+
+function assertProductionArtifactsPresent() {
   const nextApps = ["web", "admin", "docs"];
   for (const app of nextApps) {
     const buildIdFile = path.join(REPO_ROOT, "apps", app, ".next", "BUILD_ID");
@@ -95,6 +120,7 @@ function assertNextBuildsPresent() {
       );
     }
   }
+  ensureRuntimeBundlesPresent();
 }
 
 function cleanNextBuildLocks() {
@@ -155,15 +181,91 @@ function cleanOrphanedRslPortListeners(managedRslPids) {
 }
 
 function runOneShotDbAndLogCleanup() {
+  ensureRuntimeBundlesPresent();
   console.log("[rsl-pm2] Running RSL database, staging & log cleanup (--once)...");
-  const pnpmBin = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-  const res = spawnSync(pnpmBin, ["exec", "tsx", "infra/pm2/rsl-cleanup-service.ts", "--once"], {
+  const cleanupBundle = path.join(REPO_ROOT, "apps", "worker", "dist", "cleanup.cjs");
+  const res = spawnSync(process.execPath, [cleanupBundle, "--once"], {
     cwd: REPO_ROOT,
     stdio: "inherit",
-    shell: process.platform === "win32",
+    env: {
+      ...process.env,
+      RSL_APP_DIR: REPO_ROOT,
+    },
   });
   if (res.status !== 0) {
     console.warn("[rsl-pm2] Warning: one-shot cleanup exited with non-zero code.");
+  }
+}
+
+/**
+ * Safely reconciles ONLY `rsl-*` PM2 processes against `ecosystem.config.cjs`:
+ * - Any `rsl-*` process that is errored/stopped or whose `pm_exec_path` / `exec_interpreter`
+ *   changed (e.g. migrating from `pnpm` or `tsx` to pre-built `.cjs` bundles) is deleted and
+ *   freshly started from `ecosystem.config.cjs`.
+ * - Any `rsl-*` process already online with matching `script` is cleanly restarted with `--update-env`.
+ * - Non-RSL PM2 processes on the host are NEVER touched.
+ */
+function syncAndRestartRslEcosystem(existingRslProcs) {
+  delete requireCjs.cache[requireCjs.resolve(ECOSYSTEM_PATH)];
+  const ecosystem = requireCjs(ECOSYSTEM_PATH);
+  const specByName = new Map((ecosystem.apps || []).map((a) => [a.name, a]));
+
+  const needFreshStart = [];
+  const needRestart = [];
+
+  for (const appName of RSL_PM2_APPS) {
+    const spec = specByName.get(appName);
+    const matches = existingRslProcs.filter((p) => p.name === appName);
+
+    if (matches.length === 0) {
+      needFreshStart.push(appName);
+      continue;
+    }
+
+    const proc = matches[0];
+    const currentExecPath = path.resolve(String(proc.pm2_env?.pm_exec_path || ""));
+    const expectedExecPath = spec
+      ? path.resolve(spec.cwd || REPO_ROOT, String(spec.script || ""))
+      : "";
+    const status = String(proc.pm2_env?.status || "");
+    const interpreter = String(proc.pm2_env?.exec_interpreter || "");
+
+    const isStaleOrBroken =
+      matches.length > 1 ||
+      status !== "online" ||
+      interpreter === "none" ||
+      (expectedExecPath && currentExecPath !== expectedExecPath);
+
+    if (isStaleOrBroken) {
+      console.log(
+        `[rsl-pm2] Refreshing PM2 definition for ${appName} (prev status=${status}, script=${path.basename(currentExecPath || "none")})...`
+      );
+      runPm2(["delete", appName]);
+      needFreshStart.push(appName);
+    } else {
+      needRestart.push(appName);
+    }
+  }
+
+  for (const appName of needRestart) {
+    runPm2(["restart", appName, "--update-env"]);
+  }
+
+  if (needFreshStart.length > 0) {
+    runPm2(["start", ECOSYSTEM_PATH, "--only", needFreshStart.join(","), "--update-env"]);
+  }
+}
+
+function tailLogLines(filePath, maxLines = 20) {
+  try {
+    if (!fs.existsSync(filePath)) return [];
+    const lines = fs
+      .readFileSync(filePath, "utf8")
+      .split(/\r?\n/)
+      .filter((l) => l.trim().length > 0);
+    return lines.slice(-maxLines);
+  } catch {
+    return [];
   }
 }
 
@@ -179,9 +281,12 @@ async function verifyRslHealth() {
   ];
 
   console.log("[rsl-pm2] Verifying RSL health endpoints on ports 4500-4520...");
+  const pm2LogDir = resolvePm2LogDir();
+  const latestProcs = getPm2ProcessList();
+
   for (const ep of endpoints) {
     let healthy = false;
-    for (let attempt = 1; attempt <= 8; attempt++) {
+    for (let attempt = 1; attempt <= 10; attempt++) {
       try {
         const res = await fetch(ep.url, { signal: AbortSignal.timeout(3000) });
         if (res.ok) {
@@ -193,7 +298,23 @@ async function verifyRslHealth() {
       }
       await new Promise((r) => setTimeout(r, 1500));
     }
-    console.log(`  ${healthy ? "✓" : "⨯"} ${ep.name.padEnd(24)} -> ${ep.url} (${healthy ? "HEALTHY" : "STARTING/UNREACHABLE"})`);
+    console.log(
+      `  ${healthy ? "✓" : "⨯"} ${ep.name.padEnd(24)} -> ${ep.url} (${healthy ? "HEALTHY" : "UNREACHABLE"})`
+    );
+
+    if (!healthy) {
+      const p = latestProcs.find((item) => item.name === ep.name);
+      if (p) {
+        console.error(
+          `    [diag] PM2 status=${p.pm2_env?.status ?? "unknown"} | restarts=${p.pm2_env?.restart_time ?? 0} | script=${p.pm2_env?.pm_exec_path ?? "unknown"}`
+        );
+      }
+      const errLines = tailLogLines(path.join(pm2LogDir, `${ep.name}.err.log`), 20);
+      const outLines = errLines.length === 0 ? tailLogLines(path.join(pm2LogDir, `${ep.name}.out.log`), 15) : [];
+      for (const line of [...errLines, ...outLines]) {
+        console.error(`    [log] ${line}`);
+      }
+    }
   }
 }
 
@@ -216,40 +337,14 @@ async function main() {
       break;
     }
 
-    case "start": {
-      assertNextBuildsPresent();
-      cleanOrphanedRslPortListeners(managedRslPids);
+    case "start":
+    case "restart":
+    case "reload": {
+      assertProductionArtifactsPresent();
       cleanNextBuildLocks();
       runOneShotDbAndLogCleanup();
-      runPm2(["start", ECOSYSTEM_PATH, "--only", RSL_ONLY_CSV, "--update-env"]);
-      runPm2(["save"]);
-      await verifyRslHealth();
-      break;
-    }
-
-    case "restart": {
-      assertNextBuildsPresent();
-      runOneShotDbAndLogCleanup();
       cleanOrphanedRslPortListeners(managedRslPids);
-      if (existingRslProcs.length > 0) {
-        for (const appName of RSL_PM2_APPS) {
-          if (existingRslProcs.some((p) => p.name === appName)) {
-            runPm2(["restart", appName, "--update-env"]);
-          }
-        }
-      } else {
-        runPm2(["start", ECOSYSTEM_PATH, "--only", RSL_ONLY_CSV, "--update-env"]);
-      }
-      runPm2(["save"]);
-      await verifyRslHealth();
-      break;
-    }
-
-    case "reload": {
-      assertNextBuildsPresent();
-      runOneShotDbAndLogCleanup();
-      cleanOrphanedRslPortListeners(managedRslPids);
-      runPm2(["start", ECOSYSTEM_PATH, "--only", RSL_ONLY_CSV, "--update-env"]);
+      syncAndRestartRslEcosystem(existingRslProcs);
       runPm2(["save"]);
       await verifyRslHealth();
       break;

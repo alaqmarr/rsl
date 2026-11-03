@@ -268,8 +268,8 @@ async function reloadSingleRslAppSafely(pm2Name: string): Promise<void> {
     throw new Error(`Refusing to touch non-RSL PM2 process: ${pm2Name}`);
   }
   const pm2Bin = process.platform === "win32" ? "pm2.cmd" : "pm2";
-  console.warn(`[rsl-cleanup] Triggering isolated graceful reload of unhealthy RSL process: ${pm2Name}`);
-  await execFileAsync(pm2Bin, ["reload", pm2Name, "--update-env"], { timeout: 20000 });
+  console.warn(`[rsl-cleanup] Triggering isolated restart of unhealthy RSL process: ${pm2Name}`);
+  await execFileAsync(pm2Bin, ["restart", pm2Name, "--update-env"], { timeout: 20000 });
 }
 
 async function runWatchdogCheck(): Promise<void> {
@@ -304,25 +304,14 @@ async function runWatchdogCheck(): Promise<void> {
 
 async function main() {
   const onceMode = process.argv.includes("--once");
-  await runCleanupCycle();
-
   if (onceMode) {
+    await runCleanupCycle();
     closeAllHandlesForShutdown();
     process.exit(0);
   }
 
   const servicePort = env.CLEANUP_SERVICE_PORT;
   assertAllowedPort(servicePort);
-
-  const cleanupTimer = setInterval(() => {
-    void runCleanupCycle().catch((err) => console.error("[rsl-cleanup] Scheduled cleanup error:", err));
-  }, 20 * 60_000);
-
-  const watchdogTimer = setInterval(() => {
-    void runWatchdogCheck().catch((err) => console.error("[rsl-cleanup] Watchdog error:", err));
-  }, 60_000);
-
-  void runWatchdogCheck();
 
   const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && (req.url === "/health" || req.url === "/api/health")) {
@@ -358,14 +347,31 @@ async function main() {
     res.end();
   });
 
-  server.listen(servicePort, "127.0.0.1", () => {
-    console.log(
-      `[rsl-cleanup] Running on http://127.0.0.1:${servicePort}/health (strictly scoped to rsl-* apps & ports 4500-4600)`
-    );
-    if (typeof process.send === "function") {
-      process.send("ready");
-    }
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(servicePort, "127.0.0.1", () => {
+      server.removeListener("error", reject);
+      console.log(
+        `[rsl-cleanup] Running on http://127.0.0.1:${servicePort}/health (strictly scoped to rsl-* apps & ports 4500-4600)`
+      );
+      if (typeof process.send === "function") {
+        process.send("ready");
+      }
+      resolve();
+    });
   });
+
+  // Run initial cleanup & watchdog asynchronously after binding health port
+  void runCleanupCycle().catch((err) => console.error("[rsl-cleanup] Initial cleanup error:", err));
+  void runWatchdogCheck().catch((err) => console.error("[rsl-cleanup] Initial watchdog error:", err));
+
+  const cleanupTimer = setInterval(() => {
+    void runCleanupCycle().catch((err) => console.error("[rsl-cleanup] Scheduled cleanup error:", err));
+  }, 20 * 60_000);
+
+  const watchdogTimer = setInterval(() => {
+    void runWatchdogCheck().catch((err) => console.error("[rsl-cleanup] Watchdog error:", err));
+  }, 60_000);
 
   const shutdown = (signal: string) => {
     console.log(`[rsl-cleanup] Received ${signal}, shutting down cleanly...`);

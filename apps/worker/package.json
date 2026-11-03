@@ -8,7 +8,7 @@
     "start:realtime": "tsx src/index.ts --lane=realtime --health-port=4510",
     "start:bulk": "tsx src/index.ts --lane=bulk --health-port=4511",
     "start:maintenance": "tsx src/index.ts --lane=maintenance --health-port=4512",
-    "build": "tsc --noEmit",
+    "build": "tsc --noEmit && node ../../scripts/build-runtime-services.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit"
   },

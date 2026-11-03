@@ -255,7 +255,7 @@ fi
 $SUDO PRIMARY_DOMAIN="${PRIMARY_DOMAIN}" SSL_ACME_EMAIL="${SSL_ACME_EMAIL:-ssl-ops@${PRIMARY_DOMAIN}}" /usr/local/bin/rsl-provision-client-ssl --core || true
 
 echo "==> [6/8] Installing workspace dependencies & building production bundles..."
-pnpm install --frozen-lockfile || pnpm install
+NODE_ENV=development pnpm install --prod=false --frozen-lockfile || NODE_ENV=development pnpm install --prod=false
 pnpm docs:lint
 pnpm docs:build
 pnpm typecheck
