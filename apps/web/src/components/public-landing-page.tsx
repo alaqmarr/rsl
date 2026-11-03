@@ -105,6 +105,9 @@ export function PublicLandingPage({
             >
               Setup Guides ↗
             </a>
+            <Link href="/legal" className="transition hover:text-slate-900">
+              Compliance
+            </Link>
           </nav>
 
           <div className="flex items-center gap-2.5">
@@ -611,6 +614,13 @@ export function PublicLandingPage({
           { label: "Start 7-Day Free Trial", href: "/register" },
           { label: "Customer Sign In", href: "/login" },
           { label: "Setup Guides & Docs ↗", href: docsBaseUrl, external: true },
+          { label: "Privacy Policy", href: "/privacy" },
+          { label: "Terms & Conditions", href: "/terms" },
+          { label: "Payment & GST Terms", href: "/payment-terms" },
+          { label: "Refund Policy", href: "/refund-policy" },
+          { label: "Service Delivery", href: "/service-delivery" },
+          { label: "Data Deletion", href: "/data-deletion" },
+          { label: "Compliance Center", href: "/legal" },
         ]}
       />
     </div>

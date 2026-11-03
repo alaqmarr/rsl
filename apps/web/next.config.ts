@@ -32,6 +32,20 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: monorepoRoot,
   },
+  async redirects() {
+    return [
+      { source: "/privacy-policy", destination: "/privacy", permanent: true },
+      { source: "/terms-and-conditions", destination: "/terms", permanent: true },
+      { source: "/terms-of-service", destination: "/terms", permanent: true },
+      { source: "/cancellation-and-refund-policy", destination: "/refund-policy", permanent: true },
+      { source: "/refunds", destination: "/refund-policy", permanent: true },
+      { source: "/shipping-policy", destination: "/service-delivery", permanent: true },
+      { source: "/shipping-and-delivery", destination: "/service-delivery", permanent: true },
+      { source: "/cookie-policy", destination: "/cookies", permanent: true },
+      { source: "/grievance", destination: "/data-deletion", permanent: true },
+      { source: "/compliance", destination: "/legal", permanent: true },
+    ];
+  },
   async headers() {
     return [
       {

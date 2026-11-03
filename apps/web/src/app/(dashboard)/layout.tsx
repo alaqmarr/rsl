@@ -69,6 +69,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
     { label: "Backups", href: "/backups" },
     { label: "Workspace Health", href: "/status" },
     { label: "Help Guides", href: "/help" },
+    { label: "Privacy", href: "/privacy" },
+    { label: "Terms", href: "/terms" },
+    { label: "Refunds", href: "/refund-policy" },
+    { label: "Legal", href: "/legal" },
   ].filter((link) => canRoleAccessWebRoute(session.roleSlug, link.href, session.workspace.id));
 
   const workspaceSwitcherCard = (

@@ -94,6 +94,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     ...(canStaffAccessAdminRoute(staff.staffRole, "/runbooks")
       ? [{ label: "Server Health", href: "/runbooks" }]
       : []),
+    { label: "Legal & Policies ↗", href: `${env.APP_URL}/legal`, external: true },
     { label: "Client App ↗", href: env.APP_URL, external: true },
   ];
 

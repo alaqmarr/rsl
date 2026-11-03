@@ -282,6 +282,46 @@ export function WebRegisterForm({
         </div>
       </div>
 
+      <p className="text-[11px] leading-relaxed text-zinc-500">
+        By creating a business workspace, you agree to our{" "}
+        <a
+          href="/terms"
+          target="_blank"
+          rel="noreferrer"
+          className="font-semibold text-slate-700 underline decoration-zinc-300 underline-offset-2 hover:text-emerald-700"
+        >
+          Terms &amp; Conditions
+        </a>
+        ,{" "}
+        <a
+          href="/privacy"
+          target="_blank"
+          rel="noreferrer"
+          className="font-semibold text-slate-700 underline decoration-zinc-300 underline-offset-2 hover:text-emerald-700"
+        >
+          Privacy Policy
+        </a>
+        ,{" "}
+        <a
+          href="/payment-terms"
+          target="_blank"
+          rel="noreferrer"
+          className="font-semibold text-slate-700 underline decoration-zinc-300 underline-offset-2 hover:text-emerald-700"
+        >
+          Payment &amp; GST Terms
+        </a>
+        , and{" "}
+        <a
+          href="/refund-policy"
+          target="_blank"
+          rel="noreferrer"
+          className="font-semibold text-slate-700 underline decoration-zinc-300 underline-offset-2 hover:text-emerald-700"
+        >
+          Refund Policy
+        </a>
+        .
+      </p>
+
       <button
         type="submit"
         disabled={isPending}

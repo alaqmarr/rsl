@@ -120,11 +120,22 @@ export default async function LoginPage({
           <WebLoginForm />
         </div>
 
-        <div className="flex w-full max-w-[400px] items-center justify-between border-t border-zinc-200/80 pt-4 text-[11px] text-zinc-500">
+        <div className="flex w-full max-w-[400px] flex-wrap items-center justify-between gap-2 border-t border-zinc-200/80 pt-4 text-[11px] text-zinc-500">
           <BrandLogo variant="mark" size="xs" subtitle="RapidShift Labs" />
-          <Link href="/" className="hover:text-slate-900 hover:underline">
-            Explore Plans &amp; Features →
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link href="/privacy" className="hover:text-slate-900 hover:underline">
+              Privacy
+            </Link>
+            <Link href="/terms" className="hover:text-slate-900 hover:underline">
+              Terms
+            </Link>
+            <Link href="/refund-policy" className="hover:text-slate-900 hover:underline">
+              Refunds
+            </Link>
+            <Link href="/legal" className="hover:text-slate-900 hover:underline">
+              Compliance
+            </Link>
+          </div>
         </div>
       </div>
     </div>

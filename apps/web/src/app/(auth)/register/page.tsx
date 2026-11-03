@@ -60,11 +60,25 @@ export default async function RegisterPage({
           <WebRegisterForm indianStates={INDIAN_STATES} />
         </div>
 
-        <div className="mt-6 flex items-center justify-between px-1 text-[11px] text-zinc-500">
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-zinc-500">
           <BrandLogo variant="mark" size="xs" subtitle="RapidShift Labs" />
-          <Link href="/" className="hover:text-slate-900 hover:underline">
-            ← Back to Overview &amp; Pricing
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link href="/" className="hover:text-slate-900 hover:underline">
+              Overview &amp; Pricing
+            </Link>
+            <Link href="/privacy" className="hover:text-slate-900 hover:underline">
+              Privacy
+            </Link>
+            <Link href="/terms" className="hover:text-slate-900 hover:underline">
+              Terms
+            </Link>
+            <Link href="/refund-policy" className="hover:text-slate-900 hover:underline">
+              Refunds
+            </Link>
+            <Link href="/legal" className="hover:text-slate-900 hover:underline">
+              Compliance
+            </Link>
+          </div>
         </div>
       </div>
     </div>

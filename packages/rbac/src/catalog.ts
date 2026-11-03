@@ -443,6 +443,16 @@ export const WEB_ROUTE_ACCESS_RULES: Array<{
     label: "Workspace Health",
   },
   { prefix: "/help", anyOf: [], label: "Guides & Help" },
+  { prefix: "/legal", anyOf: [], label: "Legal & Compliance Center" },
+  { prefix: "/privacy", anyOf: [], label: "Privacy Policy" },
+  { prefix: "/terms", anyOf: [], label: "Terms & Conditions" },
+  { prefix: "/payment-terms", anyOf: [], label: "Payment & GST Billing Terms" },
+  { prefix: "/refund-policy", anyOf: [], label: "Refund & Cancellation Policy" },
+  { prefix: "/service-delivery", anyOf: [], label: "Service Delivery Policy" },
+  { prefix: "/acceptable-use", anyOf: [], label: "Acceptable Use & Messaging Policy" },
+  { prefix: "/cookies", anyOf: [], label: "Cookie & Session Policy" },
+  { prefix: "/data-deletion", anyOf: [], label: "User Data Deletion & Grievance" },
+  { prefix: "/dpa", anyOf: [], label: "Data Processing & Security Addendum" },
 ];
 
 export function canPermissionsAccessWebRoute(

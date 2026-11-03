@@ -147,6 +147,9 @@ export default function DocsRootLayout({ children }: { children: React.ReactNode
             { label: "All Guides", href: "/" },
             { label: "Developer API", href: "/api-reference" },
             { label: "Common Errors & Fixes", href: "/errors" },
+            { label: "Privacy Policy ↗", href: `${appUrl}/privacy`, external: true },
+            { label: "Terms ↗", href: `${appUrl}/terms`, external: true },
+            { label: "Compliance ↗", href: `${appUrl}/legal`, external: true },
             { label: "Open Dashboard ↗", href: appUrl, external: true },
           ]}
         />
