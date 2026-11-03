@@ -1,5 +1,6 @@
 import { ERROR_CATALOG } from "@rsl/core";
 import { PageHeader, SectionCard } from "@rsl/ui";
+import { ActionLink } from "@/components/ios-feedback";
 
 export default function ErrorsPage() {
   const errors = Object.values(ERROR_CATALOG);
@@ -16,7 +17,7 @@ export default function ErrorsPage() {
 
       <SectionCard
         title={`Error Reference (${errors.length})`}
-        subtitle="Lookup any error code to see what caused it and how to fix it immediately"
+        subtitle="Select any error code for its full resolution walkthrough and JSON API structure"
         noPadding
       >
         <div className="overflow-x-auto">
@@ -32,8 +33,13 @@ export default function ErrorsPage() {
             <tbody className="divide-y divide-zinc-100 bg-white">
               {errors.map((err) => (
                 <tr key={err.code} id={err.code} className="align-top hover:bg-zinc-50/60">
-                  <td className="px-5 py-3.5 font-mono text-xs font-bold whitespace-nowrap text-slate-900 sm:px-6">
-                    {err.code}
+                  <td className="px-5 py-3.5 font-mono text-xs font-bold whitespace-nowrap sm:px-6">
+                    <ActionLink
+                      href={`/errors/${err.code}`}
+                      className="text-emerald-700 hover:underline"
+                    >
+                      {err.code}
+                    </ActionLink>
                   </td>
                   <td className="px-4 py-3.5 font-mono text-xs text-zinc-500 tabular-nums">
                     {err.httpStatus}

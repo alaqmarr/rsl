@@ -15,7 +15,7 @@ import {
   formatRoleLabel,
   getPermissionsForRole,
 } from "@rsl/rbac";
-import { BrandLogo, PlatformFooter } from "@rsl/ui";
+import { BrandLogo, PlatformFooter, UserAvatar } from "@rsl/ui";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
 import { WorkspaceAccessProvider } from "@/components/workspace-access-context";
 import { SidebarNavLinks, TopWorkspaceBar } from "@/components/workspace-chrome";
@@ -284,15 +284,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 href="/settings/profile"
                 className="group flex items-center gap-2.5 rounded-xl p-1 -m-1 transition hover:bg-zinc-50"
               >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">
-                  {session.user.name.slice(0, 1).toUpperCase()}
-                </span>
+                <UserAvatar name={session.user.name} seed={session.user.email} size="sm" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-1">
                     <span className="truncate text-xs font-semibold text-slate-900 group-hover:text-emerald-700">
                       {session.user.name}
                     </span>
-                    <span className="shrink-0 text-[10px] font-semibold text-zinc-400 group-hover:text-emerald-700">
+                    <span className="shrink-0 text-[10px] font-semibold text-zinc-500 group-hover:text-emerald-700">
                       Profile
                     </span>
                   </div>

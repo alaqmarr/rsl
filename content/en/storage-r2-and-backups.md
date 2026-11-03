@@ -27,13 +27,13 @@ Open **Backups & Storage** (`/backups`) in your left sidebar. RapidShift Labs gi
    - **Default Storage Class**: keep **Standard** -> click **Create bucket**.
 4. Return to **R2 Object Storage -> Overview** and copy your **Account ID** (32-character hex string in the right sidebar) — your S3 Endpoint URL is:
    `https://<YOUR_32_CHAR_ACCOUNT_ID>.r2.cloudflarestorage.com`
-   *(Important: Do **NOT** include `/shree-traders-rsl-vault` at the end of the Endpoint URL!)*
+   *(Important: Do **NOT** include `/shree-traders-rsl-vault` at the end of the Endpoint URL)*
 5. Still on **R2 Overview**, click **Manage R2 API Tokens** (top right) -> click **Create Account API token** (or **Create API token**):
    - **Token name**: `RSL Marketing Storage Key`
    - **Permissions**: select **Object Read & Write** (never *Admin Read & Write*).
    - **Specify bucket(s)**: select **Apply to specific buckets only** -> choose `shree-traders-rsl-vault`.
    - **TTL**: leave as **Forever** -> click **Create API Token**.
-6. On the confirmation screen, copy all three values immediately (Cloudflare shows the Secret Access Key only once!):
+6. On the confirmation screen, copy all three values immediately (Cloudflare shows the Secret Access Key only once):
    - **Access Key ID**
    - **Secret Access Key**
    - **Use jurisdiction-specific endpoints for S3 clients**: `https://<account_id>.r2.cloudflarestorage.com`
@@ -50,7 +50,7 @@ Open **Backups & Storage** (`/backups`) in your left sidebar. RapidShift Labs gi
    - **Bucket Name**: `shree-traders-rsl-vault`
    - **Access Key ID & Secret Access Key**: paste the keys copied above (stored encrypted with AES-256-GCM).
 4. **Keep "Copy and verify all existing stored files before switching" checked**:
-   - RapidShift copies every existing Tally PDF and attachment to your new bucket, verifies byte-length integrity on every object, and only switches the active pointer once 100% of files pass verification!
+   - RapidShift copies every existing Tally PDF and attachment to your new bucket, verifies byte-length integrity on every object, and only switches the active pointer once 100% of files pass verification.
 5. Click **Save Storage Settings**.
 
 ---
@@ -72,17 +72,17 @@ Even without any backup add-on unlocked, you can export your live records at any
 ### A. Connecting Google Drive in 1 Click (Automatic Off-Site Sync)
 
 1. Open **Backups & Storage** (`/backups`) — the **Google Drive Automatic Off-Site Backups** card is right at the top of the page (and a **Connect to Google Drive** button also sits in the top-right header).
-2. Click **Connect to Google Drive** (you never need Google Cloud Console, Service Account JSON keys, or manual Folder IDs!).
+2. Click **Connect to Google Drive** (you never need Google Cloud Console, Service Account JSON keys, or manual Folder IDs).
 3. Sign in on Google's official **RapidShift Labs** consent screen and click **Allow**:
    - Uses Google's strict `drive.file` privacy scope — RapidShift Labs can **only** write to its own backup folder and can **never** read any other files in your Google Drive.
    - Automatically creates a **`RapidShift Labs Backups`** folder in your Google Drive.
-4. Once connected, every backup you create below is automatically uploaded into your Google Drive folder — or click **Backup & Upload to Google Drive Now** right on the Google Drive card!
+4. Once connected, every backup you create below is automatically uploaded into your Google Drive folder — or click **Backup & Upload to Google Drive Now** right on the Google Drive card.
 
 ### B. Creating an Encrypted Backup
 
 1. Scroll to **Download Full Workspace Backup (`.rslbackup`)** on `/backups`.
 2. Confirm or customize the backup label and click **Create Backup Now**.
-3. Once complete, click **Download `.rslbackup`** in the backup list — and if your Google Drive is connected above, a copy is already safely uploaded to your **`RapidShift Labs Backups`** folder in Google Drive!
+3. Once complete, click **Download `.rslbackup`** in the backup list — and if your Google Drive is connected above, a copy is already safely uploaded to your **`RapidShift Labs Backups`** folder in Google Drive.
 
 ### C. Restoring Safely Without Overwriting Financial or Opt-Out Ledgers
 

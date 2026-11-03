@@ -8,11 +8,84 @@ export {
   type FlashToastPayload,
 } from "./sileo-toast";
 
-export {
+import {
+  CopyCodeBlock,
+  InteractiveAreaChartCanvas,
   PasswordInput,
+  TabbedApiCodeViewer,
   useDialogFocusTrap,
+  type InteractiveChartPoint,
   type PasswordInputProps,
 } from "./interactive";
+
+export {
+  CopyCodeBlock,
+  InteractiveAreaChartCanvas,
+  PasswordInput,
+  TabbedApiCodeViewer,
+  useDialogFocusTrap,
+  type InteractiveChartPoint,
+  type PasswordInputProps,
+};
+
+const AVATAR_TONES = [
+  "bg-emerald-700 text-white",
+  "bg-indigo-700 text-white",
+  "bg-sky-700 text-white",
+  "bg-amber-700 text-white",
+  "bg-teal-700 text-white",
+  "bg-violet-700 text-white",
+  "bg-rose-700 text-white",
+] as const;
+
+export function getAvatarToneClasses(seed: string): string {
+  const clean = seed.trim().toLowerCase() || "rsl";
+  let hash = 0;
+  for (let i = 0; i < clean.length; i++) {
+    hash = (hash * 31 + clean.charCodeAt(i)) >>> 0;
+  }
+  return AVATAR_TONES[hash % AVATAR_TONES.length]!;
+}
+
+export function getAvatarInitials(name: string): string {
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0) return "RS";
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return `${parts[0]![0] ?? ""}${parts[parts.length - 1]![0] ?? ""}`.toUpperCase();
+}
+
+export function UserAvatar({
+  name,
+  seed,
+  size = "sm",
+  className = "",
+}: {
+  name: string;
+  seed?: string;
+  size?: "xs" | "sm" | "md" | "lg";
+  className?: string;
+}) {
+  const sizeClass =
+    size === "xs"
+      ? "h-6 w-6 text-[10px]"
+      : size === "md"
+        ? "h-9 w-9 text-xs"
+        : size === "lg"
+          ? "h-11 w-11 text-sm"
+          : "h-8 w-8 text-[11px]";
+  const tone = getAvatarToneClasses(seed || name);
+  return (
+    <span
+      aria-hidden="true"
+      className={`inline-flex shrink-0 items-center justify-center rounded-full font-bold tracking-tight shadow-2xs select-none ${sizeClass} ${tone} ${className}`}
+    >
+      {getAvatarInitials(name)}
+    </span>
+  );
+}
 
 const BRAND_LONG_HEIGHT_PX: Record<"xs" | "sm" | "md" | "lg", number> = {
   xs: 22,
@@ -111,7 +184,7 @@ export function PlatformFooter({
           />
           <span className="hidden text-zinc-300 sm:inline">•</span>
           <span className="font-medium text-slate-700">{suiteLabel}</span>
-          <span className="text-zinc-400">© {year} RapidShift Labs</span>
+          <span className="text-zinc-500">© {year} RapidShift Labs</span>
         </div>
 
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px] font-medium text-zinc-500">
@@ -196,22 +269,27 @@ export function WorkspaceLoadingScreen({
   label?: string;
   dark?: boolean;
 }) {
+  const cardSurface = dark
+    ? "border-slate-800 bg-slate-900/90 shadow-[0_1px_2px_rgba(0,0,0,0.28)]"
+    : "border-zinc-200/85 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]";
+  const barStrong = dark ? "bg-slate-800" : "bg-zinc-200/80";
+  const barMedium = dark ? "bg-slate-800/80" : "bg-zinc-200/70";
+  const barSoft = dark ? "bg-slate-800/55" : "bg-zinc-100";
+
   return (
     <div className="w-full animate-fadeIn space-y-6 py-1">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="space-y-2">
-          <div
-            className={`h-6 w-52 animate-pulse rounded-lg ${
-              dark ? "bg-slate-800" : "bg-zinc-200/80"
-            }`}
-          />
-          <div
-            className={`h-3.5 w-80 max-w-[75vw] animate-pulse rounded-md ${
-              dark ? "bg-slate-800/70" : "bg-zinc-200/60"
-            }`}
-          />
+          <div className={`h-6 w-52 animate-pulse rounded-lg ${barStrong}`} />
+          <div className={`h-3.5 w-80 max-w-[75vw] animate-pulse rounded-md ${barMedium}`} />
         </div>
-        <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-zinc-700 shadow-2xs">
+        <span
+          className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-semibold shadow-2xs ${
+            dark
+              ? "border-slate-700 bg-slate-900 text-slate-200"
+              : "border-zinc-200 bg-white text-zinc-700"
+          }`}
+        >
           <IosSpinner size="xs" className="text-emerald-600" />
           <span>{label}</span>
         </span>
@@ -219,38 +297,88 @@ export function WorkspaceLoadingScreen({
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[0, 1, 2, 3].map((i) => (
-          <div
-            key={i}
-            className="rounded-2xl border border-zinc-200/85 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
-          >
+          <div key={i} className={`rounded-2xl border p-5 ${cardSurface}`}>
             <div className="flex items-center justify-between">
-              <div className="h-3.5 w-28 animate-pulse rounded bg-zinc-200/70" />
-              <div className="h-5 w-12 animate-pulse rounded-full bg-zinc-100" />
+              <div className={`h-3.5 w-28 animate-pulse rounded ${barMedium}`} />
+              <div className={`h-5 w-12 animate-pulse rounded-full ${barSoft}`} />
             </div>
-            <div className="mt-4 h-7 w-28 animate-pulse rounded-lg bg-zinc-200/80" />
-            <div className="mt-4 h-3 w-40 animate-pulse rounded bg-zinc-100" />
+            <div className={`mt-4 h-7 w-28 animate-pulse rounded-lg ${barStrong}`} />
+            <div className={`mt-4 h-3 w-40 animate-pulse rounded ${barSoft}`} />
           </div>
         ))}
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-zinc-200/85 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-        <div className="flex items-center justify-between border-b border-zinc-100 bg-zinc-50/70 px-6 py-4">
-          <div className="h-4 w-44 animate-pulse rounded bg-zinc-200/75" />
-          <div className="h-7 w-28 animate-pulse rounded-lg bg-zinc-200/60" />
+      <div className={`overflow-hidden rounded-2xl border ${cardSurface}`}>
+        <div
+          className={`flex items-center justify-between border-b px-6 py-4 ${
+            dark ? "border-slate-800 bg-slate-900/60" : "border-zinc-100 bg-zinc-50/70"
+          }`}
+        >
+          <div className={`h-4 w-44 animate-pulse rounded ${barMedium}`} />
+          <div className={`h-7 w-28 animate-pulse rounded-lg ${barSoft}`} />
         </div>
-        <div className="divide-y divide-zinc-100 px-6 py-2">
+        <div className={`divide-y px-6 py-2 ${dark ? "divide-slate-800" : "divide-zinc-100"}`}>
           {[0, 1, 2, 3].map((r) => (
             <div key={r} className="flex items-center justify-between gap-4 py-4">
               <div className="space-y-2">
-                <div className="h-3.5 w-48 animate-pulse rounded bg-zinc-200/75" />
-                <div className="h-3 w-72 max-w-[60vw] animate-pulse rounded bg-zinc-100" />
+                <div className={`h-3.5 w-48 animate-pulse rounded ${barMedium}`} />
+                <div className={`h-3 w-72 max-w-[60vw] animate-pulse rounded ${barSoft}`} />
               </div>
-              <div className="h-6 w-20 animate-pulse rounded-full bg-zinc-100" />
+              <div className={`h-6 w-20 animate-pulse rounded-full ${barSoft}`} />
             </div>
           ))}
         </div>
       </div>
     </div>
+  );
+}
+
+export function PendingSubmitButton({
+  pending,
+  children,
+  pendingText,
+  className = "rsl-btn-primary",
+  spinnerSize = "xs",
+  disabled = false,
+  iconOnly = false,
+  name,
+  value,
+  title,
+}: {
+  pending: boolean;
+  children: React.ReactNode;
+  pendingText?: string;
+  className?: string;
+  spinnerSize?: "xs" | "sm" | "md";
+  disabled?: boolean;
+  iconOnly?: boolean;
+  name?: string;
+  value?: string;
+  title?: string;
+}) {
+  return (
+    <button
+      type="submit"
+      name={name}
+      value={value}
+      title={title}
+      disabled={disabled || pending}
+      aria-busy={pending}
+      className={`inline-flex items-center justify-center gap-1.5 ${className} disabled:cursor-not-allowed disabled:opacity-75`}
+    >
+      {iconOnly ? (
+        pending ? (
+          <IosSpinner size={spinnerSize} />
+        ) : (
+          children
+        )
+      ) : (
+        <>
+          {pending && <IosSpinner size={spinnerSize} />}
+          {pending && pendingText ? <span>{pendingText}</span> : children}
+        </>
+      )}
+    </button>
   );
 }
 
@@ -655,162 +783,81 @@ export function DualSeriesAreaChart({
   const totalSum = primarySum + secondarySum;
 
   const xFor = (idx: number) =>
-    points.length <= 1 ? padLeft + plotW / 2 : padLeft + (idx / (points.length - 1)) * plotW;
-  const yFor = (val: number) => padTop + plotH - (Math.max(0, val) / maxVal) * plotH;
+    Math.round(
+      points.length <= 1 ? padLeft + plotW / 2 : padLeft + (idx / (points.length - 1)) * plotW
+    );
+  const yFor = (val: number) =>
+    Math.round(padTop + plotH - (Math.max(0, val) / maxVal) * plotH);
 
   const primaryLine =
     points.length === 1
-      ? `M${padLeft.toFixed(1)},${yFor(points[0]!.primary).toFixed(1)} L${(padLeft + plotW).toFixed(1)},${yFor(points[0]!.primary).toFixed(1)}`
-      : points
-          .map((p, i) => `${i === 0 ? "M" : "L"}${xFor(i).toFixed(1)},${yFor(p.primary).toFixed(1)}`)
-          .join(" ");
+      ? `M${padLeft},${yFor(points[0]!.primary)} L${padLeft + plotW},${yFor(points[0]!.primary)}`
+      : points.map((p, i) => `${i === 0 ? "M" : "L"}${xFor(i)},${yFor(p.primary)}`).join(" ");
 
   const primaryArea =
     points.length === 1
-      ? `${primaryLine} L${(padLeft + plotW).toFixed(1)},${(padTop + plotH).toFixed(1)} L${padLeft.toFixed(1)},${(padTop + plotH).toFixed(1)} Z`
+      ? `${primaryLine} L${padLeft + plotW},${padTop + plotH} L${padLeft},${padTop + plotH} Z`
       : points.length > 1
-      ? `${primaryLine} L${xFor(points.length - 1).toFixed(1)},${(padTop + plotH).toFixed(1)} L${xFor(0).toFixed(1)},${(padTop + plotH).toFixed(1)} Z`
-      : "";
+        ? `${primaryLine} L${xFor(points.length - 1)},${padTop + plotH} L${xFor(0)},${padTop + plotH} Z`
+        : "";
 
   const secondaryLine =
     secondaryLabel !== undefined && points.length > 0
       ? points.length === 1
-        ? `M${padLeft.toFixed(1)},${yFor(points[0]!.secondary ?? 0).toFixed(1)} L${(padLeft + plotW).toFixed(1)},${yFor(points[0]!.secondary ?? 0).toFixed(1)}`
+        ? `M${padLeft},${yFor(points[0]!.secondary ?? 0)} L${padLeft + plotW},${yFor(points[0]!.secondary ?? 0)}`
         : points
-            .map(
-              (p, i) =>
-                `${i === 0 ? "M" : "L"}${xFor(i).toFixed(1)},${yFor(p.secondary ?? 0).toFixed(1)}`
-            )
+            .map((p, i) => `${i === 0 ? "M" : "L"}${xFor(i)},${yFor(p.secondary ?? 0)}`)
             .join(" ")
       : "";
 
-  const yTicks = [0, 0.33, 0.66, 1];
+  const yTickRatios = [0, 0.33, 0.66, 1];
+  const yTicks = yTickRatios.map((ratio) => {
+    const val = totalSum === 0 ? 0 : Math.round(maxVal * ratio);
+    return {
+      ratio,
+      y: Math.round(padTop + plotH - ratio * plotH),
+      text: totalSum === 0 && ratio > 0 ? "" : formatValue(val),
+    };
+  });
+
   const labelStride = Math.max(1, Math.ceil(points.length / 7));
   const gradId = `rsl-grad-${primaryLabel.replace(/[^a-z0-9]/gi, "").toLowerCase()}`;
 
+  const interactivePoints: InteractiveChartPoint[] = points.map((pt, idx) => ({
+    label: pt.label,
+    x: xFor(idx),
+    primaryY: yFor(pt.primary),
+    secondaryY: yFor(pt.secondary ?? 0),
+    primaryRaw: pt.primary,
+    secondaryRaw: pt.secondary ?? 0,
+    primaryFormatted: formatValue(pt.primary),
+    secondaryFormatted: formatValue(pt.secondary ?? 0),
+  }));
+
   return (
-    <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200/80 bg-zinc-50/70 px-4 py-2.5 text-[13px] text-zinc-600">
-        <div className="flex flex-wrap items-center gap-5">
-          <span className="inline-flex items-center gap-2 font-semibold text-slate-900">
-            <span
-              className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-              style={{ width: 10, height: 10, backgroundColor: primaryColor }}
-            />
-            <span>{primaryLabel}:</span>
-            <span className="tabular-nums">{formatValue(primarySum)}</span>
-          </span>
-          {secondaryLabel && (
-            <span className="inline-flex items-center gap-2 font-semibold text-slate-900">
-              <span
-                className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-                style={{ width: 10, height: 10, backgroundColor: secondaryColor }}
-              />
-              <span>{secondaryLabel}:</span>
-              <span className="tabular-nums">{formatValue(secondarySum)}</span>
-            </span>
-          )}
-        </div>
-        {totalSum === 0 && <span className="text-[12px] font-medium text-zinc-500">{emptyHint}</span>}
-      </div>
-
-      <div className="w-full overflow-x-auto">
-        <svg
-          viewBox={`0 0 ${width} ${height}`}
-          style={{ height: 224 }}
-          className="h-56 min-w-[540px] w-full select-none"
-          role="img"
-          aria-label={primaryLabel}
-        >
-          <defs>
-            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={primaryColor} stopOpacity={0.18} />
-              <stop offset="100%" stopColor={primaryColor} stopOpacity={0.01} />
-            </linearGradient>
-          </defs>
-
-          {yTicks.map((ratio) => {
-            const val = totalSum === 0 ? 0 : Math.round(maxVal * ratio);
-            const y = padTop + plotH - ratio * plotH;
-            return (
-              <g key={ratio}>
-                <line
-                  x1={padLeft}
-                  x2={width - padRight}
-                  y1={y}
-                  y2={y}
-                  stroke={ratio === 0 ? "#E4E4E7" : "#F4F4F5"}
-                  strokeDasharray={ratio === 0 ? undefined : "4 4"}
-                />
-                <text
-                  x={padLeft - 10}
-                  y={y + 4}
-                  textAnchor="end"
-                  className="fill-zinc-400 text-[11px] font-medium tabular-nums"
-                >
-                  {totalSum === 0 && ratio > 0 ? "" : formatValue(val)}
-                </text>
-              </g>
-            );
-          })}
-
-          {primaryArea && totalSum > 0 && <path d={primaryArea} fill={`url(#${gradId})`} />}
-
-          {secondaryLine && (
-            <path
-              d={secondaryLine}
-              fill="none"
-              stroke={secondaryColor}
-              strokeWidth={2}
-              strokeDasharray="5 3"
-            />
-          )}
-
-          {primaryLine && (
-            <path
-              d={primaryLine}
-              fill="none"
-              stroke={primaryColor}
-              strokeWidth={2.5}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          )}
-
-          {totalSum > 0 &&
-            points.map((pt, idx) =>
-              pt.primary > 0 ? (
-                <circle
-                  key={`pt-${idx}`}
-                  cx={xFor(idx)}
-                  cy={yFor(pt.primary)}
-                  r={3.5}
-                  fill="#FFFFFF"
-                  stroke={primaryColor}
-                  strokeWidth={2}
-                >
-                  <title>{`${pt.label}: ${formatValue(pt.primary)}`}</title>
-                </circle>
-              ) : null
-            )}
-
-          {points.map((pt, idx) => {
-            if (idx % labelStride !== 0 && idx !== points.length - 1) return null;
-            return (
-              <text
-                key={`${pt.label}-${idx}`}
-                x={xFor(idx)}
-                y={height - 8}
-                textAnchor="middle"
-                className="fill-zinc-500 text-[11px] font-medium tabular-nums"
-              >
-                {pt.label}
-              </text>
-            );
-          })}
-        </svg>
-      </div>
-    </div>
+    <InteractiveAreaChartCanvas
+      width={width}
+      height={height}
+      padLeft={padLeft}
+      padRight={padRight}
+      padTop={padTop}
+      plotH={plotH}
+      gradId={gradId}
+      primaryLabel={primaryLabel}
+      secondaryLabel={secondaryLabel}
+      primaryColor={primaryColor}
+      secondaryColor={secondaryColor}
+      primarySumFormatted={formatValue(primarySum)}
+      secondarySumFormatted={formatValue(secondarySum)}
+      totalSum={totalSum}
+      emptyHint={emptyHint}
+      primaryLine={primaryLine}
+      primaryArea={primaryArea}
+      secondaryLine={secondaryLine}
+      yTicks={yTicks}
+      labelStride={labelStride}
+      points={interactivePoints}
+    />
   );
 }
 
@@ -967,7 +1014,8 @@ function renderInlineGuideTokens(
   keyPrefix: string
 ): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
-  const tokenRegex = /(\[([^\]]+)\]\(([^)]+)\))|(`([^`]+)`)|(\*\*([^*]+)\*\*)|(\*([^*]+)\*)/g;
+  const tokenRegex =
+    /(!\[([^\]]*)\]\(([^)]+)\))|(\[([^\]]+)\]\(([^)]+)\))|(`([^`]+)`)|(\*\*([^*]+)\*\*)|(\*([^*]+)\*)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   let idx = 0;
@@ -978,8 +1026,20 @@ function renderInlineGuideTokens(
     }
 
     if (match[1]) {
-      const label = match[2] ?? "";
-      let href = match[3] ?? "#";
+      const alt = match[2] ?? "";
+      const src = match[3] ?? "";
+      nodes.push(
+        <img
+          key={`${keyPrefix}-img-${idx++}`}
+          src={src}
+          alt={alt}
+          loading="lazy"
+          className="my-2 inline-block max-w-full rounded-xl border border-zinc-200 bg-white p-1"
+        />
+      );
+    } else if (match[4]) {
+      const label = match[5] ?? "";
+      let href = match[6] ?? "#";
       if (linkMode === "help" && href.startsWith("/guides/")) {
         const targetSlug = href.replace(/^\/guides\//, "").split(/[?#]/)[0] ?? "";
         href = `/help?slug=${encodeURIComponent(targetSlug)}`;
@@ -993,27 +1053,27 @@ function renderInlineGuideTokens(
           {label}
         </a>
       );
-    } else if (match[4]) {
+    } else if (match[7]) {
       nodes.push(
         <code
           key={`${keyPrefix}-code-${idx++}`}
           className="rounded-md border border-zinc-200 bg-zinc-100/80 px-1.5 py-0.5 font-mono text-[12.5px] font-medium text-slate-900"
         >
-          {match[5]}
+          {match[8]}
         </code>
       );
-    } else if (match[6]) {
+    } else if (match[9]) {
       const bIdx = idx++;
       nodes.push(
         <strong key={`${keyPrefix}-b-${bIdx}`} className="font-semibold text-slate-900">
-          {renderInlineGuideTokens(match[7] ?? "", linkMode, `${keyPrefix}-b-${bIdx}`)}
+          {renderInlineGuideTokens(match[10] ?? "", linkMode, `${keyPrefix}-b-${bIdx}`)}
         </strong>
       );
-    } else if (match[8]) {
+    } else if (match[11]) {
       const iIdx = idx++;
       nodes.push(
         <em key={`${keyPrefix}-i-${iIdx}`} className="italic text-zinc-700">
-          {renderInlineGuideTokens(match[9] ?? "", linkMode, `${keyPrefix}-i-${iIdx}`)}
+          {renderInlineGuideTokens(match[12] ?? "", linkMode, `${keyPrefix}-i-${iIdx}`)}
         </em>
       );
     }
@@ -1129,14 +1189,88 @@ export function FormattedGuideBody({
 
   const flushQuote = () => {
     if (quoteLines.length === 0) return;
-    const text = quoteLines.join(" ");
+    const rawQuote = quoteLines.join(" ").trim();
     quoteLines = [];
+
+    let variant: "tip" | "note" | "warning" | "important" = "tip";
+    let label = "Tip";
+    let bodyText = rawQuote;
+
+    const alertMatch = /^\[!(NOTE|TIP|WARNING|IMPORTANT|CAUTION)\]\s*(.*)$/i.exec(rawQuote);
+    const prefixMatch =
+      /^(?:\*\*)?(Note|Tip|Warning|Important|Caution|Security)(?::)?(?:\*\*)?:?\s+(.*)$/i.exec(
+        rawQuote
+      );
+
+    if (alertMatch) {
+      const kind = alertMatch[1]!.toUpperCase();
+      bodyText = alertMatch[2] || "";
+      if (kind === "NOTE") {
+        variant = "note";
+        label = "Note";
+      } else if (kind === "WARNING") {
+        variant = "warning";
+        label = "Warning";
+      } else if (kind === "IMPORTANT" || kind === "CAUTION") {
+        variant = "important";
+        label = kind === "CAUTION" ? "Caution" : "Important";
+      } else {
+        variant = "tip";
+        label = "Tip";
+      }
+    } else if (prefixMatch) {
+      const kind = prefixMatch[1]!.toLowerCase();
+      bodyText = prefixMatch[2] || "";
+      if (kind === "note") {
+        variant = "note";
+        label = "Note";
+      } else if (kind === "warning") {
+        variant = "warning";
+        label = "Warning";
+      } else if (kind === "important" || kind === "caution" || kind === "security") {
+        variant = "important";
+        label = kind === "caution" ? "Caution" : kind === "security" ? "Security" : "Important";
+      } else {
+        variant = "tip";
+        label = "Tip";
+      }
+    }
+
+    const styles =
+      variant === "note"
+        ? {
+            box: "border-sky-200 bg-sky-50/70 text-sky-950",
+            badge: "bg-sky-100 text-sky-800 border-sky-200",
+          }
+        : variant === "warning"
+          ? {
+              box: "border-amber-200 bg-amber-50/75 text-amber-950",
+              badge: "bg-amber-100 text-amber-900 border-amber-200",
+            }
+          : variant === "important"
+            ? {
+                box: "border-rose-200 bg-rose-50/75 text-rose-950",
+                badge: "bg-rose-100 text-rose-800 border-rose-200",
+              }
+            : {
+                box: "border-emerald-200 bg-emerald-50/65 text-emerald-950",
+                badge: "bg-emerald-100 text-emerald-800 border-emerald-200",
+              };
+
     blocks.push(
       <div
         key={`q-${blockIdx++}`}
-        className="my-4 rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3 text-[13.5px] leading-relaxed text-emerald-950"
+        role="note"
+        className={`my-4 rounded-xl border px-4 py-3 text-[13.5px] leading-relaxed ${styles.box}`}
       >
-        {renderInlineGuideTokens(text, linkMode, `q-${blockIdx}`)}
+        <div className="mb-1 flex items-center gap-2">
+          <span
+            className={`inline-flex rounded-full border px-2 py-0.5 text-[10.5px] font-bold tracking-wider uppercase ${styles.badge}`}
+          >
+            {label}
+          </span>
+        </div>
+        <div>{renderInlineGuideTokens(bodyText || rawQuote, linkMode, `q-${blockIdx}`)}</div>
       </div>
     );
   };
@@ -1192,19 +1326,11 @@ export function FormattedGuideBody({
       flushAll();
       if (inCode) {
         blocks.push(
-          <div
+          <CopyCodeBlock
             key={`code-${blockIdx++}`}
-            className="my-4 overflow-hidden rounded-xl border border-slate-800 bg-slate-950 shadow-2xs"
-          >
-            {codeLang && (
-              <div className="border-b border-slate-800 bg-slate-900/90 px-4 py-1.5 font-mono text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
-                {codeLang}
-              </div>
-            )}
-            <pre className="overflow-x-auto p-4 font-mono text-[12.5px] leading-relaxed text-slate-100">
-              <code>{codeLines.join("\n")}</code>
-            </pre>
-          </div>
+            code={codeLines.join("\n")}
+            language={codeLang}
+          />
         );
         codeLines = [];
         codeLang = "";
@@ -1240,13 +1366,42 @@ export function FormattedGuideBody({
       flushTable();
     }
 
-    if (trimmed.startsWith("> ")) {
+    if (trimmed.startsWith(">")) {
       flushUnordered();
       flushOrdered();
-      quoteLines.push(trimmed.slice(2).trim());
+      const qLine = trimmed.replace(/^>\s?/, "").trim();
+      if (qLine) {
+        quoteLines.push(qLine);
+      }
       continue;
     } else if (quoteLines.length > 0) {
       flushQuote();
+    }
+
+    const standaloneImageMatch = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(trimmed);
+    if (standaloneImageMatch) {
+      flushAll();
+      const alt = standaloneImageMatch[1] ?? "";
+      const src = standaloneImageMatch[2] ?? "";
+      blocks.push(
+        <figure
+          key={`img-${blockIdx++}`}
+          className="my-5 overflow-hidden rounded-2xl border border-zinc-200/90 bg-zinc-50/70 p-3 shadow-2xs"
+        >
+          <img
+            src={src}
+            alt={alt}
+            loading="lazy"
+            className="mx-auto block max-w-full rounded-xl bg-white"
+          />
+          {alt && (
+            <figcaption className="mt-2.5 text-center text-xs font-medium text-zinc-500">
+              {alt}
+            </figcaption>
+          )}
+        </figure>
+      );
+      continue;
     }
 
     if (trimmed.startsWith("## ")) {
@@ -1260,7 +1415,7 @@ export function FormattedGuideBody({
         <h2
           key={`h2-${blockIdx++}`}
           id={id}
-          className="mt-7 mb-2.5 border-b border-zinc-100 pb-2 text-[17px] font-semibold tracking-[-0.02em] text-slate-900 first:mt-0"
+          className="mt-8 mb-3 border-b border-zinc-100 pb-2 text-[20px] font-bold tracking-[-0.02em] text-slate-900 first:mt-0"
         >
           {renderInlineGuideTokens(headingText, linkMode, `h2-${blockIdx}`)}
         </h2>
@@ -1279,7 +1434,7 @@ export function FormattedGuideBody({
         <h3
           key={`h3-${blockIdx++}`}
           id={id}
-          className="mt-5 mb-2 text-[14.5px] font-semibold tracking-[-0.015em] text-slate-900"
+          className="mt-6 mb-2 text-[17px] font-semibold tracking-[-0.015em] text-slate-900"
         >
           {renderInlineGuideTokens(headingText, linkMode, `h3-${blockIdx}`)}
         </h3>
@@ -1299,7 +1454,7 @@ export function FormattedGuideBody({
       blocks.push(
         <h4
           key={`h4-${blockIdx++}`}
-          className="mt-4 mb-1.5 text-[13.5px] font-semibold text-slate-900"
+          className="mt-4 mb-1.5 text-[15px] font-semibold text-slate-900"
         >
           {renderInlineGuideTokens(headingText, linkMode, `h4-${blockIdx}`)}
         </h4>

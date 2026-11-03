@@ -47,19 +47,21 @@ When helping a client's accountant over phone or screen-share (AnyDesk / Zoom / 
 
 ---
 
-## 4. Assisting With Windows Background Connector Agent (`rsl-tally-agent.mjs`)
+## 4. Assisting With Windows Background Connector Agent (`rsl-tally-connector.mjs`)
 
 If the client runs multi-company Tally Prime or wants automatic 5-minute background sweeps + PDF attachment capture:
 
-1. Verify Node.js LTS (`node -v` >= `v20`) is installed on the Tally Windows PC (`https://nodejs.org`).
-2. Download `rsl-tally-agent.mjs` from `/tally?tab=connect` into `C:\RSLConnector\rsl-tally-agent.mjs`.
-3. Generate a 15-minute `rsl_pair_...` code on `/tally?tab=connect` and run:
+1. **Recommended 1-Click Installer (Zero PowerShell Needed)**:
+   - On `/tally?tab=connect`, generate a 15-minute `rsl_pair_...` code and click **Download 1-Click Windows `.bat` Installer** (`install-rsl-tally-connector.bat`). Double-clicking that `.bat` file creates `C:\RSLConnector`, downloads `rsl-tally-connector.mjs`, pairs the device, and registers the Windows startup task automatically.
+2. **Manual CLI Fallback** (verify Node.js LTS `node -v` >= `v20` from `https://nodejs.org`):
+   - Download `rsl-tally-connector.mjs` from `/tally?tab=connect` into `C:\RSLConnector\rsl-tally-connector.mjs`.
+   - Generate a 15-minute `rsl_pair_...` code on `/tally?tab=connect` and run:
    ```powershell
    cd C:\RSLConnector
-   node rsl-tally-agent.mjs --pair rsl_pair_XXXX --server https://app.rapidshiftlabs.in --tally http://127.0.0.1:9000
-   node rsl-tally-agent.mjs --doctor
+   node rsl-tally-connector.mjs --pair rsl_pair_XXXX --server https://app.rapidshiftlabs.in --tally http://127.0.0.1:9000
+   node rsl-tally-connector.mjs --doctor
    ```
-4. Register auto-start in Windows `taskschd.msc` (`At startup`, `Run whether user is logged on or not`, Program `C:\Program Files\nodejs\node.exe`, Arguments `C:\RSLConnector\rsl-tally-agent.mjs`, Start in `C:\RSLConnector`).
+3. If registering manually in Windows `taskschd.msc`, use `At log on` / `At startup`, Program `C:\Program Files\nodejs\node.exe`, Arguments `C:\RSLConnector\rsl-tally-connector.mjs`, Start in `C:\RSLConnector`.
 
 ---
 

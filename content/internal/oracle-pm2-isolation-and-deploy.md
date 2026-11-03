@@ -1,4 +1,4 @@
-# Staff SOP 3 — Server Deployment (`setup.sh` / `update.sh`), Shared Nginx, SSL & PM2
+# Staff SOP 5 — Server Deployment (`setup.sh` / `update.sh`), Shared Nginx, SSL & PM2
 
 > Staff Reference Only — Follow strictly on shared Ubuntu servers so co-hosted websites and databases are never disrupted.
 

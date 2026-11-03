@@ -4,30 +4,46 @@ import React, { useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
-import { IosSpinner } from "@rsl/ui";
+import { IosSpinner, PendingSubmitButton } from "@rsl/ui";
+
+export { IosSpinner };
 
 export function SubmitButton({
   children,
   pendingText,
   className = "rsl-btn-primary",
   spinnerSize = "xs",
+  disabled = false,
+  iconOnly = false,
+  name,
+  value,
+  title,
 }: {
   children: React.ReactNode;
   pendingText?: string;
   className?: string;
   spinnerSize?: "xs" | "sm" | "md";
+  disabled?: boolean;
+  iconOnly?: boolean;
+  name?: string;
+  value?: string;
+  title?: string;
 }) {
   const { pending } = useFormStatus();
   return (
-    <button
-      type="submit"
-      disabled={pending}
-      aria-busy={pending}
-      className={`inline-flex items-center justify-center gap-1.5 ${className} disabled:cursor-wait disabled:opacity-75`}
+    <PendingSubmitButton
+      pending={pending}
+      pendingText={pendingText}
+      className={className}
+      spinnerSize={spinnerSize}
+      disabled={disabled}
+      iconOnly={iconOnly}
+      name={name}
+      value={value}
+      title={title}
     >
-      {pending && <IosSpinner size={spinnerSize} />}
-      {pending && pendingText ? <span>{pendingText}</span> : children}
-    </button>
+      {children}
+    </PendingSubmitButton>
   );
 }
 

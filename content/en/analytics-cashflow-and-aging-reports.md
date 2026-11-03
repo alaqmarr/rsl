@@ -26,7 +26,7 @@ Every metric on **Business Overview** (`/`) and **Detailed Analytics** (`/analyt
    - **`30d`** — Monthly cashflow & marketing ROAS review (default).
    - **`90d`** — Quarterly GST & seasonal comparison.
    - **`365d` / `All`** — Full financial year overview.
-3. All KPI cards, daily trend bars, channel breakdowns, and export links immediately update to match your selected window!
+3. All KPI cards, daily trend bars, channel breakdowns, and export links immediately update to match your selected window.
 
 ---
 
@@ -56,4 +56,4 @@ At the top right of **Detailed Analytics** (`/analytics`):
 
 1. Click **Download CSV Report** to save a clean UTF-8 spreadsheet compatible with Microsoft Excel, Google Sheets, and CA audit workpapers.
 2. Click **Download PDF Report** (`/api/pdf/analytics?range=30d`) to generate an executive A4 management summary PDF with your business name, date range, cashflow KPIs, and receivable aging table ready to share on WhatsApp or email with partners.
-   - *(Tip: You can also download a dedicated **Tally Pending Receivables PDF** from **Tally Prime & Bills** and a **Wallet Passbook Statement PDF** from **Plans & Wallet**!)*
+   - *(Tip: You can also download a dedicated **Tally Pending Receivables PDF** from **Tally Prime & Bills** and a **Wallet Passbook Statement PDF** from **Plans & Wallet**)*

@@ -35,7 +35,7 @@ Every external channel connection is managed in **Connected Channels** (`/connec
 1. In Meta App Dashboard left sidebar, click **WhatsApp -> API Setup** (or **WhatsApp -> Quickstart -> API Setup**).
 2. Under **Step 1: Select phone numbers**, choose your registered business phone number in the **From** dropdown (to add a real SIM/landline number instead of Meta's test number, scroll down and click **Add phone number**, verify your display name, and enter the 6-digit SMS/Voice OTP).
 3. Directly below the **From** dropdown, copy two numbers carefully:
-   - **Phone number ID** (a 15-digit number like `109283746519283` — **do NOT enter your `+91...` 10-digit mobile number here!**).
+   - **Phone number ID** (a 15-digit number like `109283746519283` — **do NOT enter your `+91...` 10-digit mobile number here.**).
    - **WhatsApp Business Account ID (WABA ID)** (a 15-to-16-digit number right next to it, like `118293049581726`).
 4. **If testing while Meta App is still in Development Mode:** Under the **To** field, click **Manage phone number list -> Add phone number**, enter up to 5 test mobile numbers with country code `+91`, and verify via OTP. (This prevents Meta Error `#131030: Recipient phone number not in allowed list`.)
 
@@ -53,7 +53,7 @@ Every external channel connection is managed in **Connected Channels** (`/connec
    - Click **Save changes** -> **Done**.
 4. Click **Generate new token** (top right of the System User panel):
    - **Select app**: pick your Meta App from the dropdown.
-   - **Set token expiration**: select **Never** (critical!).
+   - **Set token expiration**: select **Never** (critical).
    - Scroll through **Permissions** and tick all three checkboxes:
      - `whatsapp_business_messaging`
      - `whatsapp_business_management`
@@ -84,7 +84,7 @@ Every external channel connection is managed in **Connected Channels** (`/connec
    - **WABA ID**: paste your 15-digit WhatsApp Business Account ID
    - **Permanent Access Token**: paste your `EAA...` System User token
    - Keep **Run live API check immediately after saving** checked and click **Connect WhatsApp Cloud API**.
-6. Confirm the connection card appears below with a green **Healthy** pill!
+6. Confirm the connection card appears below with a green **Healthy** pill.
 
 ---
 
@@ -93,10 +93,10 @@ Every external channel connection is managed in **Connected Channels** (`/connec
 1. **Convert to Professional Account & Link Facebook Page**:
    - On your phone's Instagram app, open **Profile -> Edit profile -> Switch to professional account -> Business**.
    - Link it to your company's Facebook Page (`Edit profile -> Page -> Connect or create`).
-2. **Turn ON "Allow Access to Messages" on Mobile (Most Skipped Step!)**:
-   - Open the **Instagram mobile app** on your phone (this setting does NOT exist on desktop!).
+2. **Turn ON "Allow Access to Messages" on Mobile (Most Skipped Step)**:
+   - Open the **Instagram mobile app** on your phone (this setting does NOT exist on desktop).
    - Tap the top-right **Menu (☰) -> Settings and activity -> Messages and story replies -> Message controls -> Connected tools**.
-   - Toggle **Allow access to messages** to **ON**. *(If left OFF, Meta silently drops 100% of Instagram DM webhooks!)*
+   - Toggle **Allow access to messages** to **ON**. *(If left OFF, Meta silently drops 100% of Instagram DM webhooks)*
 3. **Assign Assets & Generate Permanent Token**:
    - In `business.facebook.com/settings -> Users -> System users`, select `RSL Marketing Server` -> **Assign assets**.
    - Under **Pages**, select your linked Facebook Page -> toggle **Full control**.
@@ -135,13 +135,13 @@ Every external channel connection is managed in **Connected Channels** (`/connec
 
 ## Part 5 — Connecting Google Business Profile (1-Click Google Sign-In)
 
-> **No Google Cloud Console or Service Account JSON Needed!** RapidShift Labs provides a direct **"Sign in with Google"** consent screen so you never have to create GCP projects, Service Account JSON keys, or manual OAuth tokens.
+> **No Google Cloud Console or Service Account JSON Needed.** RapidShift Labs provides a direct **"Sign in with Google"** consent screen so you never have to create GCP projects, Service Account JSON keys, or manual OAuth tokens.
 
 1. Open `https://app.rapidshiftlabs.in/connections` (**Connected Channels**) and click the **Google Business** tab at the top.
 2. Click the **Connect Google Business Profile** button.
 3. On Google's official sign-in screen (`accounts.google.com`), pick the Google account that owns or manages your verified **Google Business Profile** store listing.
 4. Review the **RapidShift Labs** permission prompt (`business.manage` — to read customer reviews and publish owner replies) and click **Continue / Allow**.
-5. You are redirected straight back to RapidShift Labs with a green **Healthy** connection card, auto-renewing refresh token, and your primary Storefront Location ID linked automatically!
+5. You are redirected straight back to RapidShift Labs with a green **Healthy** connection card, auto-renewing refresh token, and your primary Storefront Location ID linked automatically.
    - *Managing multiple store branches?* Click **Rotate Token / Edit** on the connected card below if you want to specify a particular `locations/...` branch ID.
 
 ---
@@ -149,11 +149,11 @@ Every external channel connection is managed in **Connected Channels** (`/connec
 ## Part 6 — Connecting Google Drive Off-Site Backup Vault (1-Click Google Sign-In)
 
 1. Open either **Backups & Storage** (`/backups`) or **Connected Channels** (`/connections`) — the **Connect to Google Drive** button is right at the top of both pages.
-2. Click **Connect to Google Drive** (do **not** create or upload any Google Service Account JSON file!).
+2. Click **Connect to Google Drive** (do **not** create or upload any Google Service Account JSON file).
 3. Sign in with the Gmail or Google Workspace account where you want encrypted off-site backups stored and click **Allow** on the **RapidShift Labs** consent screen:
    - RapidShift Labs requests **only** Google's privacy-safe `https://www.googleapis.com/auth/drive.file` permission. It can **only** access the backup folder it creates and can **never** see, list, or read any other personal or company files in your Google Drive.
-4. RapidShift Labs **automatically creates a `RapidShift Labs Backups` folder** inside your Google Drive (no manual Folder ID copying required!).
-5. Every time you click **Create Backup Now** (or **Backup & Upload to Google Drive Now**) on `/backups`, your encrypted `.rslbackup` snapshot is both downloadable in your browser and **uploaded automatically into your Google Drive folder**!
+4. RapidShift Labs **automatically creates a `RapidShift Labs Backups` folder** inside your Google Drive (no manual Folder ID copying required).
+5. Every time you click **Create Backup Now** (or **Backup & Upload to Google Drive Now**) on `/backups`, your encrypted `.rslbackup` snapshot is both downloadable in your browser and **uploaded automatically into your Google Drive folder**.
 
 ---
 
@@ -161,3 +161,13 @@ Every external channel connection is managed in **Connected Channels** (`/connec
 
 - You can test any connected channel at any time by clicking **Test Live API** on its card in `/connections` or inside **All API Tokens** (`/settings/tokens`).
 - If you rotate your **Webhook Verify Token**, remember to update the matching Verify Token inside Meta App Dashboard -> **Webhooks** immediately afterward.
+
+---
+
+## Troubleshooting Google Sign-In & Re-Authentication (`Needs Re-Auth`)
+
+| Symptom | Cause | Exact Resolution |
+| --- | --- | --- |
+| **Connection badge shows `Needs Re-Auth`** | Google Drive or Google Business permission was revoked in `myaccount.google.com/permissions` or your Workspace password policy reset OAuth sessions | Click **Connect to Google Drive** (on `/backups` or `/connections`) or **Connect Google Business Profile** and approve the Google prompt once to issue a fresh refresh token |
+| **`Connect to Google Drive` button shows `Setup Pending`** | Platform Google OAuth client keys have not been enabled on this server instance yet | Use **Cloudflare R2 / Amazon S3** or browser `.rslbackup` downloads immediately while platform administrators enable Google OAuth |
+| **Wrong Gmail account selected during sign-in** | Browser auto-selected a personal Gmail tab instead of your company Google account | Click **Connect to Google Drive** again — RapidShift Labs passes `prompt=consent` so you can pick the exact Google account where `RapidShift Labs Backups` should live |

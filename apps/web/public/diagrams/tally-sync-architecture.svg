@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 230" fill="none" role="img" aria-label="Tally Prime to Cloud Dashboard and WhatsApp Sync Architecture">
+  <rect width="880" height="230" rx="20" fill="#F8FAFC"/>
+  <rect x="1" y="1" width="878" height="228" rx="19" stroke="#E2E8F0" stroke-width="2"/>
+
+  <!-- Box 1: Tally Prime Desktop -->
+  <rect x="28" y="42" width="186" height="146" rx="16" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1.5"/>
+  <rect x="44" y="58" width="94" height="22" rx="11" fill="#F1F5F9"/>
+  <text x="91" y="73" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10.5" font-weight="700" fill="#334155">OFFICE PC</text>
+  <text x="44" y="106" font-family="system-ui, sans-serif" font-size="15" font-weight="700" fill="#0F172A">Tally Prime</text>
+  <text x="44" y="128" font-family="system-ui, sans-serif" font-size="12" fill="#475569">Local XML Server</text>
+  <text x="44" y="146" font-family="monospace" font-size="11.5" font-weight="600" fill="#059669">127.0.0.1:9000</text>
+  <text x="44" y="168" font-family="system-ui, sans-serif" font-size="11" fill="#64748B">Zero inbound ports</text>
+
+  <!-- Arrow 1 -->
+  <line x1="216" y1="115" x2="256" y2="115" stroke="#059669" stroke-width="2.5" stroke-dasharray="4 3"/>
+  <polygon points="256,109 266,115 256,121" fill="#059669"/>
+
+  <!-- Box 2: Windows Connector -->
+  <rect x="268" y="42" width="194" height="146" rx="16" fill="#ECFDF5" stroke="#6EE7B7" stroke-width="1.5"/>
+  <rect x="284" y="58" width="114" height="22" rx="11" fill="#D1FAE5"/>
+  <text x="341" y="73" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10.5" font-weight="700" fill="#065F46">1-CLICK AGENT</text>
+  <text x="284" y="106" font-family="system-ui, sans-serif" font-size="15" font-weight="700" fill="#0F172A">RSL Connector</text>
+  <text x="284" y="128" font-family="system-ui, sans-serif" font-size="12" fill="#065F46">AlterID Delta Sync</text>
+  <text x="284" y="146" font-family="system-ui, sans-serif" font-size="12" fill="#065F46">Native Invoice PDFs</text>
+  <text x="284" y="168" font-family="system-ui, sans-serif" font-size="11" fill="#047857">Circuit-breaker safe</text>
+
+  <!-- Arrow 2 -->
+  <line x1="464" y1="115" x2="510" y2="115" stroke="#0F172A" stroke-width="2.5"/>
+  <polygon points="510,109 520,115 510,121" fill="#0F172A"/>
+  <text x="490" y="101" text-anchor="middle" font-family="monospace" font-size="10" font-weight="700" fill="#334155">HTTPS</text>
+
+  <!-- Box 3: Cloud Workspace -->
+  <rect x="522" y="42" width="166" height="146" rx="16" fill="#0F172A"/>
+  <rect x="538" y="58" width="96" height="22" rx="11" fill="#1E293B"/>
+  <text x="586" y="73" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10.5" font-weight="700" fill="#34D399">ISOLATED DB</text>
+  <text x="538" y="106" font-family="system-ui, sans-serif" font-size="15" font-weight="700" fill="#FFFFFF">RSL Cloud</text>
+  <text x="538" y="128" font-family="system-ui, sans-serif" font-size="12" fill="#CBD5E1">Aging &amp; Cashflow</text>
+  <text x="538" y="146" font-family="system-ui, sans-serif" font-size="12" fill="#CBD5E1">AES-256 Backups</text>
+  <text x="538" y="168" font-family="system-ui, sans-serif" font-size="11" fill="#94A3B8">Double-entry XML</text>
+
+  <!-- Arrow 3 -->
+  <line x1="690" y1="115" x2="722" y2="115" stroke="#059669" stroke-width="2.5"/>
+  <polygon points="722,109 732,115 722,121" fill="#059669"/>
+
+  <!-- Box 4: WhatsApp Delivery -->
+  <rect x="734" y="42" width="118" height="146" rx="16" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1.5"/>
+  <text x="750" y="76" font-family="system-ui, sans-serif" font-size="10.5" font-weight="700" fill="#059669">META API</text>
+  <text x="750" y="106" font-family="system-ui, sans-serif" font-size="14.5" font-weight="700" fill="#0F172A">WhatsApp</text>
+  <text x="750" y="128" font-family="system-ui, sans-serif" font-size="11.5" fill="#475569">Bill PDFs</text>
+  <text x="750" y="146" font-family="system-ui, sans-serif" font-size="11.5" fill="#475569">Receipts</text>
+  <text x="750" y="168" font-family="system-ui, sans-serif" font-size="11" fill="#047857">Reminders</text>
+</svg>

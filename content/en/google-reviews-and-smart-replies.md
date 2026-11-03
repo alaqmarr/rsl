@@ -39,8 +39,8 @@ If you also unlocked the **Smart Review Reply Drafts** (`google.autoreply`) add-
 
 1. Locate any unreplied review card on `/reviews` and click **Generate Smart Reply Draft (₹1.00)**.
    - RapidShift debits **`₹1.00`** from your Prepaid Wallet (seamless down to your `-₹200.00` overdraft buffer) and writes a polite, context-aware owner draft tailored to the reviewer's name, star rating, and exact comment.
-2. **Mandatory Human Owner Approval (Never Auto-Posted Blindly!)**:
-   - Smart drafts are **never** published to Google Maps without your eyes on them first!
+2. **Mandatory Human Owner Approval (Never Auto-Posted Blindly)**:
+   - Smart drafts are **never** published to Google Maps without your eyes on them first.
    - The generated text opens directly inside the editable **Owner Reply Box** on that review card.
    - Read and tweak any store-specific detail (such as your manager's name or exchange policy).
 

@@ -10,16 +10,26 @@ const targets = [
   path.join(rootDir, "apps", "docs", "public"),
 ];
 
-if (fs.existsSync(rootPublic)) {
-  const entries = fs.readdirSync(rootPublic);
-  for (const target of targets) {
-    fs.mkdirSync(target, { recursive: true });
-    for (const name of entries) {
-      const src = path.join(rootPublic, name);
-      if (fs.statSync(src).isFile()) {
-        fs.copyFileSync(src, path.join(target, name));
-      }
+function countFilesRecursive(dir) {
+  let count = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      count += countFilesRecursive(full);
+    } else if (entry.isFile()) {
+      count += 1;
     }
   }
-  console.log(`[sync-public-assets] Synced ${entries.length} files from public/ -> apps/{web,admin,docs}/public/`);
+  return count;
+}
+
+if (fs.existsSync(rootPublic)) {
+  const totalFiles = countFilesRecursive(rootPublic);
+  for (const target of targets) {
+    fs.mkdirSync(target, { recursive: true });
+    fs.cpSync(rootPublic, target, { recursive: true, force: true });
+  }
+  console.log(
+    `[sync-public-assets] Synced ${totalFiles} files (including subdirectories) from public/ -> apps/{web,admin,docs}/public/`
+  );
 }

@@ -111,8 +111,9 @@ function EmailFrame(props: {
               }}
             >
               <img
-                src={`${appBase}/long-logo.jpeg`}
+                src={`${appBase}/email-logo.png`}
                 alt="RapidShift Labs"
+                width={130}
                 height={28}
                 style={{ height: "28px", width: "auto", display: "block" }}
               />

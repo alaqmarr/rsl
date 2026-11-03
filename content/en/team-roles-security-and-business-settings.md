@@ -16,7 +16,7 @@ lastReviewed: 2026-11-03
    - **Indian State / UT Code**: Select the 2-digit GST state code matching the first two digits of your GSTIN:
      - Selecting **`27 — Maharashtra`** splits 18% GST into **9% CGST + 9% SGST** on invoices.
      - Selecting **any other Indian state** (`01` to `38` except `27`) applies **18% IGST** for inter-state supply under SAC `998314`.
-   - **15-Character GSTIN**: Enter in uppercase (e.g. `27AABCU9603R1ZM`). Double-check that the first 2 characters match your selected State Code!
+   - **15-Character GSTIN**: Enter in uppercase (e.g. `27AABCU9603R1ZM`). Double-check that the first 2 characters match your selected State Code.
    - **Billing Address, Billing Email & Business Phone**: Used for invoice headers and finance notices.
    - **Default Tally Company Name**: Optional default label when importing CSV files that omit a company column.
 3. Click **Save Business Settings**.
@@ -49,13 +49,13 @@ To verify or refresh SSL certificates:
 3. Locate the newly created row under **Pending Team Invitations**:
    - Click **Copy Invite Link** next to their email address.
    - Send that link (`https://app.rapidshiftlabs.in/accept-invite?token=...`) to your colleague over WhatsApp or email.
-   - *(Note: If SMTP email is configured on the server, an invitation email is also sent automatically. Invitation links stay valid for **7 days**; if expired, click **Regenerate Link** in one click!)*
+   - *(Note: If SMTP email is configured on the server, an invitation email is also sent automatically. Invitation links stay valid for **7 days**; if expired, click **Regenerate Link** in one click)*
 
 ### How Your Colleague Accepts the Invitation
 
 1. Your colleague opens the `/accept-invite?token=...` link in their browser.
 2. **If they are new to RapidShift Labs:** They enter their **Full Name** and choose a **Password** (minimum 8 characters), then click **Create Account & Join Workspace**.
-3. **If they already have a RapidShift Labs login** (for example an external CA managing multiple client businesses): They sign in with their existing password, click **Accept Invitation**, and can switch between businesses anytime using the **Switch Business** dropdown in the top-left sidebar!
+3. **If they already have a RapidShift Labs login** (for example an external CA managing multiple client businesses): They sign in with their existing password, click **Accept Invitation**, and can switch between businesses anytime using the **Switch Business** dropdown in the top-left sidebar.
 
 ---
 

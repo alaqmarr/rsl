@@ -29,7 +29,7 @@ Open **Ads & Social Posts** (`/campaigns`) in your left sidebar to manage three 
    - Click **Create Campaign**.
 3. **Logging Spend & Linked Sales to Compute Exact ROAS**:
    - In the **Active Campaigns** table (or **Record Campaign Performance** form), select your campaign, enter **Ad Spend (₹)**, **Impressions / Clicks / Leads**, and **Attributed Sales Revenue (₹)**, then click **Record Metrics**.
-   - RapidShift automatically calculates **Return on Ad Spend (ROAS)** — e.g. `4.2x` (`₹4.20` collected for every `₹1.00` spent) — and feeds it directly into **Detailed Analytics** (`/analytics`)!
+   - RapidShift automatically calculates **Return on Ad Spend (ROAS)** — e.g. `4.2x` (`₹4.20` collected for every `₹1.00` spent) — and feeds it directly into **Detailed Analytics** (`/analytics`).
 4. **Pausing or Completing a Campaign**: Use the status action on any campaign row to switch between `Active` and `Paused` as budgets change.
 
 ---
@@ -59,7 +59,7 @@ When a customer buys on your website (Shopify, WooCommerce, or custom checkout),
 1. Scroll to **Record Website Conversion / Pixel Event** on `/campaigns`.
 2. Fill in the order details:
    - **Event Type**: Select `Purchase`, `Lead`, or `InitiateCheckout`.
-   - **Unique Event / Order ID**: Enter your store's exact order number (for example `ORD-2026-8841`). **If the same `ORD-2026-8841` is submitted twice, RapidShift automatically deduplicates it so revenue is never counted twice!**
+   - **Unique Event / Order ID**: Enter your store's exact order number (for example `ORD-2026-8841`). **If the same `ORD-2026-8841` is submitted twice, RapidShift automatically deduplicates it so revenue is never counted twice.**
    - **Order Amount (₹)**: Enter the rupee value (e.g. `4250`).
    - **Customer Phone / Email**: Optional (hashed with SHA-256 when forwarding to Meta Conversions API for ad attribution matching).
    - **Linked Campaign (Optional)**: Attribute this order directly to a specific ad campaign.

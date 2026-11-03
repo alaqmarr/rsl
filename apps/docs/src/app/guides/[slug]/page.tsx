@@ -5,6 +5,14 @@ import { ActionLink, SubmitButton } from "@/components/ios-feedback";
 
 export const dynamic = "force-dynamic";
 
+const SECTION_ORDER = [
+  "Getting Started",
+  "Daily Operations",
+  "Data & Cloud Storage",
+  "Billing & Security",
+  "Developers",
+] as const;
+
 export default async function GuideDetailPage({
   params,
   searchParams,
@@ -20,6 +28,10 @@ export default async function GuideDetailPage({
   }
 
   const allArticles = loadAllDocArticles();
+  const groupedSections = SECTION_ORDER.map((section) => ({
+    section,
+    items: allArticles.filter((a) => a.section === section),
+  })).filter((g) => g.items.length > 0);
 
   async function submitFeedbackAction(formData: FormData) {
     "use server";
@@ -30,32 +42,40 @@ export default async function GuideDetailPage({
   }
 
   return (
-    <div className="grid gap-8 lg:grid-cols-[260px_1fr] lg:items-start">
-      <aside className="space-y-4">
+    <div className="grid gap-8 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[260px_minmax(0,1fr)_220px] lg:items-start">
+      {/* Left Categorized Guide Sidebar */}
+      <aside className="space-y-4 lg:sticky lg:top-20">
         <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-2xs">
-          <p className="px-2.5 text-[11px] font-bold tracking-wider text-zinc-500 uppercase">
-            All Help Guides
-          </p>
-          <ul className="mt-2.5 space-y-1 text-[13px]">
-            {allArticles.map((a) => (
-              <li key={a.slug}>
-                <ActionLink
-                  href={`/guides/${a.slug}`}
-                  variant="card"
-                  className={`block rounded-xl px-3 py-2 transition ${
-                    a.slug === article.slug
-                      ? "bg-emerald-50/90 font-semibold text-emerald-800 ring-1 ring-emerald-200/80"
-                      : "font-medium text-zinc-600 hover:bg-zinc-50 hover:text-slate-900"
-                  }`}
-                >
-                  {a.title}
-                </ActionLink>
-              </li>
+          <div className="space-y-4">
+            {groupedSections.map((group) => (
+              <div key={group.section}>
+                <p className="px-2.5 text-[10.5px] font-bold tracking-wider text-zinc-500 uppercase">
+                  {group.section}
+                </p>
+                <ul className="mt-1.5 space-y-0.5 text-[13px]">
+                  {group.items.map((a) => (
+                    <li key={a.slug}>
+                      <ActionLink
+                        href={`/guides/${a.slug}`}
+                        variant="card"
+                        className={`block rounded-xl px-3 py-1.5 transition ${
+                          a.slug === article.slug
+                            ? "bg-emerald-50/90 font-semibold text-emerald-800 ring-1 ring-emerald-200/80"
+                            : "font-medium text-zinc-600 hover:bg-zinc-50 hover:text-slate-900"
+                        }`}
+                      >
+                        {a.title}
+                      </ActionLink>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ))}
-          </ul>
+          </div>
         </div>
       </aside>
 
+      {/* Main Guide Content */}
       <article className="min-w-0 space-y-6">
         <div className="rounded-2xl border border-zinc-200/90 bg-white p-6 shadow-2xs sm:p-8 lg:p-9">
           <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 tabular-nums">
@@ -64,13 +84,34 @@ export default async function GuideDetailPage({
             </span>
             <span>{article.readingMinutes} min read</span>
             <span>•</span>
-            <span>Updated {article.lastReviewed}</span>
+            <span>Reviewed {article.lastReviewed}</span>
           </div>
 
-          <h1 className="mt-3 text-2xl font-bold tracking-tight text-slate-900">
+          <h1 className="mt-3 text-2xl font-bold tracking-tight text-slate-900 sm:text-[26px]">
             {article.title}
           </h1>
-          <p className="mt-2 text-[14px] leading-relaxed text-zinc-600">{article.summary}</p>
+          <p className="mt-2 text-[14.5px] leading-relaxed text-zinc-600">{article.summary}</p>
+
+          {/* Compact mobile On This Page jump list */}
+          {article.headings.length > 1 && (
+            <details className="mt-5 rounded-xl border border-zinc-200/80 bg-zinc-50/70 px-4 py-2.5 text-xs xl:hidden">
+              <summary className="cursor-pointer font-semibold text-slate-800 select-none">
+                On this page ({article.headings.length} sections)
+              </summary>
+              <ul className="mt-2 space-y-1.5 border-t border-zinc-200/70 pt-2">
+                {article.headings.map((h) => (
+                  <li key={h.id} className={h.level === 3 ? "pl-3" : ""}>
+                    <a
+                      href={`#${h.id}`}
+                      className="text-zinc-600 hover:font-medium hover:text-emerald-700"
+                    >
+                      {h.text}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
 
           <div className="mt-6 max-w-4xl border-t border-zinc-200/80 pt-6">
             <FormattedGuideBody markdown={article.bodyMarkdown} linkMode="docs" />
@@ -109,7 +150,11 @@ export default async function GuideDetailPage({
                 </label>
               </div>
               <div className="flex flex-col gap-2.5 sm:flex-row">
+                <label htmlFor="guide-feedback-comment" className="sr-only">
+                  Optional feedback note
+                </label>
                 <input
+                  id="guide-feedback-comment"
                   type="text"
                   name="comment"
                   placeholder="Optional note (what were you looking for?)"
@@ -123,6 +168,31 @@ export default async function GuideDetailPage({
           )}
         </div>
       </article>
+
+      {/* Sticky Right-Rail Table of Contents ("On This Page") */}
+      {article.headings.length > 0 && (
+        <aside className="hidden xl:sticky xl:top-20 xl:block">
+          <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-2xs">
+            <p className="text-[10.5px] font-bold tracking-wider text-zinc-500 uppercase">
+              On This Page
+            </p>
+            <nav aria-label="On this page" className="mt-2.5">
+              <ul className="space-y-1.5 text-xs">
+                {article.headings.map((h) => (
+                  <li key={h.id} className={h.level === 3 ? "pl-3" : ""}>
+                    <a
+                      href={`#${h.id}`}
+                      className="block leading-snug text-zinc-600 transition hover:font-medium hover:text-emerald-700"
+                    >
+                      {h.text}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          </div>
+        </aside>
+      )}
     </div>
   );
 }

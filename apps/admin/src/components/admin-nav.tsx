@@ -113,7 +113,7 @@ export function AdminSidebarNav({
     <div className="mt-4 space-y-5 pb-2">
       {visibleSections.map((section) => (
         <div key={section.heading}>
-          <div className="mb-1.5 px-3 text-[10px] font-bold tracking-[0.08em] text-zinc-400 uppercase">
+          <div className="mb-1.5 px-3 text-[10px] font-bold tracking-[0.08em] text-zinc-500 uppercase">
             {section.heading}
           </div>
           <nav className="space-y-0.5">
@@ -306,7 +306,7 @@ export function AdminTopBar({
             </Link>
 
             <div className="flex min-w-0 items-center gap-2 text-xs">
-              <span className="hidden font-medium text-zinc-400 sm:inline">Staff Portal</span>
+              <span className="hidden font-medium text-zinc-500 sm:inline">Staff Portal</span>
               <span className="hidden text-zinc-300 sm:inline">/</span>
               <span className="truncate font-semibold text-slate-900">{activeItem.label}</span>
               {isBarPending && <IosSpinner size="xs" className="text-emerald-600" />}

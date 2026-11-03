@@ -21,15 +21,15 @@ RapidShift Labs separates **predictable software access** from **pay-as-you-go p
 ## Step 1 — Requesting a Plan or Value Bundle Activation (Minute-by-Minute)
 
 1. Click **Plans & Wallet** (`/billing`) in the left sidebar *(or click **Activate Plan** on any locked feature screen)*.
-2. **Check Value Bundles First**: If you need both Tally Prime + WhatsApp + Shared Inbox (or the full Growth Suite), compare the **Value Bundles** row at the top — unlocking a bundle activates all included tools together at a lower combined rate!
+2. **Check Value Bundles First**: If you need both Tally Prime + WhatsApp + Shared Inbox (or the full Growth Suite), compare the **Value Bundles** row at the top — unlocking a bundle activates all included tools together at a lower combined rate.
 3. Click **Activate Plan** (or **Unlock Bundle**) to open the **Payment & Activation Modal**:
    - **Select Billing Cycle**: Click `Monthly`, `Quarterly`, or `Yearly` and review the live **Subtotal**, **18% GST**, and **Grand Total Payable (₹)**.
    - **Pay the Grand Total**:
-     - **Via UPI App**: Open Google Pay, PhonePe, Paytm, BHIM, or Corporate UPI on your phone and scan the **Dynamic UPI QR Code** shown inside the modal (the exact rupee amount and payee details are pre-filled automatically!).
+     - **Via UPI App**: Open Google Pay, PhonePe, Paytm, BHIM, or Corporate UPI on your phone and scan the **Dynamic UPI QR Code** shown inside the modal (the exact rupee amount and payee details are pre-filled automatically).
      - **Via Bank NEFT / IMPS / RTGS**: Copy the **Beneficiary Name**, **Bank Account Number**, and **IFSC Code** displayed beside the QR code using the **Copy** buttons and transfer the exact Grand Total.
-4. **Copy & Paste Your 12-Digit UTR / UPI Reference Number** (see exact app-by-app instructions below!).
+4. **Copy & Paste Your 12-Digit UTR / UPI Reference Number** (see exact app-by-app instructions below).
 5. Paste the UTR into **UTR / Payment Reference Number**, add an optional note (e.g. `Paid from ICICI Current A/c`), and click **Submit Activation Request**.
-   - While awaiting finance verification, the button shows **Payment Verification Pending** (preventing accidental duplicate submissions). The moment verification completes, your tools unlock automatically!
+   - While awaiting finance verification, the button shows **Payment Verification Pending** (preventing accidental duplicate submissions). The moment verification completes, your tools unlock automatically.
 
 ---
 

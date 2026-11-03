@@ -18,7 +18,7 @@ lastReviewed: 2026-11-03
 
 1. Open **Customer Messages** (`/inbox`) in the left sidebar.
 2. To add a new customer before messaging them, locate the **Add Contact / Start Conversation** form:
-   - **Customer / Party Name**: Enter their name (match their Tally Party Ledger name if you also sync Tally bills!).
+   - **Customer / Party Name**: Enter their name (match their Tally Party Ledger name if you also sync Tally bills).
    - **Phone Number**: Enter `+91` followed by their 10-digit mobile number (e.g. `+919820011223`).
    - **Email & Company Name**: Optional extra context shown in the contact sidebar.
    - **WhatsApp Opt-In**: Keep ticked if the customer gave permission to receive WhatsApp updates.
@@ -41,7 +41,7 @@ Click any conversation in the left column to open its full message timeline:
      - Pick an **`APPROVED`** template from the dropdown (for example `tally_overdue_payment_reminder` or `order_status_update`).
      - Fill in `{{1}}`, `{{2}}`, etc., and click **Send Template Message**.
 2. **Quick Replies (Saved Snippets)**:
-   - If your team answers common questions repeatedly (bank details, store timings, GSTIN, transport godown address), select a **Saved Quick Reply** in the composer to insert the response in one click instead of retyping it!
+   - If your team answers common questions repeatedly (bank details, store timings, GSTIN, transport godown address), select a **Saved Quick Reply** in the composer to insert the response in one click instead of retyping it.
 
 ---
 
@@ -52,12 +52,12 @@ Need to tell your accountant *"Customer promised NEFT by Friday 4 PM"* without t
 1. Open the customer's conversation in `/inbox`.
 2. Switch the composer tab from **Customer Reply** to **Internal Team Note** (amber highlight).
 3. Type your private note (for example `@Accounts: Spoke to Mr. Mehta — hold overdue reminder until Friday evening`) and click **Save Internal Note**.
-4. Internal notes appear inside the timeline with an amber **Team Only** badge — they are **100% invisible** to the customer and are never transmitted to WhatsApp, Instagram, or Facebook!
+4. Internal notes appear inside the timeline with an amber **Team Only** badge — they are **100% invisible** to the customer and are never transmitted to WhatsApp, Instagram, or Facebook.
 
 ---
 
 ## Step 4 — Organizing Conversations with Labels & Statuses
 
 1. **Assign a Label**: In the conversation header, select or type a label (e.g. `Awaiting UTR`, `Urgent`, `Order Confirmed`) and click **Apply Label** so colleagues can filter threads by department.
-2. **Mark Resolved**: Once a customer's query or bill payment is settled, change thread status to **Resolved** to keep your active `Open` queue clean. *(If the customer replies again later, the thread automatically reopens to the top of your inbox!)*
+2. **Mark Resolved**: Once a customer's query or bill payment is settled, change thread status to **Resolved** to keep your active `Open` queue clean. *(If the customer replies again later, the thread automatically reopens to the top of your inbox)*
 3. **Respecting Opt-Out (`Unsubscribed` Badge)**: If a contact has previously texted `STOP`, a red **Unsubscribed** badge appears on their profile so agents know not to send promotional messages.

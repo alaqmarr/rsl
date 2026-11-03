@@ -6,7 +6,7 @@ import {
   formatStaffRoleLabel,
 } from "@rsl/auth";
 import { formatInr, getEnv } from "@rsl/core";
-import { BrandLogo, PlatformFooter } from "@rsl/ui";
+import { BrandLogo, PlatformFooter, UserAvatar } from "@rsl/ui";
 import { AdminSidebarNav, AdminTopBar } from "@/components/admin-nav";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
 import { staffLogoutAction } from "@/lib/actions";
@@ -120,9 +120,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
 
         <div className="shrink-0 border-t border-zinc-100 px-2 pt-4">
           <div className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white">
-              {staff.name.slice(0, 1).toUpperCase()}
-            </span>
+            <UserAvatar name={staff.name} seed={staff.email} size="sm" />
             <div className="min-w-0 flex-1">
               <div className="truncate text-xs font-semibold text-slate-900">{staff.name}</div>
               <div className="truncate text-[11px] text-zinc-500">{staff.email}</div>

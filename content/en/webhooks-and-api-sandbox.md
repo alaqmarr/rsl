@@ -38,7 +38,7 @@ curl -i -X POST "https://your-workspace.tally.rapidshiftlabs.in/api/webhooks/tal
   -d '{"mode":"ping"}'
 ```
 
-3. Confirm HTTP `200 OK` with `"ok": true` and check `/settings/tokens` — **Pings Received** increments immediately!
+3. Confirm HTTP `200 OK` with `"ok": true` and check `/settings/tokens` — **Pings Received** increments immediately.
 
 ---
 
@@ -56,7 +56,7 @@ Want your ERP, CRM, or Slack bot notified the instant a Tally bill is saved, pai
      - `whatsapp.message.received` / `whatsapp.message.sent`
    - Click **Register Webhook Endpoint**.
 3. Copy the generated **`whsec_...` Signing Secret** immediately and store it as `RSL_WEBHOOK_SECRET` on your server.
-4. Click **Send Test Ping** on the webhook row to dispatch a live signed `webhook.test` payload and inspect the HTTP response status recorded in your delivery log!
+4. Click **Send Test Ping** on the webhook row to dispatch a live signed `webhook.test` payload and inspect the HTTP response status recorded in your delivery log.
 
 ---
 

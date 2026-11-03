@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 210" fill="none" role="img" aria-label="WhatsApp Cloud API and Shared Team Inbox Message Flow">
+  <rect width="880" height="210" rx="20" fill="#F8FAFC"/>
+  <rect x="1" y="1" width="878" height="208" rx="19" stroke="#E2E8F0" stroke-width="2"/>
+
+  <rect x="28" y="38" width="184" height="134" rx="16" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1.5"/>
+  <text x="44" y="68" font-family="system-ui, sans-serif" font-size="10.5" font-weight="700" fill="#0284C7">STEP 1 • TRIGGER</text>
+  <text x="44" y="96" font-family="system-ui, sans-serif" font-size="14.5" font-weight="700" fill="#0F172A">Event or Broadcast</text>
+  <text x="44" y="118" font-family="system-ui, sans-serif" font-size="12" fill="#475569">Tally bill, reminder,</text>
+  <text x="44" y="136" font-family="system-ui, sans-serif" font-size="12" fill="#475569">or opted-in segment</text>
+
+  <line x1="214" y1="105" x2="246" y2="105" stroke="#059669" stroke-width="2.5"/>
+  <polygon points="246,99 256,105 246,111" fill="#059669"/>
+
+  <rect x="258" y="38" width="188" height="134" rx="16" fill="#ECFDF5" stroke="#6EE7B7" stroke-width="1.5"/>
+  <text x="274" y="68" font-family="system-ui, sans-serif" font-size="10.5" font-weight="700" fill="#047857">STEP 2 • SENDGUARD</text>
+  <text x="274" y="96" font-family="system-ui, sans-serif" font-size="14.5" font-weight="700" fill="#0F172A">Safety &amp; Consent</text>
+  <text x="274" y="118" font-family="system-ui, sans-serif" font-size="12" fill="#065F46">Opt-out check, atomic</text>
+  <text x="274" y="136" font-family="system-ui, sans-serif" font-size="12" fill="#065F46">dedupe &amp; wallet meter</text>
+
+  <line x1="448" y1="105" x2="480" y2="105" stroke="#059669" stroke-width="2.5"/>
+  <polygon points="480,99 490,105 480,111" fill="#059669"/>
+
+  <rect x="492" y="38" width="174" height="134" rx="16" fill="#0F172A"/>
+  <text x="508" y="68" font-family="system-ui, sans-serif" font-size="10.5" font-weight="700" fill="#34D399">STEP 3 • OFFICIAL API</text>
+  <text x="508" y="96" font-family="system-ui, sans-serif" font-size="14.5" font-weight="700" fill="#FFFFFF">Meta Cloud API</text>
+  <text x="508" y="118" font-family="system-ui, sans-serif" font-size="12" fill="#CBD5E1">Signed webhook HMAC</text>
+  <text x="508" y="136" font-family="system-ui, sans-serif" font-size="12" fill="#CBD5E1">Delivery &amp; read ticks</text>
+
+  <line x1="668" y1="105" x2="698" y2="105" stroke="#059669" stroke-width="2.5"/>
+  <polygon points="698,99 708,105 698,111" fill="#059669"/>
+
+  <rect x="710" y="38" width="142" height="134" rx="16" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1.5"/>
+  <text x="726" y="68" font-family="system-ui, sans-serif" font-size="10.5" font-weight="700" fill="#0F172A">STEP 4 • TEAM</text>
+  <text x="726" y="96" font-family="system-ui, sans-serif" font-size="14.5" font-weight="700" fill="#0F172A">Shared Inbox</text>
+  <text x="726" y="118" font-family="system-ui, sans-serif" font-size="12" fill="#475569">24h window timer</text>
+  <text x="726" y="136" font-family="system-ui, sans-serif" font-size="12" fill="#475569">Assign &amp; reply</text>
+</svg>

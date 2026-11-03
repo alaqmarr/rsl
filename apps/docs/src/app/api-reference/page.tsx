@@ -1,6 +1,7 @@
 import { resolvePublicEndpoints } from "@rsl/core";
 import { generateCodeSamples, getApiReferenceEndpoints } from "@rsl/docs";
-import { PageHeader, SectionCard } from "@rsl/ui";
+import { PageHeader, SectionCard, TabbedApiCodeViewer } from "@rsl/ui";
+import { ActionLink } from "@/components/ios-feedback";
 
 export const dynamic = "force-dynamic";
 
@@ -53,30 +54,28 @@ export default function ApiReferencePage() {
                 </div>
               }
             >
-              <div id={ep.id} className="grid gap-4 lg:grid-cols-2">
-                <div className="min-w-0 space-y-2.5">
-                  <p className="text-[11px] font-bold tracking-wider text-zinc-500 uppercase">
-                    cURL &amp; JavaScript Examples
-                  </p>
-                  <pre className="overflow-x-auto rounded-xl bg-slate-950 p-4 font-mono text-xs leading-relaxed text-zinc-100">
-                    <code>{samples.curl}</code>
-                  </pre>
-                  <pre className="overflow-x-auto rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-4 font-mono text-xs leading-relaxed text-slate-900">
-                    <code>{samples.javascript}</code>
-                  </pre>
-                </div>
+              <div id={ep.id} className="space-y-4">
+                <TabbedApiCodeViewer
+                  curl={samples.curl}
+                  javascript={samples.javascript}
+                  python={samples.python}
+                  responseJson={JSON.stringify(ep.responseExample, null, 2)}
+                />
 
-                <div className="min-w-0 space-y-2.5">
-                  <p className="text-[11px] font-bold tracking-wider text-zinc-500 uppercase">
-                    Python &amp; JSON Response
-                  </p>
-                  <pre className="overflow-x-auto rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-4 font-mono text-xs leading-relaxed text-slate-900">
-                    <code>{samples.python}</code>
-                  </pre>
-                  <pre className="overflow-x-auto rounded-xl bg-slate-950 p-4 font-mono text-xs leading-relaxed text-emerald-300">
-                    <code>{JSON.stringify(ep.responseExample, null, 2)}</code>
-                  </pre>
-                </div>
+                {ep.errorCodes && ep.errorCodes.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3 text-xs text-zinc-500">
+                    <span className="font-semibold text-zinc-600">Possible Error Codes:</span>
+                    {ep.errorCodes.map((errCode) => (
+                      <ActionLink
+                        key={errCode}
+                        href={`/errors/${errCode}`}
+                        className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50"
+                      >
+                        {errCode}
+                      </ActionLink>
+                    ))}
+                  </div>
+                )}
               </div>
             </SectionCard>
           );

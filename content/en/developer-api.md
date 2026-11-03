@@ -22,7 +22,7 @@ lastReviewed: 2026-11-03
      - `analytics:read` — Fetch KPIs, receivable aging, and time-series reports
    - Click **Create API Key**.
 4. **Copy the Full Key Immediately**:
-   - A green banner reveals the full secret (`rsl_live_<slug>_<random>`) **one time only**. RapidShift stores only its SHA-256 hash on disk, so copy it into your server `.env` (`RSL_API_KEY=...`) right away!
+   - A green banner reveals the full secret (`rsl_live_<slug>_<random>`) **one time only**. RapidShift stores only its SHA-256 hash on disk, so copy it into your server `.env` (`RSL_API_KEY=...`) right away.
    - If a key is ever leaked or an engineer leaves, click **Revoke Key** on its row in `/settings/tokens` for instant invalidation.
 
 ---
@@ -50,7 +50,7 @@ Before writing code, test your payload directly in your browser:
 1. Open `/developers` (or click **Open Interactive API Sandbox** from **All API Tokens**).
 2. Select an endpoint preset (`GET /api/v1/contacts`, `POST /api/v1/tally/bill-event`, `POST /api/v1/whatsapp/send-template`, or `GET /api/v1/analytics?range=30d`).
 3. Paste your `rsl_live_...` or `rsl_test_...` Bearer token into the **Bearer API Key** field.
-4. Edit the JSON request body if testing a `POST` route, then click **Send Live Request** to inspect the exact HTTP status code, latency (`ms`), and formatted JSON response!
+4. Edit the JSON request body if testing a `POST` route, then click **Send Live Request** to inspect the exact HTTP status code, latency (`ms`), and formatted JSON response.
 
 ---
 

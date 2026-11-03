@@ -4,7 +4,7 @@ import React, { useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
-import { IosSpinner } from "@rsl/ui";
+import { IosSpinner, PendingSubmitButton } from "@rsl/ui";
 
 export { IosSpinner };
 
@@ -30,31 +30,20 @@ export function SubmitButton({
   title?: string;
 }) {
   const { pending } = useFormStatus();
-  const isBusy = pending;
-
   return (
-    <button
-      type="submit"
+    <PendingSubmitButton
+      pending={pending}
+      pendingText={pendingText}
+      className={className}
+      spinnerSize={spinnerSize}
+      disabled={disabled}
+      iconOnly={iconOnly}
       name={name}
       value={value}
       title={title}
-      disabled={disabled || isBusy}
-      aria-busy={isBusy}
-      className={`inline-flex items-center justify-center gap-1.5 ${className} disabled:cursor-not-allowed disabled:opacity-75`}
     >
-      {iconOnly ? (
-        isBusy ? (
-          <IosSpinner size={spinnerSize} />
-        ) : (
-          children
-        )
-      ) : (
-        <>
-          {isBusy && <IosSpinner size={spinnerSize} />}
-          {isBusy && pendingText ? <span>{pendingText}</span> : children}
-        </>
-      )}
-    </button>
+      {children}
+    </PendingSubmitButton>
   );
 }
 

@@ -12,9 +12,13 @@ lastReviewed: 2026-11-03
 
 RapidShift Labs **never** redesigns, re-templates, or alters your Tally Prime invoice PDF. When Tally Prime exports a bill via local Port `9000` or the Windows Connector, RapidShift captures Tally Prime's own native `Voucher` print output (`%PDF-1.x`) byte-for-byte — preserving your company logo, custom TDL columns, HSN/SAC table, e-Invoice IRN & QR code, e-Way Bill details, bank details, and authorised signatory box — and delivers that exact PDF on WhatsApp using the `tally_tax_invoice_pdf` (`DOCUMENT` header) template.
 
+![Tally Prime to Cloud Dashboard and WhatsApp Sync Architecture](/diagrams/tally-sync-architecture.svg)
+
+> [!IMPORTANT] Built-in Data Protection: If Tally Prime is restarting or has no company open (returning 0 bills), the `RSL-SYNC-CIRCUIT-BREAKER` safeguard blocks empty snapshot deletion so your cached bills and pending reminders remain untouched.
+
 ---
 
-## Pre-Step 0 — Enter Customer Mobile Numbers in Tally Party Ledgers (Do Not Skip!)
+## Pre-Step 0 — Enter Customer Mobile Numbers in Tally Party Ledgers (Do Not Skip)
 
 For Tally Prime to tell WhatsApp *which* phone number should receive a customer's bill, the customer's 10-digit mobile number must be saved inside their **Party Ledger** in Tally Prime:
 
@@ -26,7 +30,7 @@ For Tally Prime to tell WhatsApp *which* phone number should receive a customer'
 4. Back on the Ledger screen, move the cursor down to **Mailing Details / Contact Details -> Mobile no.** (or set **Provide multiple mobile numbers** = **No** and enter the primary number in **Mobile no.**):
    - Type the customer's **10-digit Indian mobile number** (for example `9820011223` or `+919820011223` — RapidShift automatically normalizes `9820011223`, `09820011223`, and `919820011223` to `+919820011223`).
 5. Press **Ctrl + A** to save the Party Ledger.
-   - *(Tip: If a party's mobile number was missing when a bill synced, you can also add the customer's phone number under **Customer Messages -> Contacts** in RapidShift Labs with the matching company/party name!)*
+   - *(Tip: If a party's mobile number was missing when a bill synced, you can also add the customer's phone number under **Customer Messages -> Contacts** in RapidShift Labs with the matching company/party name)*
 
 ---
 
@@ -67,7 +71,7 @@ For Tally Prime to tell WhatsApp *which* phone number should receive a customer'
    - In Windows File Explorer, click **View -> Show -> File name extensions** (make sure there is a checkmark next to **File name extensions**).
    - Back in RapidShift Labs (**Tally Prime & Bills -> Connect Tally Prime**), click **Download Pre-Configured `.tdl v2.5`**.
    - Save the file directly into `C:\TallyPrime\rsl-tally-whatsapp.tdl`.
-   - **Critical Check:** If an older `rsl-tally-whatsapp.tdl` already exists in that folder, **overwrite/replace** it — never let Chrome/Edge save it as `rsl-tally-whatsapp (1).tdl`, because Tally Prime will keep loading the old file!
+   - **Critical Check:** If an older `rsl-tally-whatsapp.tdl` already exists in that folder, **overwrite/replace** it — never let Chrome/Edge save it as `rsl-tally-whatsapp (1).tdl`, because Tally Prime will keep loading the old file.
 
 ---
 
@@ -97,7 +101,7 @@ For Tally Prime to tell WhatsApp *which* phone number should receive a customer'
 2. Next, arrow down to **RSL Sync All Bills Now** and press **Enter**:
    - Tally Prime pushes your open company's bills and receipts to RapidShift Labs and reconciles any previously deleted Day Book vouchers.
 3. Switch to your browser at `https://app.rapidshiftlabs.in/tally`:
-   - Confirm the status banner turns green (**Live Connected**) and your synced bills appear in the **Synced Tally Bills & Receipts** table!
+   - Confirm the status banner turns green (**Live Connected**) and your synced bills appear in the **Synced Tally Bills & Receipts** table.
 
 ---
 
@@ -107,10 +111,10 @@ For Tally Prime to tell WhatsApp *which* phone number should receive a customer'
    - Open **WhatsApp & Templates** (`/whatsapp`), click **Load Ready-Made Tally Templates**, and click **Sync Templates with WhatsApp**.
 2. Return to **Tally Prime & Bills** (`/tally`) and scroll to **Instant Voucher Event WhatsApp Rules**:
    - **Voucher Type Trigger**: select **Sales (`Sales` — Send Bill / Native Tally PDF)**.
-   - **Approved WhatsApp Template**: select **`tally_tax_invoice_pdf`** (this template includes a `DOCUMENT` header slot so RapidShift attaches your exact untouched Tally-printed PDF invoice automatically!).
+   - **Approved WhatsApp Template**: select **`tally_tax_invoice_pdf`** (this template includes a `DOCUMENT` header slot so RapidShift attaches your exact untouched Tally-printed PDF invoice automatically).
    - Keep **Attach Native Tally Prime Printed PDF** enabled and click **Create Automation Rule**.
 3. Optional — Add a **Payment Receipt Rule**:
-   - Create a second rule with **Voucher Type**: `Receipt` and **Template**: `tally_payment_receipt_thankyou` so customers receive an instant WhatsApp receipt acknowledgment the second you press **Ctrl + A** on an `F6 Receipt` voucher in Tally!
+   - Create a second rule with **Voucher Type**: `Receipt` and **Template**: `tally_payment_receipt_thankyou` so customers receive an instant WhatsApp receipt acknowledgment the second you press **Ctrl + A** on an `F6 Receipt` voucher in Tally.
 4. Optional — Add **Scheduled Overdue Payment Reminders**:
    - Scroll to **Scheduled Overdue Payment Reminder Rules**.
    - Choose when to remind unpaid `Sales` bills (for example `3 days before due date`, `On due date`, or `7 days after due date`), pick `tally_overdue_payment_reminder`, and click **Save Reminder Rule**.

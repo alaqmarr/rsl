@@ -61,7 +61,7 @@ Gather these five items before starting so you can complete your entire workspac
 ## Step 4 — Fund Your Prepaid Message Wallet (`-₹200.00` Overdraft Included)
 
 1. Stay in **Plans & Wallet** (`/billing?tab=wallet`) and locate the **Recharge Prepaid Wallet** card.
-   - **Important:** Monthly plans unlock software screens; the **Prepaid Wallet** pays per-message WhatsApp delivery rates and ₹1.00 Smart Review drafts. Even at `₹0.00`, RapidShift Labs gives every workspace an automatic **`-₹200.00` overdraft buffer** so urgent Tally GST invoices never stop mid-day!
+   - **Important:** Monthly plans unlock software screens; the **Prepaid Wallet** pays per-message WhatsApp delivery rates and ₹1.00 Smart Review drafts. Even at `₹0.00`, RapidShift Labs gives every workspace an automatic **`-₹200.00` overdraft buffer** so urgent Tally GST invoices never stop mid-day.
 2. Enter the **Recharge Amount (₹)** (for example `1000` or `2500`).
 3. Scan the UPI QR code or transfer via Bank NEFT/IMPS, paste your **12-Digit UTR Number**, select **UPI** or **Bank Transfer**, and click **Submit Wallet Recharge**.
 4. Once verified, your top-bar green wallet pill updates immediately and every rupee deduction is logged permanently in your **Append-Only Wallet Passbook**.
