@@ -125,6 +125,120 @@ async function requireStaffWithPermission(
   return staff;
 }
 
+export interface AdminAuthFormState {
+  error: string | null;
+  notice?: string | null;
+  fields: Record<string, string>;
+}
+
+export async function staffLoginFormStateAction(
+  _prevState: AdminAuthFormState,
+  formData: FormData
+): Promise<AdminAuthFormState> {
+  const email = String(formData.get("email") || "").trim();
+  const password = String(formData.get("password") || "");
+
+  if (countPlatformStaff() === 0) {
+    return {
+      error:
+        "Platform is not initialized yet. Complete first-time Super Admin creation on the Setup portal first.",
+      fields: { email },
+    };
+  }
+
+  try {
+    const out = signInPlatformStaff({ email, password });
+    await setStaffCookie(out.rawToken);
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Login failed",
+      fields: { email },
+    };
+  }
+
+  redirect("/");
+}
+
+export async function completeSetupFormStateAction(
+  _prevState: AdminAuthFormState,
+  formData: FormData
+): Promise<AdminAuthFormState> {
+  const setupKey = String(formData.get("setupKey") || "").trim();
+  const name = String(formData.get("name") || "").trim();
+  const email = String(formData.get("email") || "").trim().toLowerCase();
+  const password = String(formData.get("password") || "");
+  const confirmPassword = String(formData.get("confirmPassword") || "");
+  const fields = { setupKey, name, email };
+
+  if (countPlatformStaff() > 0) {
+    return {
+      error: "Initial Super Admin has already been created and bootstrap is permanently locked.",
+      fields,
+    };
+  }
+
+  const env = getEnv();
+  let expectedToken = (env.SETUP_BOOTSTRAP_TOKEN || "").trim();
+  if (!expectedToken) {
+    try {
+      const envFile = path.join(env.REPO_ROOT, ".env");
+      if (fs.existsSync(envFile)) {
+        const m = fs.readFileSync(envFile, "utf8").match(/^SETUP_BOOTSTRAP_TOKEN=(.+)$/m);
+        if (m?.[1]) expectedToken = m[1].trim().replace(/^['"]|['"]$/g, "");
+      }
+    } catch {
+      // Ignore disk fallback error
+    }
+  }
+
+  if (expectedToken.length > 0) {
+    const a = Buffer.from(setupKey, "utf8");
+    const b = Buffer.from(expectedToken, "utf8");
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      return {
+        error:
+          "Invalid Server Setup Key. Copy the SETUP_BOOTSTRAP_TOKEN printed by setup.sh (or in your server .env).",
+        fields,
+      };
+    }
+  } else if (env.NODE_ENV === "production") {
+    return {
+      error:
+        "SETUP_BOOTSTRAP_TOKEN is not configured in your server .env. Run bash setup.sh on the server first.",
+      fields,
+    };
+  }
+
+  if (name.length < 2) {
+    return { error: "Please enter your full name.", fields };
+  }
+  if (!email.includes("@")) {
+    return { error: "Please enter a valid Super Admin email address.", fields };
+  }
+  if (password.length < 8) {
+    return { error: "Password must be at least 8 characters long.", fields };
+  }
+  if (password !== confirmPassword) {
+    return { error: "Password and Confirm Password do not match.", fields };
+  }
+
+  try {
+    const out = bootstrapFirstPlatformStaff({ name, email, password });
+    await setStaffCookie(out.rawToken);
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Failed to initialize Super Admin account.",
+      fields,
+    };
+  }
+
+  return flashAdminRedirect(
+    "/setup",
+    "notice",
+    "Primary Super Admin created and bootstrap locked! Your platform is ready."
+  );
+}
+
 export async function staffBootstrapOrLoginAction(formData: FormData) {
   const email = String(formData.get("email") || "").trim();
   const password = String(formData.get("password") || "");

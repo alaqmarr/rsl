@@ -17,14 +17,16 @@ import {
 } from "@rsl/rbac";
 import { BrandLogo, PlatformFooter } from "@rsl/ui";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
-import { PageWalkthroughBanner } from "@/components/page-walkthrough-banner";
 import { WorkspaceAccessProvider } from "@/components/workspace-access-context";
 import { SidebarNavLinks, TopWorkspaceBar } from "@/components/workspace-chrome";
 import { logoutAction, switchWorkspaceAction } from "@/lib/actions";
-import { requireWebSession } from "@/lib/session";
+import { getOptionalWebSession } from "@/lib/session";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const session = await requireWebSession();
+  const session = await getOptionalWebSession();
+  if (!session) {
+    return <>{children}</>;
+  }
   const env = getEnv();
   const grantedPermissions = Array.from(
     getPermissionsForRole(session.roleSlug, session.workspace.id)
@@ -266,7 +268,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                   title={formatRoleLabel(session.roleSlug)}
                   className="shrink-0 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-bold tracking-wide text-zinc-600 uppercase"
                 >
-                  {session.roleSlug}
+                  {formatRoleLabel(session.roleSlug)}
                 </span>
               </div>
 
@@ -323,7 +325,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
             />
 
             <main className="w-full flex-1 px-5 py-6 lg:px-8 xl:px-10">
-              <PageWalkthroughBanner />
               {children}
             </main>
 

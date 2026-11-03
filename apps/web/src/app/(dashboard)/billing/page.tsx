@@ -83,6 +83,10 @@ export default async function BillingAndWalletPage({
   const activeTab =
     sp.tab === "wallet" || sp.tab === "invoices" ? sp.tab : "plans";
   const planFilter = sp.filter || "all";
+  const selectedCycle: "monthly" | "quarterly" | "yearly" =
+    sp.cycle === "yearly" ? "yearly" : sp.cycle === "quarterly" ? "quarterly" : "monthly";
+  const selectedCycleSuffix =
+    selectedCycle === "yearly" ? "/ yr" : selectedCycle === "quarterly" ? "/ 3 mo" : "/ mo";
 
   const walletBalancePaise = getWalletBalancePaise(session.workspace.id);
   const walletAvailableSpendPaise = getWalletAvailableSpendPaise(walletBalancePaise);
@@ -348,6 +352,59 @@ export default async function BillingAndWalletPage({
       {/* TAB 1: BUNDLES + FEATURE PLANS */}
       {activeTab === "plans" && (
         <div className="space-y-6">
+          {/* Interactive Monthly / Quarterly / Yearly Pricing Cycle Bar (5.2 / P2-02) */}
+          {!allToolsUnlocked && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-200/90 bg-white px-4 py-3 shadow-2xs">
+              <div className="text-xs text-zinc-600">
+                <span className="font-bold text-slate-900">Select Billing Cycle:</span>{" "}
+                Prices update live across all bundles and modular feature plans (+ 18% GST).
+              </div>
+              <div
+                role="group"
+                aria-label="Billing cycle switcher"
+                className="inline-flex rounded-xl border border-zinc-200 bg-zinc-50/80 p-1"
+              >
+                {(
+                  [
+                    { key: "monthly", label: "Monthly", badge: null },
+                    { key: "quarterly", label: "Quarterly", badge: "Save ~10%" },
+                    { key: "yearly", label: "Yearly", badge: "Save ~20%" },
+                  ] as const
+                ).map((opt) => {
+                  const active = selectedCycle === opt.key;
+                  const href = `/billing?tab=plans&cycle=${opt.key}${
+                    planFilter !== "all" ? `&filter=${encodeURIComponent(planFilter)}` : ""
+                  }`;
+                  return (
+                    <ActionLink
+                      key={opt.key}
+                      href={href}
+                      spinnerSize="xs"
+                      className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                        active
+                          ? "bg-slate-900 text-white shadow-2xs"
+                          : "text-zinc-600 hover:bg-white hover:text-slate-900"
+                      }`}
+                    >
+                      <span>{opt.label}</span>
+                      {opt.badge && (
+                        <span
+                          className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                            active
+                              ? "bg-emerald-500 text-white"
+                              : "bg-emerald-100 text-emerald-800"
+                          }`}
+                        >
+                          {opt.badge}
+                        </span>
+                      )}
+                    </ActionLink>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* SECTION 1A: AVAILABLE VALUE BUNDLES (hidden when all tools are already unlocked) */}
           {availableBundles.length > 0 && (
             <SectionCard
@@ -358,7 +415,14 @@ export default async function BillingAndWalletPage({
               <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                 {availableBundles.map((bundle) => {
                   const isAllFeatures = bundle.key === "all_features";
+                  const isRecommended = bundle.key === "tally_whatsapp_pack";
                   const bundlePending = Boolean(bundle.pendingRequest);
+                  const activeBundlePaise =
+                    selectedCycle === "yearly"
+                      ? bundle.yearlyAmountPaise
+                      : selectedCycle === "quarterly"
+                        ? bundle.quarterlyAmountPaise
+                        : bundle.monthlyAmountPaise;
 
                   return (
                     <div
@@ -366,9 +430,11 @@ export default async function BillingAndWalletPage({
                       className={`flex h-full flex-col justify-between rounded-2xl border p-5 text-[13px] transition ${
                         isAllFeatures
                           ? "border-slate-900/20 bg-slate-50/70 ring-1 ring-slate-900/5 lg:col-span-2"
-                          : bundlePending
-                            ? "border-amber-200 bg-amber-50/30"
-                            : "border-zinc-200/90 bg-white hover:border-zinc-300"
+                          : isRecommended
+                            ? "border-emerald-500/80 bg-white ring-1 ring-emerald-500/15"
+                            : bundlePending
+                              ? "border-amber-200 bg-amber-50/30"
+                              : "border-zinc-200/90 bg-white hover:border-zinc-300"
                       }`}
                     >
                       <div className="space-y-3">
@@ -382,7 +448,7 @@ export default async function BillingAndWalletPage({
                                     : "bg-emerald-100 text-emerald-900"
                                 }`}
                               >
-                                {bundle.badgeLabel}
+                                {isRecommended ? "Recommended • Most Popular" : bundle.badgeLabel}
                               </span>
                               {bundle.hasCustomOverride && (
                                 <StatusPill label="Tailored Client Rate" tone="emerald" />
@@ -408,11 +474,13 @@ export default async function BillingAndWalletPage({
                               </div>
                             )}
                             <div className="text-xl font-extrabold tracking-tight text-slate-900">
-                              {formatInr(bundle.monthlyAmountPaise)}
-                              <span className="ml-1 text-xs font-medium text-zinc-500">/ mo</span>
+                              {formatInr(activeBundlePaise)}
+                              <span className="ml-1 text-xs font-medium text-zinc-500">
+                                {selectedCycleSuffix}
+                              </span>
                             </div>
                             <div className="text-[11px] text-zinc-500">
-                              Quarterly: <strong className="text-slate-700">{formatInr(bundle.quarterlyAmountPaise)}</strong> • Yearly:{" "}
+                              Monthly: <strong className="text-slate-700">{formatInr(bundle.monthlyAmountPaise)}</strong> • Yearly:{" "}
                               <strong className="text-slate-700">{formatInr(bundle.yearlyAmountPaise)}</strong>
                             </div>
                           </div>
@@ -461,6 +529,8 @@ export default async function BillingAndWalletPage({
                           monthlyPaise={bundle.monthlyAmountPaise}
                           quarterlyPaise={bundle.quarterlyAmountPaise}
                           yearlyPaise={bundle.yearlyAmountPaise}
+                          defaultCycle={selectedCycle}
+                          walletBalancePaise={walletBalancePaise}
                           hasCustomRate={bundle.hasCustomOverride}
                           isUnlocked={bundle.isFullyUnlocked}
                           isPending={bundlePending}
@@ -703,9 +773,18 @@ export default async function BillingAndWalletPage({
                                       </span>
                                     )}
                                   <span className="text-base font-extrabold text-slate-900">
-                                    {formatInr(svc.monthlyAmountPaise)}
+                                    {formatInr(
+                                      selectedCycle === "yearly"
+                                        ? svc.yearlyAmountPaise
+                                        : selectedCycle === "quarterly"
+                                          ? svc.quarterlyAmountPaise
+                                          : svc.monthlyAmountPaise
+                                    )}
                                   </span>
-                                  <span className="text-[11px] text-zinc-500"> / mo + 18% GST</span>
+                                  <span className="text-[11px] text-zinc-500">
+                                    {" "}
+                                    {selectedCycleSuffix} + 18% GST
+                                  </span>
                                 </div>
                                 {svc.unitAmountPaise > 0 && (
                                   <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 ring-1 ring-emerald-200/70">
@@ -715,9 +794,9 @@ export default async function BillingAndWalletPage({
                                 )}
                               </div>
                               <div className="text-[11px] text-zinc-500">
-                                Quarterly:{" "}
+                                Monthly:{" "}
                                 <strong className="text-slate-700">
-                                  {formatInr(svc.quarterlyAmountPaise)}
+                                  {formatInr(svc.monthlyAmountPaise)}
                                 </strong>{" "}
                                 • Yearly:{" "}
                                 <strong className="text-slate-700">
@@ -748,7 +827,7 @@ export default async function BillingAndWalletPage({
 
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <span className="text-[11px] text-zinc-500">
-                                  UPI QR + 18% GST Invoice
+                                  UPI / Wallet + 18% GST Invoice
                                 </span>
 
                                 <PlanActivationModal
@@ -760,6 +839,8 @@ export default async function BillingAndWalletPage({
                                   monthlyPaise={svc.monthlyAmountPaise}
                                   quarterlyPaise={svc.quarterlyAmountPaise}
                                   yearlyPaise={svc.yearlyAmountPaise}
+                                  defaultCycle={selectedCycle}
+                                  walletBalancePaise={walletBalancePaise}
                                   hasCustomRate={svc.hasCustomPriceOverride}
                                   isUnlocked={svc.isUnlocked}
                                   isPending={isPending}
@@ -864,34 +945,57 @@ export default async function BillingAndWalletPage({
                 </div>
               </div>
 
+              {billingSettings.upiId && (
+                <a
+                  href={`upi://pay?pa=${encodeURIComponent(billingSettings.upiId).replace(/%40/g, "@")}&pn=${encodeURIComponent(billingSettings.payeeName || "RapidShift Labs")}&cu=INR`}
+                  className="rsl-btn-secondary inline-flex min-h-11 w-full items-center justify-center gap-2 text-xs font-semibold sm:w-auto"
+                >
+                  <QrCode className="h-4 w-4 text-emerald-600" />
+                  <span>Open UPI Payment App (GPay / PhonePe / Paytm) →</span>
+                </a>
+              )}
+
               <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
                 <div>
-                  <label className="rsl-label">Recharge Amount (₹ INR)</label>
+                  <label htmlFor="wallet-recharge-rupees" className="rsl-label">
+                    Recharge Amount (₹ INR)
+                  </label>
                   <input
+                    id="wallet-recharge-rupees"
                     name="amountRupees"
                     type="number"
                     min="100"
                     step="1"
                     defaultValue="2500"
                     required
-                    className="rsl-input tabular-nums"
+                    className="rsl-input min-h-10 tabular-nums"
                   />
                 </div>
                 <div>
-                  <label className="rsl-label">Payment Method</label>
-                  <select name="paymentMethod" defaultValue="upi" className="rsl-input">
+                  <label htmlFor="wallet-payment-method" className="rsl-label">
+                    Payment Method
+                  </label>
+                  <select
+                    id="wallet-payment-method"
+                    name="paymentMethod"
+                    defaultValue="upi"
+                    className="rsl-input min-h-10"
+                  >
                     <option value="upi">UPI Payment</option>
                     <option value="bank_transfer">Bank Transfer (NEFT / IMPS)</option>
                   </select>
                 </div>
                 <div>
-                  <label className="rsl-label">UTR / Transaction Ref # *</label>
+                  <label htmlFor="wallet-utr-ref" className="rsl-label">
+                    UTR / Transaction Ref # *
+                  </label>
                   <input
+                    id="wallet-utr-ref"
                     name="utrOrReference"
                     required
                     minLength={4}
                     placeholder="12-digit UPI or bank UTR"
-                    className="rsl-input font-mono"
+                    className="rsl-input min-h-10 font-mono"
                   />
                 </div>
               </div>

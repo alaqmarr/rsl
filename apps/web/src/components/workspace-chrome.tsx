@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BrandLogo, IosSpinner } from "@rsl/ui";
+import { BrandLogo, IosSpinner, useDialogFocusTrap } from "@rsl/ui";
 import { useWorkspaceAccess } from "@/components/workspace-access-context";
 import { resolveWebPageGuide } from "@/lib/page-guides";
 import {
@@ -332,7 +332,7 @@ export function SidebarNavLinks({ onNavigate }: { onNavigate?: () => void }) {
     <nav className="mt-4 space-y-4 pb-2">
       {visibleSections.map((sec) => (
         <div key={sec.heading}>
-          <div className="px-2.5 text-[10px] font-bold tracking-[0.08em] text-zinc-400 uppercase">
+          <div className="px-2.5 text-[10px] font-bold tracking-[0.08em] text-zinc-500 uppercase">
             {sec.heading}
           </div>
           <ul className="mt-1.5 space-y-0.5">
@@ -433,6 +433,15 @@ export function TopWorkspaceBar({
   const [helpOpen, setHelpOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  const mobileDrawerRef = React.useRef<HTMLDivElement>(null);
+  const paletteDialogRef = React.useRef<HTMLDivElement>(null);
+  const helpDrawerRef = React.useRef<HTMLElement>(null);
+
+  useDialogFocusTrap(mobileDrawerRef, mobileMenuOpen, () => setMobileMenuOpen(false));
+  useDialogFocusTrap(paletteDialogRef, paletteOpen, () => setPaletteOpen(false));
+  useDialogFocusTrap(helpDrawerRef, helpOpen, () => setHelpOpen(false));
 
   const allItems = useMemo(() => WORKSPACE_NAV_SECTIONS.flatMap((s) => s.items), []);
   const accessibleItems = useMemo(
@@ -450,6 +459,64 @@ export function TopWorkspaceBar({
     );
   }, [accessibleItems, allItems, pathname]);
 
+  const quickActions = useMemo(() => {
+    const actions: Array<{
+      id: string;
+      label: string;
+      summary: string;
+      keywords: string;
+      href?: string;
+      onRun?: () => void;
+    }> = [
+      {
+        id: "open-guide",
+        label: `Open Page Guide: ${currentItem.label}`,
+        summary: "Read step-by-step instructions and common mistakes for this screen",
+        keywords: "help guide manual steps walkthrough",
+        onRun: () => setHelpOpen(true),
+      },
+    ];
+    if (canAccessRoute("/billing")) {
+      actions.push({
+        id: "wallet-recharge",
+        label: "Recharge Prepaid Wallet",
+        summary: "Add funds via UPI / Bank Transfer or view GST Advance Receipts",
+        keywords: "recharge topup wallet upi utr billing balance",
+        href: "/billing?tab=wallet",
+      });
+    }
+    if (canAccessRoute("/tally")) {
+      actions.push({
+        id: "tally-sync",
+        label: "Pair Tally Prime or Download .bat Connector",
+        summary: "Configure Tally Prime .tdl v2.5 add-on or Windows 1-click sync",
+        keywords: "tally prime sync connector bat tdl bills",
+        href: "/tally",
+      });
+    }
+    if (canAccessRoute("/whatsapp")) {
+      actions.push({
+        id: "wa-template",
+        label: "Create WhatsApp Business Template",
+        summary: "Design Meta-approved bill or payment reminder templates with live preview",
+        keywords: "whatsapp template create broadcast reminder",
+        href: "/whatsapp",
+      });
+    }
+    return actions;
+  }, [canAccessRoute, currentItem.label]);
+
+  const filteredQuickActions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return quickActions;
+    return quickActions.filter(
+      (a) =>
+        a.label.toLowerCase().includes(q) ||
+        a.summary.toLowerCase().includes(q) ||
+        a.keywords.toLowerCase().includes(q)
+    );
+  }, [quickActions, query]);
+
   const filteredItems = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return accessibleItems;
@@ -460,6 +527,18 @@ export function TopWorkspaceBar({
         i.helpSummary.toLowerCase().includes(q)
     );
   }, [accessibleItems, query]);
+
+  const paletteEntries = useMemo(
+    () => [
+      ...filteredQuickActions.map((a) => ({ kind: "action" as const, action: a })),
+      ...filteredItems.map((i) => ({ kind: "nav" as const, item: i })),
+    ],
+    [filteredQuickActions, filteredItems]
+  );
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [query, paletteOpen]);
 
   const canViewBilling = canAccessRoute("/billing");
   const isNegativeWallet = walletBalancePaise < 0;
@@ -586,7 +665,13 @@ export function TopWorkspaceBar({
             className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs"
             onClick={() => setMobileMenuOpen(false)}
           />
-          <div className="relative z-10 flex w-72 max-w-[85vw] flex-col justify-between overflow-y-auto bg-white p-4 shadow-2xl">
+          <div
+            ref={mobileDrawerRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Workspace navigation menu"
+            className="relative z-10 flex w-72 max-w-[85vw] flex-col justify-between overflow-y-auto bg-white p-4 shadow-2xl"
+          >
             <div>
               <div className="flex items-center justify-between border-b border-zinc-200 pb-3">
                 <Link href="/" onClick={() => setMobileMenuOpen(false)}>
@@ -595,7 +680,8 @@ export function TopWorkspaceBar({
                 <button
                   type="button"
                   onClick={() => setMobileMenuOpen(false)}
-                  className="rounded-lg p-1 text-zinc-500 hover:bg-zinc-100"
+                  aria-label="Close navigation menu"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -603,7 +689,7 @@ export function TopWorkspaceBar({
               {sidebarSlot}
               <SidebarNavLinks onNavigate={() => setMobileMenuOpen(false)} />
             </div>
-            <div className="mt-4 flex items-center gap-2 border-t border-zinc-100 pt-3 text-[11px] text-zinc-400">
+            <div className="mt-4 flex items-center gap-2 border-t border-zinc-100 pt-3 text-[11px] text-zinc-500">
               <BrandLogo variant="mark" size="xs" />
               <span>© {new Date().getFullYear()} RapidShift Labs</span>
             </div>
@@ -614,26 +700,64 @@ export function TopWorkspaceBar({
       {/* Command Palette (Ctrl+K / Cmd+K) */}
       {paletteOpen && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/35 px-4 pt-[12vh] backdrop-blur-xs">
-          <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl">
+          <div
+            ref={paletteDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Workspace command palette"
+            className="w-full max-w-xl overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl"
+          >
             <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-3.5">
               <Search className="h-4 w-4 text-emerald-600" />
+              <label htmlFor="workspace-cmdk-input" className="sr-only">
+                Search workspace pages or quick actions
+              </label>
               <input
+                id="workspace-cmdk-input"
                 autoFocus
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (paletteEntries.length === 0) return;
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setActiveIndex((prev) => (prev + 1) % paletteEntries.length);
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setActiveIndex(
+                      (prev) => (prev - 1 + paletteEntries.length) % paletteEntries.length
+                    );
+                  } else if (e.key === "Enter") {
+                    e.preventDefault();
+                    const picked = paletteEntries[activeIndex] ?? paletteEntries[0];
+                    if (!picked) return;
+                    setPaletteOpen(false);
+                    setQuery("");
+                    if (picked.kind === "action") {
+                      if (picked.action.onRun) {
+                        picked.action.onRun();
+                      } else if (picked.action.href) {
+                        const targetHref = picked.action.href;
+                        startBarTransition(() => router.push(targetHref));
+                      }
+                    } else {
+                      startBarTransition(() => router.push(picked.item.href));
+                    }
+                  }
+                }}
                 placeholder="Type a page or task (e.g. Tally bills, WhatsApp templates, Wallet, Backups)..."
                 className="w-full bg-transparent text-sm text-slate-900 outline-none placeholder:text-zinc-400"
               />
               <button
                 type="button"
                 onClick={() => setPaletteOpen(false)}
-                className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-medium text-zinc-500"
+                className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-medium text-zinc-600"
               >
                 ESC
               </button>
             </div>
-            <div className="max-h-80 overflow-y-auto p-2">
-              {filteredItems.length === 0 ? (
+            <div className="max-h-80 overflow-y-auto p-2" role="listbox">
+              {paletteEntries.length === 0 ? (
                 <div className="px-4 py-8 text-center text-xs text-zinc-500">
                   No matching pages found. Try searching inside{" "}
                   <Link
@@ -646,34 +770,103 @@ export function TopWorkspaceBar({
                   .
                 </div>
               ) : (
-                filteredItems.map((item) => {
-                  const Icon = ICON_BY_HREF[item.href] || LayoutDashboard;
-                  return (
-                    <button
-                      key={item.href}
-                      type="button"
-                      onClick={() => {
-                        setPaletteOpen(false);
-                        setQuery("");
-                        startBarTransition(() => router.push(item.href));
-                      }}
-                      className="flex w-full items-start gap-3 rounded-xl px-3.5 py-2.5 text-left transition hover:bg-emerald-50/60"
-                    >
-                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-zinc-200/80 bg-zinc-50 text-emerald-600">
-                        <Icon className="h-3.5 w-3.5" />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-xs font-semibold text-slate-900">
-                          {item.label}
-                        </span>
-                        <span className="block truncate text-[11px] text-zinc-500">
-                          {item.helpSummary}
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })
+                <>
+                  {filteredQuickActions.length > 0 && (
+                    <div className="mb-1.5">
+                      <div className="px-3 py-1 text-[10px] font-bold tracking-wider text-zinc-500 uppercase">
+                        Quick Actions
+                      </div>
+                      {filteredQuickActions.map((act, idx) => {
+                        const isSelected = activeIndex === idx;
+                        return (
+                          <button
+                            key={act.id}
+                            type="button"
+                            role="option"
+                            aria-selected={isSelected}
+                            onMouseEnter={() => setActiveIndex(idx)}
+                            onClick={() => {
+                              setPaletteOpen(false);
+                              setQuery("");
+                              if (act.onRun) {
+                                act.onRun();
+                              } else if (act.href) {
+                                const targetHref = act.href;
+                                startBarTransition(() => router.push(targetHref));
+                              }
+                            }}
+                            className={`flex w-full items-start gap-3 rounded-xl px-3.5 py-2.5 text-left transition ${
+                              isSelected
+                                ? "bg-emerald-50/90 ring-1 ring-emerald-200/80"
+                                : "hover:bg-emerald-50/60"
+                            }`}
+                          >
+                            <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-emerald-200/80 bg-emerald-50 text-emerald-700">
+                              <Command className="h-3.5 w-3.5" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-xs font-semibold text-slate-900">
+                                {act.label}
+                              </span>
+                              <span className="block truncate text-[11px] text-zinc-500">
+                                {act.summary}
+                              </span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {filteredItems.length > 0 && (
+                    <div>
+                      <div className="px-3 py-1 text-[10px] font-bold tracking-wider text-zinc-500 uppercase">
+                        Workspace Screens
+                      </div>
+                      {filteredItems.map((item, idx) => {
+                        const entryIndex = filteredQuickActions.length + idx;
+                        const isSelected = activeIndex === entryIndex;
+                        const Icon = ICON_BY_HREF[item.href] || LayoutDashboard;
+                        return (
+                          <button
+                            key={item.href}
+                            type="button"
+                            role="option"
+                            aria-selected={isSelected}
+                            onMouseEnter={() => setActiveIndex(entryIndex)}
+                            onClick={() => {
+                              setPaletteOpen(false);
+                              setQuery("");
+                              startBarTransition(() => router.push(item.href));
+                            }}
+                            className={`flex w-full items-start gap-3 rounded-xl px-3.5 py-2.5 text-left transition ${
+                              isSelected
+                                ? "bg-emerald-50/90 ring-1 ring-emerald-200/80"
+                                : "hover:bg-emerald-50/60"
+                            }`}
+                          >
+                            <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-zinc-200/80 bg-zinc-50 text-emerald-600">
+                              <Icon className="h-3.5 w-3.5" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-xs font-semibold text-slate-900">
+                                {item.label}
+                              </span>
+                              <span className="block truncate text-[11px] text-zinc-500">
+                                {item.helpSummary}
+                              </span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
               )}
+            </div>
+            <div className="flex items-center justify-between border-t border-zinc-100 bg-zinc-50/75 px-4 py-2 text-[11px] text-zinc-500">
+              <span>↑↓ Navigate • ↵ Open • Esc Close</span>
+              <span className="font-mono">Ctrl+K / ⌘K</span>
             </div>
           </div>
         </div>
@@ -689,7 +882,13 @@ export function TopWorkspaceBar({
               className="fixed inset-0 bg-slate-900/30 backdrop-blur-xs"
               onClick={() => setHelpOpen(false)}
             />
-            <aside className="relative z-10 flex h-full w-full max-w-lg flex-col justify-between overflow-y-auto border-l border-zinc-200 bg-white p-6 shadow-2xl">
+            <aside
+              ref={helpDrawerRef}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Step-by-step page guide"
+              className="relative z-10 flex h-full w-full max-w-lg flex-col justify-between overflow-y-auto border-l border-zinc-200 bg-white p-6 shadow-2xl"
+            >
               <div className="space-y-5">
                 <div className="flex items-start justify-between gap-3 border-b border-zinc-100 pb-4">
                   <div>
@@ -703,7 +902,8 @@ export function TopWorkspaceBar({
                   <button
                     type="button"
                     onClick={() => setHelpOpen(false)}
-                    className="rounded-lg border border-zinc-200 p-1.5 text-zinc-500 hover:bg-zinc-50"
+                    aria-label="Close page guide"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 hover:bg-zinc-50"
                   >
                     <X className="h-4 w-4" />
                   </button>

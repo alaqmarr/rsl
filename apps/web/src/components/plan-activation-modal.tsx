@@ -1,11 +1,14 @@
 "use client";
 
-import React, { useEffect, useMemo, useState, useTransition } from "react";
+import React, { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
-import { IosSpinner, sileo } from "@rsl/ui";
-import { submitActivationModalAction } from "@/lib/actions";
+import { IosSpinner, sileo, useDialogFocusTrap } from "@rsl/ui";
+import {
+  instantActivateFromWalletAction,
+  submitActivationModalAction,
+} from "@/lib/actions";
 
 export type ModalBillingCycle = "monthly" | "quarterly" | "yearly";
 
@@ -18,6 +21,8 @@ export interface PlanActivationModalProps {
   monthlyPaise: number;
   quarterlyPaise: number;
   yearlyPaise: number;
+  defaultCycle?: ModalBillingCycle;
+  walletBalancePaise?: number;
   hasCustomRate?: boolean;
   isUnlocked?: boolean;
   isPending?: boolean;
@@ -101,6 +106,8 @@ export function PlanActivationModal({
   monthlyPaise,
   quarterlyPaise,
   yearlyPaise,
+  defaultCycle = "monthly",
+  walletBalancePaise,
   hasCustomRate = false,
   isUnlocked = false,
   isPending = false,
@@ -115,29 +122,31 @@ export function PlanActivationModal({
   canManageBilling = true,
 }: PlanActivationModalProps) {
   const router = useRouter();
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [cycle, setCycle] = useState<ModalBillingCycle>("monthly");
+  const [cycle, setCycle] = useState<ModalBillingCycle>(defaultCycle);
   const [utrRef, setUtrRef] = useState("");
   const [customerNote, setCustomerNote] = useState("");
   const [qrSvg, setQrSvg] = useState<string>("");
   const [justRequested, setJustRequested] = useState(false);
+  const [justUnlocked, setJustUnlocked] = useState(false);
   const [isSubmitting, startTransition] = useTransition();
 
   const effectivePending = isPending || justRequested;
+  const effectiveUnlocked = isUnlocked || justUnlocked;
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
   useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open]);
+    setCycle(defaultCycle);
+  }, [defaultCycle]);
+
+  useDialogFocusTrap(dialogRef, open, () => {
+    if (!isSubmitting) setOpen(false);
+  });
 
   const subtotalPaise =
     cycle === "yearly"
@@ -284,7 +293,34 @@ export function PlanActivationModal({
     });
   }
 
-  if (isUnlocked) {
+  function handleInstantWalletUnlock() {
+    const fd = new FormData();
+    fd.set("targetType", targetType);
+    fd.set("targetKey", targetKey);
+    fd.set("billingCycle", cycle);
+
+    startTransition(async () => {
+      const res = await instantActivateFromWalletAction(fd);
+      if (res.ok) {
+        setJustUnlocked(true);
+        setOpen(false);
+        sileo.success({
+          title: "Plan Unlocked Instantly",
+          description: res.message,
+          duration: 5200,
+        });
+        router.refresh();
+      } else {
+        sileo.error({
+          title: "Could not unlock from wallet",
+          description: res.message,
+          duration: 5200,
+        });
+      }
+    });
+  }
+
+  if (effectiveUnlocked) {
     return (
       <button
         type="button"
@@ -367,6 +403,7 @@ export function PlanActivationModal({
             }}
           >
             <div
+              ref={dialogRef}
               role="dialog"
               aria-modal="true"
               aria-labelledby={`modal-title-${targetKey}`}
@@ -554,6 +591,30 @@ export function PlanActivationModal({
                         Exact paise-rounded tax split matches your statutory GST Tax Invoice to the single paisa.
                       </p>
                     </div>
+
+                    {/* Instant 1-Click Prepaid Wallet Checkout (5.2 / UX-11) */}
+                    {walletBalancePaise !== undefined && walletBalancePaise >= totalPayablePaise && (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50/75 p-3.5 text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <div className="font-bold text-emerald-950">
+                              Instant Activation Ready from Prepaid Wallet
+                            </div>
+                            <div className="mt-0.5 text-[11px] text-emerald-900/90 tabular-nums">
+                              Available balance: {formatInrClient(walletBalancePaise, true)} • Unlocks immediately + issues GST Invoice
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={isSubmitting}
+                            onClick={handleInstantWalletUnlock}
+                            className="rsl-btn-primary min-h-10 shrink-0 px-3.5 py-2 text-xs"
+                          >
+                            {isSubmitting ? "Activating..." : `Pay ${formatInrClient(totalPayablePaise, true)} from Wallet`}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Confirmation Form */}
@@ -563,27 +624,35 @@ export function PlanActivationModal({
                   >
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <div className="min-w-0">
-                        <label className="mb-1 block text-[11px] font-semibold text-slate-700">
+                        <label
+                          htmlFor={`utr-ref-${targetKey}`}
+                          className="mb-1 block text-[11px] font-semibold text-slate-700"
+                        >
                           UTR / Bank Ref # (Optional)
                         </label>
                         <input
+                          id={`utr-ref-${targetKey}`}
                           type="text"
                           value={utrRef}
                           onChange={(e) => setUtrRef(e.target.value)}
                           placeholder="12-digit UTR if already paid"
-                          className="rsl-input text-xs"
+                          className="rsl-input min-h-10 text-xs"
                         />
                       </div>
                       <div className="min-w-0">
-                        <label className="mb-1 block text-[11px] font-semibold text-slate-700">
+                        <label
+                          htmlFor={`note-ref-${targetKey}`}
+                          className="mb-1 block text-[11px] font-semibold text-slate-700"
+                        >
                           Note for Billing Desk (Optional)
                         </label>
                         <input
+                          id={`note-ref-${targetKey}`}
                           type="text"
                           value={customerNote}
                           onChange={(e) => setCustomerNote(e.target.value)}
                           placeholder="Any GST or setup note"
-                          className="rsl-input text-xs"
+                          className="rsl-input min-h-10 text-xs"
                         />
                       </div>
                     </div>
@@ -677,16 +746,12 @@ export function PlanActivationModal({
                         </div>
                       )}
 
-                      <div className="mt-2 flex flex-wrap items-center justify-center gap-1.5 text-xs">
-                        <span className="font-mono font-bold text-emerald-700 tabular-nums">
-                          {formatInrClient(totalPayablePaise, true)}
-                        </span>
-                        <span className="text-zinc-300">•</span>
+                      <div className="mt-2.5 flex w-full flex-col gap-2">
                         <a
                           href={upiUri}
-                          className="font-semibold text-slate-800 hover:text-emerald-700 hover:underline"
+                          className="rsl-btn-primary inline-flex min-h-11 w-full items-center justify-center gap-1.5 px-4 py-2.5 text-xs font-bold"
                         >
-                          Open in UPI App →
+                          <span>Pay {formatInrClient(totalPayablePaise, true)} in UPI App →</span>
                         </a>
                       </div>
 

@@ -4,8 +4,7 @@ import { ShieldCheck } from "lucide-react";
 import { countPlatformStaff } from "@rsl/auth";
 import { resolveEndpointsFromHeaders } from "@rsl/core";
 import { BrandLogo, FlashBanner } from "@rsl/ui";
-import { SubmitButton } from "@/components/ios-feedback";
-import { staffBootstrapOrLoginAction } from "@/lib/actions";
+import { AdminLoginForm } from "@/components/admin-auth-forms";
 import { getOptionalStaffSession, isSetupSubdomainHost } from "@/lib/session";
 
 export default async function AdminLoginPage({
@@ -78,35 +77,7 @@ export default async function AdminLoginPage({
 
             <FlashBanner notice={sp.notice} error={sp.error} />
 
-            <form action={staffBootstrapOrLoginAction} className="mt-5 space-y-4 text-xs">
-              <div>
-                <label className="mb-1.5 block font-semibold text-zinc-700">Work Email</label>
-                <input
-                  name="email"
-                  type="email"
-                  required
-                  placeholder="staff@rapidshiftlabs.in"
-                  className="adm-input"
-                />
-              </div>
-              <div>
-                <label className="mb-1.5 block font-semibold text-zinc-700">Password</label>
-                <input
-                  name="password"
-                  type="password"
-                  required
-                  minLength={8}
-                  placeholder="••••••••"
-                  className="adm-input"
-                />
-              </div>
-              <SubmitButton
-                className="adm-btn-primary w-full py-2.5 text-sm"
-                pendingText="Signing in..."
-              >
-                Sign In
-              </SubmitButton>
-            </form>
+            <AdminLoginForm />
           </>
         )}
       </div>

@@ -17,6 +17,7 @@ import {
   addOrInviteTeamMember,
   changeAuthenticatedUserPassword,
   createAdditionalWorkspace,
+  DEFAULT_STARTER_TRIAL_DAYS,
   regenerateWorkspaceInvitationToken,
   registerUserWithWorkspace,
   removeWorkspaceMember,
@@ -39,6 +40,7 @@ import {
   restoreSignedEncryptedBackup,
 } from "@rsl/backup";
 import {
+  activatePlanOrBundleFromWallet,
   BILLING_CYCLE_META,
   createRazorpayOrderForWallet,
   hasActiveEntitlement,
@@ -188,6 +190,102 @@ async function enforceFeaturePaidEntitlement(
 // Authentication & Business Switching
 // ==========================================
 
+export interface WebAuthFormState {
+  error: string | null;
+  fields: Record<string, string>;
+}
+
+export async function registerFormStateAction(
+  _prevState: WebAuthFormState,
+  formData: FormData
+): Promise<WebAuthFormState> {
+  const name = String(formData.get("name") || "").trim();
+  const email = String(formData.get("email") || "").trim();
+  const password = String(formData.get("password") || "");
+  const businessName = String(formData.get("businessName") || "").trim();
+  const industry = String(formData.get("industry") || "").trim();
+  const stateCode = String(formData.get("stateCode") || "27").trim();
+  const gstin = String(formData.get("gstin") || "").trim().toUpperCase();
+  const fields = { name, email, businessName, industry, stateCode, gstin };
+
+  if (name.length < 2) {
+    return { error: "Please enter your full name.", fields };
+  }
+  if (!email.includes("@")) {
+    return { error: "Please enter a valid business email address.", fields };
+  }
+  if (businessName.length < 2) {
+    return { error: "Please enter your firm or business name.", fields };
+  }
+  if (password.length < 8) {
+    return { error: "Password must be at least 8 characters long.", fields };
+  }
+
+  let reg: { rawSessionToken: string; userId: string; workspaceId: string };
+  try {
+    reg = registerUserWithWorkspace({
+      name,
+      email,
+      password,
+      businessName,
+      industry,
+      stateCode,
+      gstin,
+      grantStarterTrialDays: DEFAULT_STARTER_TRIAL_DAYS,
+    });
+  } catch (err) {
+    return { error: friendlyMessage(err), fields };
+  }
+
+  await setWebSessionCookie(reg.rawSessionToken);
+
+  try {
+    await enqueueWorkspaceSslProvisioning({
+      workspaceId: reg.workspaceId,
+      actorType: "user",
+      actorId: reg.userId,
+    });
+  } catch {
+    // Non-blocking SSL subdomain warm-up
+  }
+
+  try {
+    await sendEmailVerificationCode({
+      userId: reg.userId,
+      email,
+      recipientName: name,
+      workspaceId: reg.workspaceId,
+    });
+  } catch {
+    // Non-blocking welcome verification email
+  }
+
+  await setWebFlashToastCookie(
+    "success",
+    `Welcome to RSL Marketing! Your ${DEFAULT_STARTER_TRIAL_DAYS}-day all-tools starter trial for ${businessName} is now active.`
+  );
+  redirect("/");
+}
+
+export async function loginFormStateAction(
+  _prevState: WebAuthFormState,
+  formData: FormData
+): Promise<WebAuthFormState> {
+  const email = String(formData.get("email") || "").trim();
+  const password = String(formData.get("password") || "");
+  const fields = { email };
+
+  let res: { rawSessionToken: string };
+  try {
+    res = signInUser({ email, password });
+  } catch (err) {
+    return { error: friendlyMessage(err), fields };
+  }
+
+  await setWebSessionCookie(res.rawSessionToken);
+  redirect("/");
+}
+
 export async function registerAction(formData: FormData) {
   const name = String(formData.get("name") || "").trim();
   const email = String(formData.get("email") || "").trim();
@@ -211,6 +309,7 @@ export async function registerAction(formData: FormData) {
       industry,
       stateCode,
       gstin,
+      grantStarterTrialDays: DEFAULT_STARTER_TRIAL_DAYS,
     });
   } catch (err) {
     return goWithError("/register", friendlyMessage(err));
@@ -239,7 +338,10 @@ export async function registerAction(formData: FormData) {
     // Non-blocking welcome verification email
   }
 
-  return goWithNotice("/", `Welcome to RSL Marketing! Your business workspace for ${businessName} is ready.`);
+  return goWithNotice(
+    "/",
+    `Welcome to RSL Marketing! Your ${DEFAULT_STARTER_TRIAL_DAYS}-day all-tools starter trial for ${businessName} is active.`
+  );
 }
 
 export async function loginAction(formData: FormData) {
@@ -655,6 +757,67 @@ export async function submitActivationModalAction(formData: FormData): Promise<{
     return {
       ok: true,
       message: `Activation requested — '${out.serviceName}' (${cycleLabel}) will unlock once payment is verified.`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: friendlyMessage(err),
+    };
+  }
+}
+
+export async function instantActivateFromWalletAction(formData: FormData): Promise<{
+  ok: boolean;
+  message: string;
+  invoiceNumber?: string;
+}> {
+  try {
+    const session = await requireWebSession();
+    authorize(session.ctx, "billing:manage");
+    const targetType =
+      String(formData.get("targetType") || "service") === "bundle" ? "bundle" : "service";
+    const targetKey = String(formData.get("targetKey") || "").trim();
+    const billingCycle = normalizeBillingCycle(String(formData.get("billingCycle") || "monthly"));
+    const cycleLabel = BILLING_CYCLE_META[billingCycle].label;
+
+    const out = activatePlanOrBundleFromWallet({
+      workspaceId: session.workspace.id,
+      actorId: session.user.id,
+      targetType,
+      targetKey,
+      billingCycle,
+    });
+
+    appendActionLog({
+      workspaceId: session.workspace.id,
+      actorType: session.ctx.actorType,
+      actorId: session.user.id,
+      impersonatorId: session.impersonatorStaffId,
+      source: "web",
+      action: targetType === "bundle" ? "billing.bundle.activated" : "billing.service.activated",
+      outcome: "success",
+      requestId: session.ctx.requestId,
+      correlationId: session.ctx.correlationId,
+      durationMs: 6,
+      summary: `Instantly activated '${out.activatedName}' (${cycleLabel}) from Prepaid Wallet — GST Invoice ${out.invoiceNumber}`,
+    });
+
+    await sendBillingNotification({
+      workspaceId: session.workspace.id,
+      businessName: session.workspace.name,
+      recipientEmail: session.user.email,
+      headline: `Plan Unlocked — ${out.activatedName} (${out.invoiceNumber})`,
+      bodyText: `Your '${out.activatedName}' (${cycleLabel}) subscription is now active! ${formatInr(out.totalDebitedPaise, { showDecimals: true })} (incl. 18% GST) was settled from your Prepaid Wallet under Tax Invoice ${out.invoiceNumber}.`,
+      walletBalanceFormatted: formatInr(out.remainingWalletPaise, { showDecimals: true }),
+    }).catch(() => undefined);
+
+    revalidatePath("/billing");
+    revalidatePath("/");
+
+    return {
+      ok: true,
+      invoiceNumber: out.invoiceNumber,
+      message: `'${out.activatedName}' is now unlocked! Official GST Tax Invoice ${out.invoiceNumber} has been issued.`,
     };
   } catch (err) {
     return {

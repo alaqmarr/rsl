@@ -1457,7 +1457,7 @@ export function creditWallet(params: {
     };
   });
 
-  return runImmediate.immediate();
+  return raw.inTransaction ? runImmediate() : runImmediate.immediate();
 }
 
 export function debitWallet(params: {
@@ -1532,7 +1532,7 @@ export function debitWallet(params: {
     return { balancePaise: getWalletBalancePaise(params.workspaceId) };
   });
 
-  return runImmediate.immediate();
+  return raw.inTransaction ? runImmediate() : runImmediate.immediate();
 }
 
 export function consumeUsage(params: {
@@ -3830,4 +3830,309 @@ export function exportPlatformGstr1Csv(filter?: {
 
   return buildGstr1CsvFromRows(filtered, bizMap, invNumById, getSupplierGstStateCode());
 }
+
+/**
+ * Returns live database-backed public bundle and modular service pricing for the unauthenticated `/` storefront (5.2).
+ */
+export function listPublicPricingCatalog() {
+  ensureServiceCatalogSeeded();
+  const db = controlDb();
+  const servicesRows = db
+    .select()
+    .from(controlSchema.services)
+    .where(eq(controlSchema.services.active, true))
+    .orderBy(controlSchema.services.sortOrder)
+    .all();
+
+  const priceRows = db
+    .select()
+    .from(controlSchema.servicePrices)
+    .where(eq(controlSchema.servicePrices.active, true))
+    .all();
+  const priceMap = new Map(priceRows.map((p) => [p.serviceKey, p]));
+
+  const services = servicesRows.map((s) => {
+    const p = priceMap.get(s.key);
+    const monthlyAmountPaise = p?.monthlyAmountPaise ?? 0;
+    const defaults = computeDefaultCycleAmountsPaise(monthlyAmountPaise);
+    return {
+      key: s.key,
+      name: s.name,
+      plainSummary: s.plainSummary,
+      category: s.category,
+      pricingModel: s.pricingModel,
+      meteredUnit: s.meteredUnit,
+      monthlyAmountPaise,
+      quarterlyAmountPaise: p?.quarterlyAmountPaise ?? defaults.quarterlyPaise,
+      yearlyAmountPaise: p?.yearlyAmountPaise ?? defaults.yearlyPaise,
+      unitAmountPaise: p?.unitAmountPaise ?? 0,
+      includedFeatures: PLAN_FEATURE_DETAILS[s.key]?.includedFeatures ?? [s.plainSummary],
+    };
+  });
+
+  const svcMap = new Map(services.map((s) => [s.key, s]));
+
+  const bundleRows = db
+    .select()
+    .from(controlSchema.planBundles)
+    .where(
+      and(
+        eq(controlSchema.planBundles.active, true),
+        isNull(controlSchema.planBundles.workspaceId)
+      )
+    )
+    .orderBy(controlSchema.planBundles.sortOrder)
+    .all();
+
+  const bundles = bundleRows.map((b) => {
+    let includedKeys: string[] = [];
+    try {
+      includedKeys = JSON.parse(b.includedKeysJson) as string[];
+    } catch {
+      includedKeys = [];
+    }
+    const includedServiceNames = includedKeys.map((k) => svcMap.get(k)?.name ?? k);
+    const separateMonthlySumPaise = includedKeys.reduce(
+      (sum, k) => sum + (svcMap.get(k)?.monthlyAmountPaise ?? 0),
+      0
+    );
+    return {
+      key: b.key,
+      name: b.name,
+      tagline: b.tagline,
+      description: b.description,
+      badgeLabel: b.badgeLabel,
+      includedKeys,
+      includedServiceNames,
+      monthlyAmountPaise: b.monthlyAmountPaise,
+      quarterlyAmountPaise: b.quarterlyAmountPaise,
+      yearlyAmountPaise: b.yearlyAmountPaise,
+      savingsMonthlyPaise: Math.max(0, separateMonthlySumPaise - b.monthlyAmountPaise),
+    };
+  });
+
+  return { bundles, services };
+}
+
+/**
+ * Instant self-serve activation using positive Prepaid Wallet balance (5.2 / UX-11).
+ * Atomically debits subtotal + 18% GST from the customer's wallet (overdraft NOT allowed),
+ * issues an official 18% GST Tax Invoice (RSL/...), and unlocks the plan or bundle immediately.
+ */
+export function activatePlanOrBundleFromWallet(params: {
+  workspaceId: string;
+  actorId: string;
+  targetType: "service" | "bundle";
+  targetKey: string;
+  billingCycle?: BillingCycle;
+}): {
+  invoiceNumber: string;
+  totalDebitedPaise: number;
+  remainingWalletPaise: number;
+  activatedName: string;
+  activatedKeys: string[];
+  expiresAt: number;
+} {
+  ensureServiceCatalogSeeded();
+  const db = controlDb();
+  const raw = db.$client;
+  const cycle = normalizeBillingCycle(params.billingCycle);
+  const cycleMeta = BILLING_CYCLE_META[cycle];
+
+  const ws = db
+    .select()
+    .from(controlSchema.workspaces)
+    .where(eq(controlSchema.workspaces.id, params.workspaceId))
+    .get();
+  if (!ws) {
+    throw new RslError("RSL-VAL-1001", "Workspace not found.");
+  }
+
+  let subtotalPaise = 0;
+  let activatedName = "";
+  let keysToActivate: string[] = [];
+  let bundleKeyForRow: string | null = null;
+
+  if (params.targetType === "bundle") {
+    const bundles = listBundlesWithWorkspaceState(params.workspaceId);
+    const bundle = bundles.find((b) => b.key === params.targetKey);
+    if (!bundle || bundle.includedKeys.length === 0) {
+      throw new RslError("RSL-VAL-1001", "Selected bundle package was not found.");
+    }
+    if (bundle.isFullyUnlocked && !bundle.includedKeys.some((k) => !hasActiveEntitlement(params.workspaceId, k))) {
+      // Allow paid lock-in even during complimentary trial if desired, or guard only if all are paid-unlocked
+      const services = listServicesWithWorkspaceState(params.workspaceId);
+      const allPaid = bundle.includedKeys.every(
+        (k) => services.find((s) => s.key === k)?.isPaidUnlocked
+      );
+      if (allPaid) {
+        throw new RslError("RSL-VAL-1001", `'${bundle.name}' is already active on a paid subscription.`);
+      }
+    }
+    subtotalPaise =
+      cycle === "yearly"
+        ? bundle.yearlyAmountPaise
+        : cycle === "quarterly"
+          ? bundle.quarterlyAmountPaise
+          : bundle.monthlyAmountPaise;
+    activatedName = bundle.name;
+    keysToActivate = [...new Set(bundle.includedKeys)];
+    bundleKeyForRow = bundle.key;
+  } else {
+    const services = listServicesWithWorkspaceState(params.workspaceId);
+    const svc = services.find((s) => s.key === params.targetKey);
+    if (!svc) {
+      throw new RslError("RSL-VAL-1001", "Selected feature plan was not found.");
+    }
+    if (svc.isPaidUnlocked) {
+      throw new RslError("RSL-VAL-1001", `'${svc.name}' is already active on a paid subscription.`);
+    }
+    subtotalPaise =
+      cycle === "yearly"
+        ? svc.yearlyAmountPaise
+        : cycle === "quarterly"
+          ? svc.quarterlyAmountPaise
+          : svc.monthlyAmountPaise;
+    activatedName = svc.name;
+    keysToActivate = [...new Set([...svc.dependsOn, svc.key])];
+  }
+
+  if (subtotalPaise <= 0) {
+    throw new RslError("RSL-VAL-1001", "Invalid plan subscription price.");
+  }
+
+  const taxSplit = computeGstTaxSplit({
+    subtotalPaise,
+    buyerStateCode: ws.stateCode,
+    supplierStateCode: getSupplierGstStateCode(),
+  });
+  const currentWallet = getWalletBalancePaise(params.workspaceId);
+  if (currentWallet < taxSplit.totalPaise) {
+    throw new RslError(
+      "RSL-BILL-1003",
+      `Insufficient wallet balance (${formatInr(currentWallet, { showDecimals: true })}) to pay ${formatInr(taxSplit.totalPaise, { showDecimals: true })} (incl. 18% GST). Recharge your wallet first or pay via UPI QR.`
+    );
+  }
+
+  const tx = raw.transaction(() => {
+    const now = Date.now();
+    const expiresAt = now + cycleMeta.durationDays * 86_400_000;
+
+    const inv = createGstInvoice({
+      workspaceId: params.workspaceId,
+      description: `${activatedName} — ${cycleMeta.label} (Instant Prepaid Wallet Settlement)`,
+      subtotalPaise,
+      status: "paid",
+    });
+
+    const debited = debitWallet({
+      workspaceId: params.workspaceId,
+      amountPaise: inv.totalPaise,
+      serviceKey: params.targetType === "service" ? params.targetKey : undefined,
+      description: `${activatedName} (${cycleMeta.label}) — Tax Invoice ${inv.invoiceNumber}`,
+      idempotencyKey: `wallet_plan_unlock:${inv.id}`,
+      actorId: params.actorId,
+      allowOverdraft: false,
+    });
+
+    const paymentId = newId("pay", params.workspaceId);
+    db.insert(controlSchema.payments)
+      .values({
+        id: paymentId,
+        workspaceId: params.workspaceId,
+        invoiceId: inv.id,
+        provider: "wallet",
+        externalPaymentId: inv.invoiceNumber,
+        amountPaise: inv.totalPaise,
+        currency: "INR",
+        purpose:
+          params.targetType === "bundle"
+            ? `bundle_activation:${params.targetKey}`
+            : `plan_activation:${params.targetKey}`,
+        status: "captured",
+        createdAt: now,
+      })
+      .run();
+
+    for (const key of keysToActivate) {
+      db.insert(controlSchema.entitlements)
+        .values({
+          id: newId(),
+          workspaceId: params.workspaceId,
+          serviceKey: key,
+          status: "active",
+          billingCycle: cycle,
+          bundleKey: bundleKeyForRow,
+          activatedAt: now,
+          expiresAt,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: [controlSchema.entitlements.workspaceId, controlSchema.entitlements.serviceKey],
+          set: {
+            status: "active",
+            billingCycle: cycle,
+            bundleKey: bundleKeyForRow,
+            activatedAt: now,
+            expiresAt,
+            updatedAt: now,
+          },
+        })
+        .run();
+
+      db.update(controlSchema.servicePlanRequests)
+        .set({
+          status: "activated",
+          paymentId,
+          invoiceId: inv.id,
+          paymentMethod: "wallet",
+          paymentReference: inv.invoiceNumber,
+          reviewedAt: now,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(controlSchema.servicePlanRequests.workspaceId, params.workspaceId),
+            eq(controlSchema.servicePlanRequests.serviceKey, key),
+            eq(controlSchema.servicePlanRequests.status, "pending_payment")
+          )
+        )
+        .run();
+    }
+
+    if (bundleKeyForRow) {
+      db.update(controlSchema.servicePlanRequests)
+        .set({
+          status: "activated",
+          paymentId,
+          invoiceId: inv.id,
+          amountPaidPaise: subtotalPaise,
+          paymentMethod: "wallet",
+          paymentReference: inv.invoiceNumber,
+          reviewedAt: now,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(controlSchema.servicePlanRequests.workspaceId, params.workspaceId),
+            eq(controlSchema.servicePlanRequests.bundleKey, bundleKeyForRow),
+            eq(controlSchema.servicePlanRequests.status, "pending_payment")
+          )
+        )
+        .run();
+    }
+
+    return {
+      invoiceNumber: inv.invoiceNumber,
+      totalDebitedPaise: inv.totalPaise,
+      remainingWalletPaise: debited.balancePaise,
+      activatedName,
+      activatedKeys: keysToActivate,
+      expiresAt,
+    };
+  });
+
+  return raw.inTransaction ? tx() : tx.immediate();
+}
+
 

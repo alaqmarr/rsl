@@ -118,6 +118,7 @@ export default async function CustomerInboxPage({
   const activeThread = activeConvId
     ? getConversationThread(session.workspace.id, activeConvId)
     : null;
+  const hasMobileThreadOpen = Boolean(sp.conv && activeThread);
 
   return (
     <div className="w-full space-y-6">
@@ -236,12 +237,23 @@ export default async function CustomerInboxPage({
               <form action={createContactAction} className="space-y-3.5 text-[13px]">
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
-                    <label className="rsl-label">Customer Name *</label>
-                    <input name="name" required placeholder="Shree Ganesh Traders" className="rsl-input" />
+                    <label htmlFor="inbox-contact-name" className="rsl-label">
+                      Customer Name *
+                    </label>
+                    <input
+                      id="inbox-contact-name"
+                      name="name"
+                      required
+                      placeholder="Shree Ganesh Traders"
+                      className="rsl-input"
+                    />
                   </div>
                   <div>
-                    <label className="rsl-label">WhatsApp Number</label>
+                    <label htmlFor="inbox-contact-phone" className="rsl-label">
+                      WhatsApp Number
+                    </label>
                     <input
+                      id="inbox-contact-phone"
                       name="phoneE164"
                       placeholder="+919820000000"
                       className="rsl-input font-mono"
@@ -250,12 +262,27 @@ export default async function CustomerInboxPage({
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
-                    <label className="rsl-label">Email Address</label>
-                    <input name="email" type="email" placeholder="accounts@client.in" className="rsl-input" />
+                    <label htmlFor="inbox-contact-email" className="rsl-label">
+                      Email Address
+                    </label>
+                    <input
+                      id="inbox-contact-email"
+                      name="email"
+                      type="email"
+                      placeholder="accounts@client.in"
+                      className="rsl-input"
+                    />
                   </div>
                   <div>
-                    <label className="rsl-label">Firm / Company</label>
-                    <input name="companyName" placeholder="Firm name (optional)" className="rsl-input" />
+                    <label htmlFor="inbox-contact-company" className="rsl-label">
+                      Firm / Company
+                    </label>
+                    <input
+                      id="inbox-contact-company"
+                      name="companyName"
+                      placeholder="Firm name (optional)"
+                      className="rsl-input"
+                    />
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
@@ -288,8 +315,10 @@ export default async function CustomerInboxPage({
                 <form action={startConversationAction} className="space-y-3.5 text-[13px]">
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                     <div>
-                      <label className="rsl-label">Customer *</label>
-                      <select name="contactId" required className="rsl-input">
+                      <label htmlFor="inbox-start-contact" className="rsl-label">
+                        Customer *
+                      </label>
+                      <select id="inbox-start-contact" name="contactId" required className="rsl-input">
                         {contacts.map((c) => (
                           <option key={c.id} value={c.id}>
                             {c.name} {c.phoneE164 ? `(${c.phoneE164})` : ""}
@@ -298,8 +327,15 @@ export default async function CustomerInboxPage({
                       </select>
                     </div>
                     <div>
-                      <label className="rsl-label">Channel</label>
-                      <select name="channel" defaultValue="whatsapp" className="rsl-input">
+                      <label htmlFor="inbox-start-channel" className="rsl-label">
+                        Channel
+                      </label>
+                      <select
+                        id="inbox-start-channel"
+                        name="channel"
+                        defaultValue="whatsapp"
+                        className="rsl-input"
+                      >
                         <option value="whatsapp">WhatsApp</option>
                         <option value="instagram">Instagram DM</option>
                         <option value="facebook">Facebook Page</option>
@@ -307,17 +343,27 @@ export default async function CustomerInboxPage({
                       </select>
                     </div>
                     <div>
-                      <label className="rsl-label">Direction</label>
-                      <select name="direction" defaultValue="inbound" className="rsl-input">
+                      <label htmlFor="inbox-start-direction" className="rsl-label">
+                        Direction
+                      </label>
+                      <select
+                        id="inbox-start-direction"
+                        name="direction"
+                        defaultValue="inbound"
+                        className="rsl-input"
+                      >
                         <option value="inbound">Customer Sent Message</option>
                         <option value="outbound">Team Sent Message</option>
                       </select>
                     </div>
                   </div>
                   <div>
-                    <label className="rsl-label">Message Text *</label>
+                    <label htmlFor="inbox-start-body" className="rsl-label">
+                      Message Text *
+                    </label>
                     <div className="flex gap-2.5">
                       <input
+                        id="inbox-start-body"
                         name="body"
                         required
                         placeholder="Write message text..."
@@ -344,12 +390,23 @@ export default async function CustomerInboxPage({
             >
               <input type="hidden" name="returnPath" value="/inbox" />
               <div className="min-w-[220px] flex-1">
-                <label className="rsl-label">Upload Contacts CSV (.csv)</label>
-                <input name="csvFile" type="file" accept=".csv,.txt" className="rsl-input" />
+                <label htmlFor="inbox-csv-file" className="rsl-label">
+                  Upload Contacts CSV (.csv)
+                </label>
+                <input
+                  id="inbox-csv-file"
+                  name="csvFile"
+                  type="file"
+                  accept=".csv,.txt"
+                  className="rsl-input"
+                />
               </div>
               <div className="min-w-[240px] flex-1">
-                <label className="rsl-label">Or Paste CSV Rows (name,phone,email,company)</label>
+                <label htmlFor="inbox-csv-content" className="rsl-label">
+                  Or Paste CSV Rows (name,phone,email,company)
+                </label>
                 <input
+                  id="inbox-csv-content"
                   name="csvContent"
                   placeholder="Ravi Traders,+919820011223,ravi@traders.in,Ravi Steel"
                   className="rsl-input font-mono text-xs"
@@ -373,8 +430,9 @@ export default async function CustomerInboxPage({
       </details>
       )}
 
-      {/* 3-Pane Inbox Workspace */}
+      {/* 3-Pane Inbox Workspace (Master-Detail on Mobile, 3-Column on Desktop) */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[310px_1fr_290px]">
+        <div className={hasMobileThreadOpen ? "hidden lg:block" : "block"}>
         <SectionCard
           title={`Threads (${conversations.length})`}
           action={
@@ -466,7 +524,17 @@ export default async function CustomerInboxPage({
             </ul>
           )}
         </SectionCard>
+        </div>
 
+        <div className={hasMobileThreadOpen ? "space-y-3" : "hidden lg:block"}>
+          {hasMobileThreadOpen && (
+            <ActionLink
+              href={`/inbox?status=${statusFilter}&assigned=${assignedFilter}`}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-900 shadow-2xs lg:hidden"
+            >
+              ← All Threads ({conversations.length})
+            </ActionLink>
+          )}
         <SectionCard
           title={
             activeThread
@@ -551,7 +619,9 @@ export default async function CustomerInboxPage({
             </div>
           )}
         </SectionCard>
+        </div>
 
+        <div className={hasMobileThreadOpen ? "block" : "hidden lg:block"}>
         <SectionCard title="Customer, Notes & Quick Replies" subtitle="Visible only to your staff">
           <div className="space-y-4 text-[13px]">
             {!activeThread ? (
@@ -577,11 +647,12 @@ export default async function CustomerInboxPage({
                     className="space-y-2 rounded-xl border border-zinc-200/85 bg-white p-3"
                   >
                     <input type="hidden" name="conversationId" value={activeThread.conversation.id} />
-                    <label className="text-xs font-semibold text-slate-900">
+                    <label htmlFor="inbox-assigned-user" className="text-xs font-semibold text-slate-900">
                       Assigned Team Member
                     </label>
                     <div className="flex items-center gap-2">
                       <select
+                        id="inbox-assigned-user"
                         name="assignedUserId"
                         defaultValue={activeThread.conversation.assignedUserId || ""}
                         className="rsl-input py-1.5 text-xs"
@@ -589,7 +660,7 @@ export default async function CustomerInboxPage({
                         <option value="">Unassigned</option>
                         {team.members.map((m) => (
                           <option key={m.userId} value={m.userId}>
-                            {m.name} ({m.roleSlug})
+                            {m.name} ({formatRoleLabel(m.roleSlug)})
                           </option>
                         ))}
                       </select>
@@ -698,8 +769,11 @@ export default async function CustomerInboxPage({
                 {canNote && (
                   <form action={addInternalNoteAction} className="space-y-2.5">
                     <input type="hidden" name="conversationId" value={activeThread.conversation.id} />
-                    <label className="rsl-label">New Private Note</label>
+                    <label htmlFor="inbox-private-note" className="rsl-label">
+                      New Private Note
+                    </label>
                     <textarea
+                      id="inbox-private-note"
                       name="body"
                       rows={2}
                       required
@@ -764,12 +838,14 @@ export default async function CustomerInboxPage({
                   <div className="grid grid-cols-2 gap-2">
                     <input
                       name="shortcut"
+                      aria-label="Quick reply shortcut"
                       required
                       placeholder="upi-details"
                       className="rsl-input font-mono text-xs"
                     />
                     <input
                       name="title"
+                      aria-label="Quick reply title"
                       required
                       placeholder="UPI Details"
                       className="rsl-input text-xs"
@@ -777,6 +853,7 @@ export default async function CustomerInboxPage({
                   </div>
                   <textarea
                     name="body"
+                    aria-label="Quick reply body"
                     rows={2}
                     required
                     placeholder="Reusable reply text for your team..."
@@ -794,6 +871,7 @@ export default async function CustomerInboxPage({
             </div>
           </div>
         </SectionCard>
+        </div>
       </div>
     </div>
   );

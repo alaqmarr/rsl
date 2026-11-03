@@ -66,8 +66,11 @@ export function WhatsAppTemplateBuilder({
       <div className="space-y-4 text-[13px]">
         <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
           <div>
-            <label className="rsl-label">Template Name *</label>
+            <label htmlFor="wa-tpl-name" className="rsl-label">
+              Template Name *
+            </label>
             <input
+              id="wa-tpl-name"
               name="name"
               value={name}
               onChange={(e) =>
@@ -75,16 +78,19 @@ export function WhatsAppTemplateBuilder({
               }
               required
               placeholder="tally_sales_invoice"
-              className="rsl-input font-mono"
+              className="rsl-input min-h-10 font-mono"
             />
           </div>
           <div>
-            <label className="rsl-label">Message Category</label>
+            <label htmlFor="wa-tpl-category" className="rsl-label">
+              Message Category
+            </label>
             <select
+              id="wa-tpl-category"
               name="category"
               value={category}
               onChange={(e) => setCategory(e.target.value as typeof category)}
-              className="rsl-input"
+              className="rsl-input min-h-10"
             >
               <option value="utility">Billing / Order Update (₹0.85)</option>
               <option value="marketing">Promotional / Offer (₹0.95)</option>
@@ -92,12 +98,15 @@ export function WhatsAppTemplateBuilder({
             </select>
           </div>
           <div>
-            <label className="rsl-label">Language</label>
+            <label htmlFor="wa-tpl-language" className="rsl-label">
+              Language
+            </label>
             <select
+              id="wa-tpl-language"
               name="language"
               value={language}
               onChange={(e) => setLanguage(e.target.value)}
-              className="rsl-input"
+              className="rsl-input min-h-10"
             >
               <option value="en_IN">English (India)</option>
               <option value="en_US">English (Global)</option>
@@ -108,12 +117,15 @@ export function WhatsAppTemplateBuilder({
 
         <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-[200px_1fr]">
           <div>
-            <label className="rsl-label">Header Style</label>
+            <label htmlFor="wa-tpl-header-type" className="rsl-label">
+              Header Style
+            </label>
             <select
+              id="wa-tpl-header-type"
               name="headerType"
               value={headerType}
               onChange={(e) => setHeaderType(e.target.value as typeof headerType)}
-              className="rsl-input"
+              className="rsl-input min-h-10"
             >
               <option value="NONE">No Header</option>
               <option value="TEXT">Bold Text Header</option>
@@ -122,19 +134,31 @@ export function WhatsAppTemplateBuilder({
           </div>
           {headerType === "TEXT" ? (
             <div>
-              <label className="rsl-label">Header Headline</label>
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <label htmlFor="wa-tpl-header-text" className="text-xs font-semibold text-slate-700">
+                  Header Headline
+                </label>
+                <span
+                  className={`font-mono text-[11px] tabular-nums ${
+                    headerText.length >= 55 ? "font-semibold text-amber-700" : "text-zinc-500"
+                  }`}
+                >
+                  {headerText.length}/60
+                </span>
+              </div>
               <input
+                id="wa-tpl-header-text"
                 name="headerText"
                 value={headerText}
                 onChange={(e) => setHeaderText(e.target.value)}
                 maxLength={60}
                 placeholder="New Tax Invoice Generated"
-                className="rsl-input"
+                className="rsl-input min-h-10"
               />
             </div>
           ) : (
             <div className="flex items-end">
-              <div className="flex min-h-9 w-full items-center rounded-xl border border-zinc-200/90 bg-zinc-50 px-3.5 py-2 text-[12px] text-zinc-600">
+              <div className="flex min-h-10 w-full items-center rounded-xl border border-zinc-200/90 bg-zinc-50 px-3.5 py-2 text-[12px] text-zinc-600">
                 {headerType === "DOCUMENT"
                   ? "Allows attaching an Invoice PDF link when sending from Tally."
                   : "Message starts directly with the body text below."}
@@ -145,7 +169,18 @@ export function WhatsAppTemplateBuilder({
 
         <div>
           <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-            <label className="text-xs font-semibold text-slate-700">Message Body *</label>
+            <div className="flex items-center gap-2">
+              <label htmlFor="wa-tpl-body" className="text-xs font-semibold text-slate-700">
+                Message Body *
+              </label>
+              <span
+                className={`font-mono text-[11px] tabular-nums ${
+                  bodyText.length >= 960 ? "font-semibold text-amber-700" : "text-zinc-500"
+                }`}
+              >
+                ({bodyText.length}/1024)
+              </span>
+            </div>
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-[11.5px] text-zinc-500">Insert placeholder:</span>
               {[1, 2, 3, 4].map((n) => (
@@ -153,7 +188,7 @@ export function WhatsAppTemplateBuilder({
                   key={n}
                   type="button"
                   onClick={() => insertPlaceholder(n)}
-                  className="rounded-md border border-zinc-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-50"
+                  className="min-h-7 rounded-md border border-zinc-200 bg-white px-2.5 py-1 font-mono text-[11px] font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-50"
                 >
                   {`+ {{${n}}}`}
                 </button>
@@ -161,8 +196,10 @@ export function WhatsAppTemplateBuilder({
             </div>
           </div>
           <textarea
+            id="wa-tpl-body"
             name="bodyText"
             rows={4}
+            maxLength={1024}
             required
             value={bodyText}
             onChange={(e) => setBodyText(e.target.value)}
@@ -207,8 +244,20 @@ export function WhatsAppTemplateBuilder({
 
         <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
           <div>
-            <label className="rsl-label">Footer Note (Optional)</label>
+            <div className="flex items-center justify-between gap-2">
+              <label htmlFor="wa-tpl-footer-text" className="rsl-label">
+                Footer Note (Optional)
+              </label>
+              <span
+                className={`text-[11px] font-medium tabular-nums ${
+                  footerText.length >= 54 ? "text-amber-700" : "text-zinc-500"
+                }`}
+              >
+                {footerText.length}/60
+              </span>
+            </div>
             <input
+              id="wa-tpl-footer-text"
               name="footerText"
               value={footerText}
               onChange={(e) => setFooterText(e.target.value)}
@@ -218,8 +267,11 @@ export function WhatsAppTemplateBuilder({
             />
           </div>
           <div>
-            <label className="rsl-label">Action Button</label>
+            <label htmlFor="wa-tpl-btn1-type" className="rsl-label">
+              Action Button
+            </label>
             <select
+              id="wa-tpl-btn1-type"
               name="button1Type"
               value={button1Type}
               onChange={(e) => setButton1Type(e.target.value as typeof button1Type)}
@@ -231,8 +283,20 @@ export function WhatsAppTemplateBuilder({
             </select>
           </div>
           <div>
-            <label className="rsl-label">Button Label (Optional)</label>
+            <div className="flex items-center justify-between gap-2">
+              <label htmlFor="wa-tpl-btn1-text" className="rsl-label">
+                Button Label (Optional)
+              </label>
+              <span
+                className={`text-[11px] font-medium tabular-nums ${
+                  button1Text.length >= 22 ? "text-amber-700" : "text-zinc-500"
+                }`}
+              >
+                {button1Text.length}/25
+              </span>
+            </div>
             <input
+              id="wa-tpl-btn1-text"
               name="button1Text"
               value={button1Text}
               onChange={(e) => setButton1Text(e.target.value)}
@@ -245,10 +309,11 @@ export function WhatsAppTemplateBuilder({
 
         {(button1Type === "URL" || button1Type === "PHONE_NUMBER") && button1Text && (
           <div>
-            <label className="rsl-label">
+            <label htmlFor="wa-tpl-btn1-target" className="rsl-label">
               {button1Type === "URL" ? "Button Website URL" : "Office Phone Number (+91...)"}
             </label>
             <input
+              id="wa-tpl-btn1-target"
               name="button1Target"
               value={button1Target}
               onChange={(e) => setButton1Target(e.target.value)}

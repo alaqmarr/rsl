@@ -8,6 +8,12 @@ export {
   type FlashToastPayload,
 } from "./sileo-toast";
 
+export {
+  PasswordInput,
+  useDialogFocusTrap,
+  type PasswordInputProps,
+} from "./interactive";
+
 const BRAND_LONG_HEIGHT_PX: Record<"xs" | "sm" | "md" | "lg", number> = {
   xs: 22,
   sm: 26,

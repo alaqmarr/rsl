@@ -9,8 +9,7 @@ import {
   platformLogsDb,
 } from "@rsl/tenancy";
 import { BrandLogo, FlashBanner } from "@rsl/ui";
-import { SubmitButton } from "@/components/ios-feedback";
-import { completeInitialPlatformSetupAction } from "@/lib/actions";
+import { AdminSetupForm } from "@/components/admin-auth-forms";
 import { getOptionalStaffSession } from "@/lib/session";
 
 export default async function PlatformSetupPage({
@@ -145,91 +144,7 @@ export default async function PlatformSetupPage({
                 to claim ownership and permanently lock public bootstrap.
               </p>
 
-              <form action={completeInitialPlatformSetupAction} className="mt-6 space-y-4 text-xs">
-                {requiresSetupKey ? (
-                  <div>
-                    <label className="mb-1.5 block font-semibold text-zinc-700">
-                      One-Time Server Setup Key
-                    </label>
-                    <input
-                      name="setupKey"
-                      type="password"
-                      required
-                      defaultValue={prefilledKey}
-                      placeholder="Paste SETUP_BOOTSTRAP_TOKEN from server terminal / .env"
-                      className="adm-input font-mono text-xs"
-                    />
-                    {prefilledKey && (
-                      <p className="mt-1 text-[11px] font-medium text-emerald-700">
-                        Setup key pre-filled from your one-click server setup link.
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 text-[11px] text-zinc-600">
-                    Local development mode detected (<code className="font-mono">SETUP_BOOTSTRAP_TOKEN</code>{" "}
-                    not set). In production, <code className="font-mono">setup.sh</code> enforces a cryptographic
-                    one-time setup key automatically.
-                  </div>
-                )}
-
-                <div>
-                  <label className="mb-1.5 block font-semibold text-zinc-700">Full Name</label>
-                  <input
-                    name="name"
-                    required
-                    placeholder="Platform Owner"
-                    className="adm-input"
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1.5 block font-semibold text-zinc-700">
-                    Super Admin Email
-                  </label>
-                  <input
-                    name="email"
-                    type="email"
-                    required
-                    placeholder="founder@rapidshiftlabs.in"
-                    className="adm-input"
-                  />
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1.5 block font-semibold text-zinc-700">Password</label>
-                    <input
-                      name="password"
-                      type="password"
-                      required
-                      minLength={8}
-                      placeholder="Min 8 characters"
-                      className="adm-input"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block font-semibold text-zinc-700">
-                      Confirm Password
-                    </label>
-                    <input
-                      name="confirmPassword"
-                      type="password"
-                      required
-                      minLength={8}
-                      placeholder="Re-enter password"
-                      className="adm-input"
-                    />
-                  </div>
-                </div>
-
-                <SubmitButton
-                  className="adm-btn-primary w-full py-2.5 text-sm"
-                  pendingText="Initializing Platform & Locking Setup..."
-                >
-                  Initialize Super Admin & Lock Bootstrap
-                </SubmitButton>
-              </form>
+              <AdminSetupForm requiresSetupKey={requiresSetupKey} prefilledKey={prefilledKey} />
             </div>
 
             {/* Right Column: Modular Setup Architecture Preview */}

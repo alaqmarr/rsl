@@ -294,21 +294,36 @@ export default async function DatabaseStorageAndBackupsPage({
         )}
       </SectionCard>
 
-      {/* Cloud Storage & Provider Switching */}
-      <SectionCard
-        title="Cloud File Storage & Provider Switching"
-        subtitle={
-          hasManagedStorageEntitlement
-            ? "Switch seamlessly between RSL Managed Cloud Storage (unlocked on your account) and your own Cloudflare R2 / S3 bucket. Existing files copy across automatically."
-            : "Connect your own Cloudflare R2 / S3 bucket, or activate RSL Managed Cloud Storage. Existing files copy across automatically when you switch."
-        }
-        action={
-          <StatusPill
-            label={storage.config.displayLabel}
-            tone={storage.config.mode === "rsl_managed" ? "emerald" : "sky"}
-          />
-        }
+      {/* Advanced S3/R2 Destination Switching (Progressive Disclosure so primary Google Drive + .rslbackup lead cleanly) */}
+      <details
+        open={storage.config.mode !== "rsl_managed"}
+        className="group rounded-2xl border border-zinc-200/90 bg-white shadow-2xs"
       >
+        <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 px-6 py-4 select-none">
+          <div>
+            <div className="text-sm font-bold text-slate-900">
+              Advanced Cloud Bucket Switching (Cloudflare R2 / Amazon S3)
+            </div>
+            <div className="text-xs text-zinc-500">
+              {hasManagedStorageEntitlement
+                ? "Switch seamlessly between RSL Managed Cloud Storage and your own Cloudflare R2 / S3 bucket"
+                : "Connect your own Cloudflare R2 / S3 bucket, or activate RSL Managed Cloud Storage"}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <StatusPill
+              label={storage.config.displayLabel}
+              tone={storage.config.mode === "rsl_managed" ? "emerald" : "sky"}
+            />
+            <span className="text-xs font-semibold text-emerald-700 group-open:hidden">
+              Configure Bucket
+            </span>
+            <span className="hidden text-xs font-semibold text-zinc-500 group-open:inline">
+              Hide Settings
+            </span>
+          </div>
+        </summary>
+        <div className="border-t border-zinc-100 p-6">
         <div className="space-y-4">
           {!hasManagedStorageEntitlement && managedStoragePlan && (
             <InlineAddonPlanBanner plan={managedStoragePlan} returnPath="/backups" />
@@ -421,7 +436,8 @@ export default async function DatabaseStorageAndBackupsPage({
             </ul>
           </div>
         )}
-      </SectionCard>
+        </div>
+      </details>
 
       {/* Protected Backups & Safe Restore */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

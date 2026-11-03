@@ -8,7 +8,6 @@ import {
 import { formatInr, getEnv } from "@rsl/core";
 import { BrandLogo, PlatformFooter } from "@rsl/ui";
 import { AdminSidebarNav, AdminTopBar } from "@/components/admin-nav";
-import { AdminPageWalkthroughBanner } from "@/components/admin-page-guide";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
 import { staffLogoutAction } from "@/lib/actions";
 import { ADMIN_NAV_HREFS } from "@/lib/nav-routes";
@@ -156,7 +155,6 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
         />
 
         <main className="w-full flex-1 px-5 py-6 lg:px-8 xl:px-10">
-          <AdminPageWalkthroughBanner />
           {children}
         </main>
 

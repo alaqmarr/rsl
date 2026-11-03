@@ -1,9 +1,11 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
+import { CheckCircle2 } from "lucide-react";
 import { INDIA_GST_STATES } from "@rsl/billing";
 import { BrandLogo } from "@rsl/ui";
+import { WebRegisterForm } from "@/components/auth-forms";
 import { FlashBanner } from "@/components/flash-banner";
-import { ActionLink, SubmitButton } from "@/components/ios-feedback";
-import { registerAction } from "@/lib/actions";
+import { ActionLink } from "@/components/ios-feedback";
 import { getOptionalWebSession } from "@/lib/session";
 
 const INDIAN_STATES = Object.entries(INDIA_GST_STATES)
@@ -26,7 +28,9 @@ export default async function RegisterPage({
     <div className="flex min-h-screen items-center justify-center bg-[#F8F9FB] px-4 py-10">
       <div className="w-full max-w-lg">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <BrandLogo variant="long" size="sm" subtitle="RSL Marketing & Tally Suite" />
+          <Link href="/">
+            <BrandLogo variant="long" size="sm" subtitle="RSL Marketing & Tally Suite" />
+          </Link>
           <ActionLink
             href="/login"
             spinnerSize="xs"
@@ -37,93 +41,30 @@ export default async function RegisterPage({
         </div>
 
         <div className="rounded-2xl border border-zinc-200/90 bg-white p-7 shadow-[0_8px_30px_rgba(15,23,42,0.05)]">
-          <h1 className="text-xl font-bold tracking-tight text-slate-900">
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800">
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+            <span>Includes 7-Day All-Tools Free Trial • No Credit Card Required</span>
+          </div>
+
+          <h1 className="mt-2.5 text-xl font-bold tracking-tight text-slate-900">
             Create your Business Account
           </h1>
-          <p className="mt-1 text-xs text-zinc-500">
-            Set up your business account to view plans, connect Tally Prime, and manage customer messages.
+          <p className="mt-1 text-xs text-zinc-600">
+            Explore all 15 Tally Prime, WhatsApp, Inbox, and Cloud Backup tools free for 7 days.
           </p>
 
           <div className="mt-4">
             <FlashBanner notice={sp.notice} error={sp.error} />
           </div>
 
-          <form action={registerAction} className="mt-4 space-y-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-zinc-700">
-                  Your Full Name
-                </label>
-                <input name="name" type="text" required className="rsl-input" />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-zinc-700">Work Email</label>
-                <input name="email" type="email" required className="rsl-input" />
-              </div>
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-zinc-700">
-                Password (minimum 8 characters)
-              </label>
-              <input name="password" type="password" minLength={8} required className="rsl-input" />
-            </div>
-
-            <div className="border-t border-zinc-200/80 pt-4">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-zinc-700">
-                    Business / Firm Name
-                  </label>
-                  <input name="businessName" type="text" required className="rsl-input" />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-zinc-700">
-                    Industry (Optional)
-                  </label>
-                  <input name="industry" type="text" className="rsl-input" />
-                </div>
-              </div>
-
-              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-zinc-700">
-                    Billing State (for GST)
-                  </label>
-                  <select name="stateCode" defaultValue="27" className="rsl-input">
-                    {INDIAN_STATES.map((s) => (
-                      <option key={s.code} value={s.code}>
-                        {s.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-zinc-700">
-                    GSTIN (Optional)
-                  </label>
-                  <input
-                    name="gstin"
-                    type="text"
-                    maxLength={15}
-                    className="rsl-input font-mono uppercase"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <SubmitButton
-              className="rsl-btn-primary w-full py-2.5 text-sm"
-              pendingText="Creating Account..."
-            >
-              Create Business Account
-            </SubmitButton>
-          </form>
+          <WebRegisterForm indianStates={INDIAN_STATES} />
         </div>
 
-        <div className="mt-6 flex items-center justify-between px-1 text-[11px] text-zinc-400">
+        <div className="mt-6 flex items-center justify-between px-1 text-[11px] text-zinc-500">
           <BrandLogo variant="mark" size="xs" subtitle="RapidShift Labs" />
-          <span>Official GST Invoicing &amp; Tally Suite</span>
+          <Link href="/" className="hover:text-slate-900 hover:underline">
+            ← Back to Overview &amp; Pricing
+          </Link>
         </div>
       </div>
     </div>

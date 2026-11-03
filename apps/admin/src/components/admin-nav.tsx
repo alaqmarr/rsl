@@ -22,7 +22,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { BrandLogo, IosSpinner } from "@rsl/ui";
+import { BrandLogo, IosSpinner, useDialogFocusTrap } from "@rsl/ui";
 import {
   ADMIN_NAV_SECTIONS_META,
   resolveAdminPageGuide,
@@ -216,6 +216,19 @@ export function AdminTopBar({
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  const mobileDrawerRef = React.useRef<HTMLElement>(null);
+  const paletteDialogRef = React.useRef<HTMLDivElement>(null);
+  const helpDrawerRef = React.useRef<HTMLElement>(null);
+
+  useDialogFocusTrap(mobileDrawerRef, drawerOpen, () => setDrawerOpen(false));
+  useDialogFocusTrap(paletteDialogRef, paletteOpen, () => setPaletteOpen(false));
+  useDialogFocusTrap(helpDrawerRef, helpOpen, () => setHelpOpen(false));
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [query, paletteOpen]);
   const totalPending = pendingPlanRequestsCount + pendingWalletRequestsCount;
   const activePageGuide = useMemo(
     () => resolveAdminPageGuide(pathname || "/"),
@@ -369,7 +382,13 @@ export function AdminTopBar({
             className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs"
             onClick={() => setDrawerOpen(false)}
           />
-          <aside className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between overflow-y-auto bg-white p-4 shadow-2xl">
+          <aside
+            ref={mobileDrawerRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Staff portal navigation menu"
+            className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between overflow-y-auto bg-white p-4 shadow-2xl"
+          >
             <div>
               <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
                 <Link href="/" onClick={() => setDrawerOpen(false)}>
@@ -378,7 +397,8 @@ export function AdminTopBar({
                 <button
                   type="button"
                   onClick={() => setDrawerOpen(false)}
-                  className="rounded-lg p-1 text-zinc-500 hover:bg-zinc-100"
+                  aria-label="Close staff menu"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -390,7 +410,7 @@ export function AdminTopBar({
                 onNavigate={() => setDrawerOpen(false)}
               />
             </div>
-            <div className="mt-4 flex items-center gap-2 border-t border-zinc-100 pt-3 text-[11px] text-zinc-400">
+            <div className="mt-4 flex items-center gap-2 border-t border-zinc-100 pt-3 text-[11px] text-zinc-500">
               <BrandLogo variant="mark" size="xs" />
               <span>© {new Date().getFullYear()} RapidShift Labs</span>
             </div>
@@ -401,85 +421,141 @@ export function AdminTopBar({
       {/* Staff Command Palette (Ctrl+K / Cmd+K) */}
       {paletteOpen && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/35 px-4 pt-[11vh] backdrop-blur-xs">
-          <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl">
+          <div
+            ref={paletteDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Staff command palette"
+            className="w-full max-w-xl overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl"
+          >
             <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-3.5">
               <Search className="h-4 w-4 text-emerald-600" />
+              <label htmlFor="admin-cmdk-input" className="sr-only">
+                Search staff portal screens or client accounts
+              </label>
               <input
+                id="admin-cmdk-input"
                 autoFocus
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  const totalEntries = filteredClients.length + filteredScreens.length;
+                  if (totalEntries === 0) return;
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setActiveIndex((prev) => (prev + 1) % totalEntries);
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setActiveIndex((prev) => (prev - 1 + totalEntries) % totalEntries);
+                  } else if (e.key === "Enter") {
+                    e.preventDefault();
+                    const clamped = Math.min(activeIndex, totalEntries - 1);
+                    setPaletteOpen(false);
+                    setQuery("");
+                    if (clamped < filteredClients.length) {
+                      const pickedClient = filteredClients[clamped];
+                      if (pickedClient) {
+                        startBarTransition(() => router.push(`/clients/${pickedClient.id}`));
+                      }
+                    } else {
+                      const pickedScreen = filteredScreens[clamped - filteredClients.length];
+                      if (pickedScreen) {
+                        startBarTransition(() => router.push(pickedScreen.href));
+                      }
+                    }
+                  }
+                }}
                 placeholder="Search client name, GSTIN, invoices, pricing, templates, or staff..."
                 className="w-full bg-transparent text-sm text-slate-900 outline-none placeholder:text-zinc-400"
               />
               <button
                 type="button"
                 onClick={() => setPaletteOpen(false)}
-                className="rounded-md border border-zinc-200 px-2 py-0.5 text-[11px] font-medium text-zinc-500"
+                className="rounded-md border border-zinc-200 px-2 py-0.5 text-[11px] font-medium text-zinc-600"
               >
                 ESC
               </button>
             </div>
 
-            <div className="max-h-96 overflow-y-auto p-2">
+            <div className="max-h-96 overflow-y-auto p-2" role="listbox">
               {filteredClients.length > 0 && (
                 <div className="mb-2">
-                  <div className="px-3 py-1.5 text-[10px] font-bold tracking-wider text-zinc-400 uppercase">
+                  <div className="px-3 py-1.5 text-[10px] font-bold tracking-wider text-zinc-500 uppercase">
                     Client Accounts
                   </div>
-                  {filteredClients.map((client) => (
-                    <button
-                      key={client.id}
-                      type="button"
-                      onClick={() => {
-                        setPaletteOpen(false);
-                        setQuery("");
-                        startBarTransition(() => router.push(`/clients/${client.id}`));
-                      }}
-                      className="flex w-full items-center justify-between gap-3 rounded-xl px-3.5 py-2.5 text-left transition hover:bg-emerald-50/70"
-                    >
-                      <span className="inline-flex min-w-0 items-center gap-2.5">
-                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-50 text-xs font-bold text-slate-800">
-                          {client.name.slice(0, 1).toUpperCase()}
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block truncate text-xs font-semibold text-slate-900">
-                            {client.name}
-                          </span>
-                          <span className="block truncate text-[11px] text-zinc-500">
-                            {client.gstin ? `GSTIN ${client.gstin}` : "Open full client controls"}
-                          </span>
-                        </span>
-                      </span>
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                          client.billingStatus === "suspended"
-                            ? "bg-rose-50 text-rose-700"
-                            : "bg-emerald-50 text-emerald-700"
+                  {filteredClients.map((client, idx) => {
+                    const isSelected = activeIndex === idx;
+                    return (
+                      <button
+                        key={client.id}
+                        type="button"
+                        role="option"
+                        aria-selected={isSelected}
+                        onMouseEnter={() => setActiveIndex(idx)}
+                        onClick={() => {
+                          setPaletteOpen(false);
+                          setQuery("");
+                          startBarTransition(() => router.push(`/clients/${client.id}`));
+                        }}
+                        className={`flex w-full items-center justify-between gap-3 rounded-xl px-3.5 py-2.5 text-left transition ${
+                          isSelected
+                            ? "bg-emerald-50/90 ring-1 ring-emerald-200/80"
+                            : "hover:bg-emerald-50/70"
                         }`}
                       >
-                        {client.billingStatus === "suspended" ? "Paused" : "Active"}
-                      </span>
-                    </button>
-                  ))}
+                        <span className="inline-flex min-w-0 items-center gap-2.5">
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-50 text-xs font-bold text-slate-800">
+                            {client.name.slice(0, 1).toUpperCase()}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block truncate text-xs font-semibold text-slate-900">
+                              {client.name}
+                            </span>
+                            <span className="block truncate text-[11px] text-zinc-500">
+                              {client.gstin ? `GSTIN ${client.gstin}` : "Open full client controls"}
+                            </span>
+                          </span>
+                        </span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            client.billingStatus === "suspended"
+                              ? "bg-rose-50 text-rose-700"
+                              : "bg-emerald-50 text-emerald-700"
+                          }`}
+                        >
+                          {client.billingStatus === "suspended" ? "Paused" : "Active"}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
 
               <div>
-                <div className="px-3 py-1.5 text-[10px] font-bold tracking-wider text-zinc-400 uppercase">
+                <div className="px-3 py-1.5 text-[10px] font-bold tracking-wider text-zinc-500 uppercase">
                   Staff Screens
                 </div>
-                {filteredScreens.map((item) => {
+                {filteredScreens.map((item, idx) => {
+                  const entryIndex = filteredClients.length + idx;
+                  const isSelected = activeIndex === entryIndex;
                   const Icon = item.icon;
                   return (
                     <button
                       key={item.href}
                       type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      onMouseEnter={() => setActiveIndex(entryIndex)}
                       onClick={() => {
                         setPaletteOpen(false);
                         setQuery("");
                         startBarTransition(() => router.push(item.href));
                       }}
-                      className="flex w-full items-start gap-3 rounded-xl px-3.5 py-2.5 text-left transition hover:bg-zinc-50"
+                      className={`flex w-full items-start gap-3 rounded-xl px-3.5 py-2.5 text-left transition ${
+                        isSelected
+                          ? "bg-emerald-50/90 ring-1 ring-emerald-200/80"
+                          : "hover:bg-zinc-50"
+                      }`}
                     >
                       <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-50 text-emerald-600">
                         <Icon className="h-3.5 w-3.5" />
@@ -497,6 +573,10 @@ export function AdminTopBar({
                 })}
               </div>
             </div>
+            <div className="flex items-center justify-between border-t border-zinc-100 bg-zinc-50/75 px-4 py-2 text-[11px] text-zinc-500">
+              <span>↑↓ Navigate • ↵ Open • Esc Close</span>
+              <span className="font-mono">Ctrl+K / ⌘K</span>
+            </div>
           </div>
         </div>
       )}
@@ -508,7 +588,13 @@ export function AdminTopBar({
             className="fixed inset-0 bg-slate-950/35 backdrop-blur-xs"
             onClick={() => setHelpOpen(false)}
           />
-          <aside className="relative z-10 flex h-full w-full max-w-lg flex-col justify-between overflow-y-auto border-l border-zinc-200 bg-white p-6 shadow-2xl">
+          <aside
+            ref={helpDrawerRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Staff screen SOP guide"
+            className="relative z-10 flex h-full w-full max-w-lg flex-col justify-between overflow-y-auto border-l border-zinc-200 bg-white p-6 shadow-2xl"
+          >
             <div className="space-y-5">
               <div className="flex items-start justify-between gap-3 border-b border-zinc-100 pb-4">
                 <div>

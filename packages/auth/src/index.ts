@@ -93,6 +93,8 @@ export interface AuthenticatedSession {
   ctx: TenantContext;
 }
 
+export const DEFAULT_STARTER_TRIAL_DAYS = 7;
+
 export function registerUserWithWorkspace(params: {
   name: string;
   email: string;
@@ -103,12 +105,30 @@ export function registerUserWithWorkspace(params: {
   gstin?: string;
   ipAddress?: string;
   userAgent?: string;
+  grantStarterTrialDays?: number;
 }): { rawSessionToken: string; userId: string; workspaceId: string } {
   ensureSystemRolesSeeded();
   ensureServiceCatalogSeeded();
 
   if (params.password.length < 8) {
     throw new RslError("RSL-VAL-1001", "Password must be at least 8 characters long.");
+  }
+
+  const effectiveStateCode = params.stateCode?.trim() || "27";
+  const normalizedGstin = params.gstin?.trim().toUpperCase() || null;
+  if (normalizedGstin) {
+    if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(normalizedGstin)) {
+      throw new RslError(
+        "RSL-VAL-1001",
+        "Enter a valid 15-character Indian GSTIN (for example: 27AABCU9603R1ZM), or leave GSTIN blank if unregistered."
+      );
+    }
+    if (normalizedGstin.slice(0, 2) !== effectiveStateCode) {
+      throw new RslError(
+        "RSL-VAL-1001",
+        `GSTIN state prefix (${normalizedGstin.slice(0, 2)}) must match your selected Billing State (${effectiveStateCode}).`
+      );
+    }
   }
 
   const db = controlDb();
@@ -128,6 +148,8 @@ export function registerUserWithWorkspace(params: {
   const workspaceId = newId("biz", params.businessName);
   const passwordHash = hashPassword(params.password);
   const slug = slugifyWorkspace(params.businessName);
+  const trialDays = Math.max(0, Math.round(params.grantStarterTrialDays ?? 0));
+  const freeAccessUntil = trialDays > 0 ? now + trialDays * 86_400_000 : null;
 
   const tx = db.$client.transaction(() => {
     db.insert(controlSchema.users)
@@ -150,13 +172,16 @@ export function registerUserWithWorkspace(params: {
         name: params.businessName.trim(),
         slug,
         industry: params.industry?.trim() || null,
-        gstin: params.gstin?.trim() || null,
-        stateCode: params.stateCode?.trim() || "27",
+        gstin: normalizedGstin,
+        stateCode: effectiveStateCode,
         currency: "INR",
         timezone: "Asia/Kolkata",
         billingStatus: "active",
         mode: "live",
         ownerUserId: userId,
+        freeAccessUntil,
+        freeAccessNote: trialDays > 0 ? `${trialDays}-Day New Business Starter Trial` : null,
+        freeAccessGrantedBy: trialDays > 0 ? "system_onboarding" : null,
         createdAt: now,
         updatedAt: now,
       })

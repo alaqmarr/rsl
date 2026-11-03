@@ -125,18 +125,28 @@ export default async function AdminPlatformCredentialsPage({
         />
       </div>
 
-      {/* Complete Minute-by-Minute Admin Guide for Google OAuth Consent Screen */}
-      <SectionCard
-        title="Complete Admin Setup Guide — RapidShift Labs Google OAuth Screen (1-Click Customer Drive)"
-        subtitle="Do this ONCE on the Admin side so every RapidShift Labs customer can connect their own Google Drive in 2 clicks without ever touching Google Cloud Console"
-        action={
+      {/* Complete Minute-by-Minute Admin Guide for Google OAuth Consent Screen (Auto-expands until Google OAuth is Ready) */}
+      <details
+        open={!snap.google.isReady}
+        className="group rounded-2xl border border-zinc-200/90 bg-white shadow-2xs"
+      >
+        <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 px-6 py-4 select-none">
+          <div>
+            <div className="text-sm font-bold text-slate-900">
+              Complete Admin Setup Guide — RapidShift Labs Google OAuth Screen (1-Click Customer Drive)
+            </div>
+            <div className="text-xs text-zinc-500">
+              {snap.google.isReady
+                ? "Google OAuth is active — click to review the 6 Google Cloud Console setup steps or copy Authorized Callback URLs"
+                : "Do this ONCE on the Admin side so every RapidShift Labs customer can connect their own Google Drive in 2 clicks"}
+            </div>
+          </div>
           <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-800">
             <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
             <span>Zero CASA Audit Needed (drive.file)</span>
           </span>
-        }
-      >
-        <div className="space-y-5 text-xs">
+        </summary>
+        <div className="space-y-5 border-t border-zinc-100 p-6 text-xs">
           {/* Why Service Account JSON Fails Callout */}
           <div className="rounded-2xl border border-amber-300/90 bg-amber-50/85 p-4 text-amber-950">
             <div className="flex items-start gap-2.5">
@@ -278,7 +288,7 @@ export default async function AdminPlatformCredentialsPage({
             </div>
           </div>
         </div>
-      </SectionCard>
+      </details>
 
       {/* 1. Google OAuth 2.0 Web Client Vault */}
       <SectionCard

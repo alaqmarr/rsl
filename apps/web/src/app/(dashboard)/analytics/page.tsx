@@ -122,8 +122,30 @@ export default async function DetailedAnalyticsPage({
         />
       </div>
 
-      {/* Operational Health Row */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {/* Operational Health Row (Collapsible Progressive Disclosure) */}
+      <details
+        open={range === "7d"}
+        className="group rounded-2xl border border-zinc-200/90 bg-white shadow-2xs"
+      >
+        <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 px-5 py-3.5 select-none">
+          <div className="flex flex-wrap items-center gap-2.5 text-xs">
+            <span className="font-bold text-slate-900">
+              Operational &amp; Wallet Runway Metrics
+            </span>
+            <span className="text-zinc-500">
+              Reply Rate <strong>{report.kpis.replyRatePct}%</strong> • Avg Reply{" "}
+              <strong>{report.kpis.avgReplyMinutes}m</strong> • Reach{" "}
+              <strong>{report.kpis.contactsTotalCount.toLocaleString("en-IN")}</strong>
+            </span>
+          </div>
+          <span className="text-xs font-semibold text-emerald-700 group-open:hidden">
+            Expand Operational KPIs
+          </span>
+          <span className="hidden text-xs font-semibold text-zinc-500 group-open:inline">
+            Hide Operational KPIs
+          </span>
+        </summary>
+        <div className="grid grid-cols-1 gap-4 border-t border-zinc-100 p-5 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Team Reply Rate"
           value={`${report.kpis.replyRatePct}%`}
@@ -158,7 +180,8 @@ export default async function DetailedAnalyticsPage({
           value={report.kpis.contactsTotalCount.toLocaleString("en-IN")}
           sublabel={`${report.kpis.optedInCount} WhatsApp opted-in • ${report.kpis.unsubscribedCount} unsubscribed`}
         />
-      </div>
+        </div>
+      </details>
 
       {/* Dual Trend Charts */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

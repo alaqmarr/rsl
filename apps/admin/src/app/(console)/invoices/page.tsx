@@ -114,13 +114,29 @@ export default async function AdminInvoicesAndLedgerPage({
         />
       </div>
 
-      {/* Issue Custom GST Invoice */}
+      {/* Issue Custom GST Invoice (Progressive Disclosure) */}
       {canManageBilling && (
-      <SectionCard
-        title="Issue Custom GST Invoice"
-        subtitle="Create an official sequential GST invoice (automatically calculates 9% CGST + 9% SGST for same-state or 18% IGST for inter-state)"
-        action={<StatusPill label="SAC 998314 • 18% GST" tone="emerald" />}
-      >
+        <details className="group rounded-2xl border border-zinc-200/90 bg-white shadow-2xs">
+          <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 px-6 py-4 select-none">
+            <div>
+              <div className="text-sm font-bold text-slate-900">
+                + Issue Custom GST Invoice
+              </div>
+              <div className="text-xs text-zinc-500">
+                Create an official sequential GST invoice (9% CGST + 9% SGST intra-state or 18% IGST inter-state)
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <StatusPill label="SAC 998314 • 18% GST" tone="emerald" />
+              <span className="text-xs font-semibold text-emerald-700 group-open:hidden">
+                Open Form
+              </span>
+              <span className="hidden text-xs font-semibold text-zinc-500 group-open:inline">
+                Hide Form
+              </span>
+            </div>
+          </summary>
+          <div className="border-t border-zinc-100 p-6">
         <form action={staffCreateCustomInvoiceAction} className="space-y-4 text-[13px]">
           <input type="hidden" name="returnTo" value="/invoices" />
 
@@ -197,7 +213,8 @@ export default async function AdminInvoicesAndLedgerPage({
             </SubmitButton>
           </div>
         </form>
-      </SectionCard>
+          </div>
+        </details>
       )}
 
       {/* Search & Status Filter Toolbar + Invoices Table */}

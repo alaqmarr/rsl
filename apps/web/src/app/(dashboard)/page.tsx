@@ -8,8 +8,8 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { getWorkspaceAnalytics } from "@rsl/analytics";
-import { hasActiveEntitlement } from "@rsl/billing";
-import { formatInr } from "@rsl/core";
+import { hasActiveEntitlement, listPublicPricingCatalog } from "@rsl/billing";
+import { formatInr, getEnv } from "@rsl/core";
 import { listRecentActionLogs } from "@rsl/logging";
 import {
   canRoleAccessWebRoute,
@@ -26,18 +26,31 @@ import {
   SectionCard,
   StatusPill,
 } from "@rsl/ui";
+import { ConfirmWhatsAppReminderButton } from "@/components/confirm-whatsapp-reminder";
 import { FlashBanner } from "@/components/flash-banner";
-import { ActionLink, SubmitButton } from "@/components/ios-feedback";
+import { ActionLink } from "@/components/ios-feedback";
+import { PublicLandingPage } from "@/components/public-landing-page";
 import { sendBillWhatsAppAction } from "@/lib/actions";
 import { formatCustomerAuditSummary } from "@/lib/plain-text";
-import { requireWebSession } from "@/lib/session";
+import { getOptionalWebSession } from "@/lib/session";
 
 export default async function BusinessOverviewPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  const session = await requireWebSession();
+  const session = await getOptionalWebSession();
+  if (!session) {
+    const env = getEnv();
+    const catalog = listPublicPricingCatalog();
+    return (
+      <PublicLandingPage
+        bundles={catalog.bundles}
+        services={catalog.services}
+        docsBaseUrl={env.DOCS_URL}
+      />
+    );
+  }
   const sp = await searchParams;
   const analytics = getWorkspaceAnalytics(session.workspace.id, "30d");
 
@@ -389,17 +402,14 @@ export default async function BusinessOverviewPage({
                             {!canSendTallyWhatsApp ? (
                               <span className="text-[11px] text-zinc-400">Read-only</span>
                             ) : canSendBillWhatsApp && bill.partyPhoneE164 ? (
-                              <form action={sendBillWhatsAppAction} className="inline">
-                                <input type="hidden" name="voucherId" value={bill.id} />
-                                <input type="hidden" name="sendKind" value="reminder" />
-                                <SubmitButton
-                                  className="rsl-btn-secondary py-1 text-[11px]"
-                                  spinnerSize="xs"
-                                  pendingText="Sending..."
-                                >
-                                  Send Reminder
-                                </SubmitButton>
-                              </form>
+                              <ConfirmWhatsAppReminderButton
+                                voucherId={bill.id}
+                                voucherNumber={bill.voucherNumber}
+                                partyName={bill.partyName}
+                                partyPhoneE164={bill.partyPhoneE164}
+                                balanceFormatted={formatInr(balance)}
+                                action={sendBillWhatsAppAction}
+                              />
                             ) : canSendBillWhatsApp ? (
                               <ActionLink
                                 href="/tally"

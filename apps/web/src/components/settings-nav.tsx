@@ -66,7 +66,7 @@ export function SettingsNav() {
   }, [isPending, pathname]);
 
   return (
-    <div className="w-full rounded-2xl border border-zinc-200/90 bg-white p-1.5 shadow-2xs">
+    <div className="w-full rounded-2xl border border-zinc-200/90 bg-white p-1.5 shadow-2xs lg:hidden">
       <nav
         aria-label="Account and workspace settings navigation"
         className="flex flex-wrap items-center gap-1"

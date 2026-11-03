@@ -34,6 +34,7 @@ import {
   SectionCard,
   StatusPill,
 } from "@rsl/ui";
+import { ConfirmWhatsAppReminderButton } from "@/components/confirm-whatsapp-reminder";
 import { FeaturePlanGate, InlineAddonPlanBanner } from "@/components/feature-plan-gate";
 import { FlashBanner } from "@/components/flash-banner";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
@@ -257,17 +258,31 @@ export default async function TallySyncPage({
               </>
             )}
             {tally.vouchers.length > 0 && (
-              <>
-                <a href="/api/pdf/tally-receivables" className="rsl-btn-secondary">
-                  Download Receivables PDF
-                </a>
-                <a href="/api/export/tally-xml" className="rsl-btn-secondary">
-                  Export XML
-                </a>
-                <a href="/api/export/tally-csv" className="rsl-btn-secondary">
-                  Export CSV
-                </a>
-              </>
+              <details className="relative">
+                <summary className="rsl-btn-secondary cursor-pointer list-none select-none">
+                  Export Register ▾
+                </summary>
+                <div className="absolute right-0 z-20 mt-1.5 flex w-52 flex-col gap-1 rounded-xl border border-zinc-200 bg-white p-1.5 text-xs shadow-lg">
+                  <a
+                    href="/api/pdf/tally-receivables"
+                    className="rounded-lg px-3 py-2 font-medium text-slate-800 hover:bg-zinc-50"
+                  >
+                    Download Receivables PDF
+                  </a>
+                  <a
+                    href="/api/export/tally-xml"
+                    className="rounded-lg px-3 py-2 font-medium text-slate-800 hover:bg-zinc-50"
+                  >
+                    Export Tally Prime XML
+                  </a>
+                  <a
+                    href="/api/export/tally-csv"
+                    className="rounded-lg px-3 py-2 font-medium text-slate-800 hover:bg-zinc-50"
+                  >
+                    Export Bills CSV
+                  </a>
+                </div>
+              </details>
             )}
             {canManageTally && (
               <form action={generatePairingCodeAction}>
@@ -659,22 +674,17 @@ export default async function TallySyncPage({
                                   </SubmitButton>
                                 </form>
                                 {balance > 0 && (
-                                  <form action={sendBillWhatsAppAction} className="inline-flex">
-                                    <input type="hidden" name="voucherId" value={v.id} />
-                                    <input type="hidden" name="sendKind" value="reminder" />
-                                    <input
-                                      type="hidden"
-                                      name="returnPath"
-                                      value={currentBillsReturnPath}
-                                    />
-                                    <SubmitButton
-                                      spinnerSize="xs"
-                                      pendingText="Sending..."
-                                      className="rsl-btn-primary py-1 px-2.5 text-[11px]"
-                                    >
-                                      Send Reminder ({v.remindersSentCount})
-                                    </SubmitButton>
-                                  </form>
+                                  <ConfirmWhatsAppReminderButton
+                                    voucherId={v.id}
+                                    voucherNumber={v.voucherNumber}
+                                    partyName={v.partyName}
+                                    partyPhoneE164={v.partyPhoneE164}
+                                    balanceFormatted={formatInr(balance)}
+                                    action={sendBillWhatsAppAction}
+                                    returnPath={currentBillsReturnPath}
+                                    buttonLabel={`Send Reminder (${v.remindersSentCount})`}
+                                    buttonClassName="rsl-btn-primary py-1 px-2.5 text-[11px]"
+                                  />
                                 )}
                               </div>
                             )
