@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
-import { createGstInvoice, creditWallet, verifyRazorpaySignature } from "@rsl/billing";
+import { createAdvanceReceiptVoucher, creditWallet, verifyRazorpaySignature } from "@rsl/billing";
 import { newId } from "@rsl/core";
 import { controlSchema, ingressSchema } from "@rsl/database";
 import { controlDb, ingressDb } from "@rsl/tenancy";
@@ -9,12 +9,18 @@ import { controlDb, ingressDb } from "@rsl/tenancy";
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
   const sig = req.headers.get("x-razorpay-signature") || "";
+
+  // Validate HMAC signature strictly in memory BEFORE writing to ingress.db (P2-08 / SEC-09)
   const valid = verifyRazorpaySignature(rawBody, sig);
+  if (!valid) {
+    return NextResponse.json({ ok: false, error: "Invalid Razorpay signature" }, { status: 401 });
+  }
+
   const eventId =
     req.headers.get("x-razorpay-event-id") ||
     `rzp_${crypto.createHash("sha256").update(rawBody).digest("hex").slice(0, 24)}`;
 
-  ingressDb()
+  const inserted = ingressDb()
     .insert(ingressSchema.webhookInbox)
     .values({
       id: newId(),
@@ -22,16 +28,16 @@ export async function POST(req: NextRequest) {
       eventId,
       rawBody: rawBody.slice(0, 65536),
       headersJson: JSON.stringify({ sigPresent: Boolean(sig) }),
-      signatureValid: valid,
-      status: valid ? "processed" : "ignored",
+      signatureValid: true,
+      status: "processed",
       receivedAt: Date.now(),
       processedAt: Date.now(),
     })
     .onConflictDoNothing()
     .run();
 
-  if (!valid) {
-    return NextResponse.json({ ok: false, error: "Invalid Razorpay signature" }, { status: 401 });
+  if (inserted.changes === 0) {
+    return NextResponse.json({ ok: true, deduplicated: true });
   }
 
   const parsed = JSON.parse(rawBody) as {
@@ -55,18 +61,18 @@ export async function POST(req: NextRequest) {
     const creditPaise = Number(entity?.notes?.walletCreditPaise || 0);
 
     if (workspaceId && paymentId && creditPaise > 0) {
-      const inv = createGstInvoice({
+      const inv = createAdvanceReceiptVoucher({
         workspaceId,
-        description: `Online Wallet Recharge (${paymentId})`,
-        subtotalPaise: creditPaise,
-        status: "paid",
+        description: `Online Prepaid Wallet Deposit (${paymentId})`,
+        amountPaise: creditPaise,
+        externalRefKey: `rzp_payment:${paymentId}`,
       });
 
       creditWallet({
         workspaceId,
         amountPaise: creditPaise,
         description: `Verified Razorpay Wallet Recharge (${paymentId})`,
-        idempotencyKey: `rzp_webhook:${paymentId}`,
+        idempotencyKey: `rzp_payment:${paymentId}`,
         actorId: "razorpay_webhook",
         entryType: "credit",
         createInvoice: false,

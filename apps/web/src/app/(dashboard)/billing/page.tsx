@@ -273,9 +273,11 @@ export default async function BillingAndWalletPage({
         )}
         <MetricCard
           label="GST Tax Invoices"
-          value={String(invoices.length)}
+          value={String(invoices.filter((i) => i.docType !== "advance_receipt").length)}
           sublabel={`State ${session.workspace.stateCode} (${
-            session.workspace.stateCode === "27" ? "9% CGST + 9% SGST" : "18% IGST"
+            session.workspace.stateCode === (billingSettings.gstin.slice(0, 2) || "27")
+              ? "9% CGST + 9% SGST"
+              : "18% IGST"
           })`}
           icon={<ReceiptText className="h-4 w-4" />}
         />
@@ -464,6 +466,8 @@ export default async function BillingAndWalletPage({
                           isPending={bundlePending}
                           pendingCycle={bundle.pendingRequest?.billingCycle}
                           workspaceSlug={session.workspace.slug}
+                          buyerStateCode={session.workspace.stateCode}
+                          supplierStateCode={billingSettings.gstin.slice(0, 2) || "27"}
                           billingSettings={billingSettings}
                           canManageBilling={canManageBilling}
                           triggerLabel={
@@ -761,6 +765,8 @@ export default async function BillingAndWalletPage({
                                   isPending={isPending}
                                   pendingCycle={svc.pendingRequest?.billingCycle}
                                   workspaceSlug={session.workspace.slug}
+                                  buyerStateCode={session.workspace.stateCode}
+                                  supplierStateCode={billingSettings.gstin.slice(0, 2) || "27"}
                                   billingSettings={billingSettings}
                                   canManageBilling={canManageBilling}
                                   triggerLabel="Request Activation"
@@ -892,7 +898,7 @@ export default async function BillingAndWalletPage({
 
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-3.5">
                 <span className="text-xs text-zinc-500">
-                  Balance is credited after payment verification — official 18% GST invoice (SAC 998314) issued automatically.
+                  Prepaid wallet deposits are credited at 0% GST with an Advance Receipt Voucher (ADV/...). Official 18% GST Tax Invoices (SAC 998314) are issued upon plan/service consumption.
                 </span>
                 <SubmitButton pendingText="Submitting..." className="rsl-btn-primary">
                   Submit Recharge UTR
@@ -990,8 +996,15 @@ export default async function BillingAndWalletPage({
       {activeTab === "invoices" && (
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.35fr_1fr]">
           <SectionCard
-            title={`GST Tax Invoices (${invoices.length})`}
-            subtitle={`Official sequential GST invoices (SAC 998314) • Supplier GSTIN: ${billingSettings.gstin}`}
+            title={`GST Invoices & Vouchers (${invoices.length})`}
+            subtitle={`Official sequential GST Tax Invoices, Section 34 Credit Notes & Advance Receipt Vouchers (SAC 998314) • Supplier GSTIN: ${billingSettings.gstin}`}
+            action={
+              invoices.length > 0 ? (
+                <a href="/api/export/gst-invoices-csv" className="rsl-btn-secondary text-xs">
+                  Export GSTR-1 CSV
+                </a>
+              ) : undefined
+            }
             noPadding
           >
             {invoices.length === 0 ? (
@@ -1024,11 +1037,33 @@ export default async function BillingAndWalletPage({
                             >
                               {inv.invoiceNumber}
                             </ActionLink>
-                            <div className="mt-0.5 flex items-center gap-1.5 text-xs text-zinc-500 tabular-nums">
+                            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500 tabular-nums">
                               <span>{new Date(inv.issuedAt).toLocaleDateString("en-IN")}</span>
                               <StatusPill
+                                label={
+                                  inv.docType === "advance_receipt"
+                                    ? "ADVANCE RECEIPT"
+                                    : inv.docType === "credit_note"
+                                      ? "CREDIT NOTE"
+                                      : "TAX INVOICE"
+                                }
+                                tone={
+                                  inv.docType === "credit_note"
+                                    ? "ruby"
+                                    : inv.docType === "advance_receipt"
+                                      ? "sky"
+                                      : "emerald"
+                                }
+                              />
+                              <StatusPill
                                 label={inv.status.toUpperCase()}
-                                tone={inv.status === "paid" ? "emerald" : "amber"}
+                                tone={
+                                  inv.status === "paid"
+                                    ? "emerald"
+                                    : inv.status === "credited"
+                                      ? "stone"
+                                      : "amber"
+                                }
                               />
                             </div>
                           </td>

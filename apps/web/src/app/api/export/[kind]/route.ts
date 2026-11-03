@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exportWorkspaceAnalyticsCsv, type AnalyticsDateRange } from "@rsl/analytics";
+import { exportWorkspaceGstInvoicesCsv } from "@rsl/billing";
 import {
   exportContactsAsCsv,
   exportPortableWorkspaceJson,
@@ -28,6 +29,7 @@ const EXPORT_PERMISSION_MAP: Record<string, Permission[]> = {
   "contacts-csv": ["inbox:view", "backup:manage"],
   "portable-json": ["backup:manage"],
   "analytics-csv": ["tally:view", "ads:view", "pixel:view", "billing:view"],
+  "gst-invoices-csv": ["billing:view", "billing:manage"],
   "activity-csv": ["logs:export"],
   "backup-bundle": ["backup:view", "backup:manage"],
 };
@@ -172,6 +174,17 @@ export async function GET(
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="${session.workspace.slug}-analytics-${range}.csv"`,
+      },
+    });
+  }
+
+  if (kind === "gst-invoices-csv") {
+    const csv = exportWorkspaceGstInvoicesCsv(wsId);
+    return new NextResponse(`\uFEFF${csv}`, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${session.workspace.slug}-gstr1-invoices.csv"`,
+        "Cache-Control": "no-store",
       },
     });
   }

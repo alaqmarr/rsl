@@ -11,6 +11,8 @@ import {
 
 export interface GstInvoicePdfInput {
   invoiceNumber: string;
+  docType?: string;
+  linkedInvoiceNumber?: string | null;
   financialYear: string;
   description: string;
   subtotalPaise: number;
@@ -650,10 +652,19 @@ function stampStationeryFooters(
  */
 export async function generateGstInvoicePdfBytes(inv: GstInvoicePdfInput): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
-  doc.setTitle(`GST Tax Invoice ${inv.invoiceNumber}`);
+  const docType = inv.docType || "tax_invoice";
+  const isAdvanceReceipt = docType === "advance_receipt";
+  const isCreditNote = docType === "credit_note";
+  const docTitleLabel = isAdvanceReceipt
+    ? "ADVANCE RECEIPT VOUCHER"
+    : isCreditNote
+      ? "GST CREDIT NOTE (SEC. 34)"
+      : "GST TAX INVOICE";
+
+  doc.setTitle(`${docTitleLabel} ${inv.invoiceNumber}`);
   doc.setAuthor(safePdfText(inv.seller.payeeName));
   doc.setCreator("RapidShift Labs — RSL Marketing & Tally Suite");
-  doc.setSubject(`GST Tax Invoice for ${safePdfText(inv.buyerName)}`);
+  doc.setSubject(`${docTitleLabel} for ${safePdfText(inv.buyerName)}`);
 
   const ctx = await createStationeryContext(doc);
   const { fontRegular, fontBold } = ctx;
@@ -663,13 +674,25 @@ export async function generateGstInvoicePdfBytes(inv: GstInvoicePdfInput): Promi
 
   const statusUpper = inv.status.toUpperCase();
   const statusTone: BadgeTone =
-    inv.status === "paid" ? "emerald" : inv.status === "void" ? "slate" : "amber";
+    inv.status === "paid"
+      ? "emerald"
+      : inv.status === "void" || inv.status === "credited"
+        ? "slate"
+        : "amber";
 
   let y = drawStationeryHeader(page, ctx, {
-    docTitle: "GST TAX INVOICE",
-    primaryMeta: `Invoice # ${inv.invoiceNumber}  |  FY ${inv.financialYear}`,
-    secondaryMeta: `Original for Recipient  |  SAC ${inv.hsnSac || "998314"}`,
-    badgeLabel: statusUpper === "PAID" ? "PAID IN FULL" : statusUpper,
+    docTitle: docTitleLabel,
+    primaryMeta: `${isAdvanceReceipt ? "Voucher" : isCreditNote ? "Credit Note" : "Invoice"} # ${inv.invoiceNumber}  |  FY ${inv.financialYear}`,
+    secondaryMeta: isAdvanceReceipt
+      ? "0% GST on Prepaid Wallet Deposit  |  SAC 998314"
+      : isCreditNote && inv.linkedInvoiceNumber
+        ? `Against Tax Invoice # ${inv.linkedInvoiceNumber}  |  SAC ${inv.hsnSac || "998314"}`
+        : `Original for Recipient  |  SAC ${inv.hsnSac || "998314"}`,
+    badgeLabel: isCreditNote
+      ? "SEC. 34 CREDIT NOTE"
+      : statusUpper === "PAID"
+        ? "PAID IN FULL"
+        : statusUpper,
     badgeTone: statusTone,
     brandTagline: inv.seller.payeeName,
     brandSubline: "Cloud Marketing, WhatsApp Business & Tally Automation Suite",
@@ -867,7 +890,23 @@ export async function generateGstInvoicePdfBytes(inv: GstInvoicePdfInput): Promi
   page.drawText("Subtotal (Before Tax)", { x: boxX + 12, y: y - 20, size: 9, font: fontRegular, color: SLATE_600 });
   drawRightText(page, pdfInr(inv.subtotalPaise), width - 52, y - 20, 9, fontBold, SLATE_900);
 
-  if (inv.igstPaise > 0) {
+  if (isAdvanceReceipt) {
+    page.drawText("GST on Prepaid Deposit (0%)", {
+      x: boxX + 12,
+      y: y - 40,
+      size: 9,
+      font: fontRegular,
+      color: SLATE_600,
+    });
+    drawRightText(page, pdfInr(0), width - 52, y - 40, 9, fontRegular, SLATE_900);
+    page.drawText("Tax Invoice issued on usage", {
+      x: boxX + 12,
+      y: y - 55,
+      size: 7.8,
+      font: fontRegular,
+      color: ZINC_400,
+    });
+  } else if (inv.igstPaise !== 0) {
     page.drawText("IGST (18% Inter-State)", { x: boxX + 12, y: y - 40, size: 9, font: fontRegular, color: SLATE_600 });
     drawRightText(page, pdfInr(inv.igstPaise), width - 52, y - 40, 9, fontRegular, SLATE_900);
   } else {
@@ -884,18 +923,18 @@ export async function generateGstInvoicePdfBytes(inv: GstInvoicePdfInput): Promi
     color: ZINC_200,
   });
 
-  page.drawText("TOTAL PAYABLE (INR)", {
+  page.drawText(isCreditNote ? "TOTAL CREDITED (INR)" : isAdvanceReceipt ? "DEPOSIT RECEIVED (INR)" : "TOTAL PAYABLE (INR)", {
     x: boxX + 12,
     y: y - 92,
     size: 10,
     font: fontBold,
     color: SLATE_900,
   });
-  drawRightText(page, pdfInr(inv.totalPaise), width - 52, y - 92, 11, fontBold, EMERALD_700);
+  drawRightText(page, pdfInr(inv.totalPaise), width - 52, y - 92, 11, fontBold, isCreditNote ? RUBY_700 : EMERALD_700);
 
   // Left side next to totals: Amount in words & Payment Reference
   page.drawText("AMOUNT IN WORDS", { x: 40, y: y - 16, size: 8, font: fontBold, color: SLATE_600 });
-  page.drawText(safePdfText(indianRupeesInWords(inv.totalPaise), 60), {
+  page.drawText(safePdfText(indianRupeesInWords(Math.abs(inv.totalPaise)), 60), {
     x: 40,
     y: y - 32,
     size: 9.5,

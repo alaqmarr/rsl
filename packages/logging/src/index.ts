@@ -504,7 +504,9 @@ export function listRecentActionLogs(
 }
 
 function escapeCsvCell(val: unknown): string {
-  const s = val === null || val === undefined ? "" : String(val);
+  if (typeof val === "number") return Number.isFinite(val) ? String(val) : "0";
+  const raw = val === null || val === undefined ? "" : String(val);
+  const s = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
   if (/[",\r\n]/.test(s)) {
     return `"${s.replace(/"/g, '""')}"`;
   }

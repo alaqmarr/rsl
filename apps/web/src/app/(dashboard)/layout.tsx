@@ -190,6 +190,18 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 style={{ width: `${setupPct}%` }}
               />
             </div>
+            {(() => {
+              const nextMilestone = setupProgress.milestones.find((m) => !m.done);
+              return nextMilestone ? (
+                <ActionLink
+                  href={nextMilestone.href}
+                  spinnerSize="xs"
+                  className="mt-1.5 inline-flex items-center gap-1 text-[10.5px] font-semibold text-emerald-700 hover:text-emerald-800 hover:underline"
+                >
+                  <span>Next: {nextMilestone.label} →</span>
+                </ActionLink>
+              ) : null;
+            })()}
           </div>
         )}
       </div>

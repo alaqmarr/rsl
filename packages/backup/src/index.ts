@@ -506,11 +506,20 @@ export function exportContactsAsCsv(workspaceId: string): string {
   const rows = tenantDataDb({ workspaceId }).select().from(tenantDataSchema.contacts).all();
   const header = "Id,Name,PhoneE164,Email,CompanyName,CreatedAt";
   const lines = rows.map((r) => {
-    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const q = (s: string, allowPhonePlus = false) => {
+      const trimmed = s ?? "";
+      const safe =
+        allowPhonePlus && /^\+\d{8,15}$/.test(trimmed.trim())
+          ? trimmed.trim()
+          : /^[=+\-@\t\r]/.test(trimmed)
+            ? `'${trimmed}`
+            : trimmed;
+      return `"${safe.replace(/"/g, '""')}"`;
+    };
     return [
       q(r.id),
       q(r.name),
-      q(r.phoneE164 ?? ""),
+      q(r.phoneE164 ?? "", true),
       q(r.email ?? ""),
       q(r.companyName ?? ""),
       new Date(r.createdAt).toISOString(),

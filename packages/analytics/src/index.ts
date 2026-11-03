@@ -1,5 +1,5 @@
 import { desc } from "drizzle-orm";
-import { assertValidUlid, formatInr } from "@rsl/core";
+import { assertValidUlid, escapeCsvCellSafe, formatInr } from "@rsl/core";
 import { controlSchema, platformLogsSchema } from "@rsl/database";
 import { controlDb, ingressDb, platformLogsDb, tenantDataDb, tenantLogsDb } from "@rsl/tenancy";
 
@@ -67,9 +67,17 @@ function formatShortDay(dayKey: string): string {
   return dt.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" });
 }
 
+export interface SetupMilestoneItem {
+  key: string;
+  label: string;
+  href: string;
+  done: boolean;
+}
+
 export function getWorkspaceSetupProgress(workspaceId: string): {
   doneCount: number;
   totalCount: number;
+  milestones: SetupMilestoneItem[];
 } {
   const validId = assertValidUlid(workspaceId, "workspaceId");
   const ctrlDb = controlDb().$client;
@@ -87,8 +95,16 @@ export function getWorkspaceSetupProgress(workspaceId: string): {
   const hasTally = Boolean(dataDb.prepare("SELECT 1 FROM tally_vouchers LIMIT 1").get());
   const hasMessage = Boolean(dataDb.prepare("SELECT 1 FROM messages LIMIT 1").get());
 
-  const doneCount = [hasWallet, hasConnection, hasContact, hasTally, hasMessage].filter(Boolean).length;
-  return { doneCount, totalCount: 5 };
+  const milestones: SetupMilestoneItem[] = [
+    { key: "wallet", label: "Recharge Wallet", href: "/billing?tab=wallet", done: hasWallet },
+    { key: "connections", label: "Connect Account", href: "/connections", done: hasConnection },
+    { key: "contacts", label: "Add Contacts", href: "/inbox", done: hasContact },
+    { key: "tally", label: "Sync Tally Bills", href: "/tally", done: hasTally },
+    { key: "messages", label: "Send First Reply", href: "/inbox", done: hasMessage },
+  ];
+
+  const doneCount = milestones.filter((m) => m.done).length;
+  return { doneCount, totalCount: milestones.length, milestones };
 }
 
 export function getWorkspaceAnalytics(workspaceId: string, range: AnalyticsDateRange = "30d") {
@@ -182,29 +198,57 @@ export function getWorkspaceAnalytics(workspaceId: string, range: AnalyticsDateR
     overdueCount: number;
   };
 
-  const collectedWindow = dataDb
+  // Deduplicate Receipt vouchers vs Sales.paid_amount_paise per (company, party) so collections are never double-counted (P1-23 / ACT-5.1)
+  const collectedPartyRows = dataDb
     .prepare(
       `SELECT
-        COALESCE(SUM(CASE
-          WHEN voucher_type = 'Receipt' THEN amount_paise
-          WHEN voucher_type = 'Sales' THEN paid_amount_paise
-          ELSE 0
-        END), 0) AS collectedPaise,
-        COALESCE(SUM(CASE WHEN voucher_type = 'Sales' AND payment_status = 'paid' THEN 1 ELSE 0 END), 0) AS paidBillsCount
-      FROM tally_vouchers
-      WHERE voucher_date >= ?`
+         COALESCE(company_id, '') AS companyId,
+         LOWER(TRIM(party_name)) AS partyKey,
+         COALESCE(SUM(CASE WHEN voucher_type = 'Receipt' THEN amount_paise ELSE 0 END), 0) AS receiptPaise,
+         COALESCE(SUM(CASE WHEN voucher_type = 'Sales' THEN paid_amount_paise ELSE 0 END), 0) AS salesPaidPaise,
+         COALESCE(SUM(CASE WHEN voucher_type = 'Sales' AND payment_status = 'paid' THEN 1 ELSE 0 END), 0) AS paidBillsCount
+       FROM tally_vouchers
+       WHERE voucher_date >= ? AND payment_status != 'cancelled'
+       GROUP BY COALESCE(company_id, ''), LOWER(TRIM(party_name))`
     )
-    .get(startMs) as { collectedPaise: number; paidBillsCount: number };
+    .all(startMs) as Array<{
+    companyId: string;
+    partyKey: string;
+    receiptPaise: number;
+    salesPaidPaise: number;
+    paidBillsCount: number;
+  }>;
+
+  const collectedWindow = collectedPartyRows.reduce(
+    (acc, r) => ({
+      collectedPaise:
+        acc.collectedPaise + Math.max(Number(r.receiptPaise), Number(r.salesPaidPaise)),
+      paidBillsCount: acc.paidBillsCount + Number(r.paidBillsCount),
+    }),
+    { collectedPaise: 0, paidBillsCount: 0 }
+  );
 
   const collectedPrev =
     range === "all"
       ? { collectedPaise: 0 }
-      : (dataDb
-          .prepare(
-            `SELECT COALESCE(SUM(CASE WHEN voucher_type = 'Receipt' THEN amount_paise WHEN voucher_type = 'Sales' THEN paid_amount_paise ELSE 0 END), 0) AS collectedPaise
-             FROM tally_vouchers WHERE voucher_date >= ? AND voucher_date < ?`
-          )
-          .get(prevStartMs, startMs) as { collectedPaise: number });
+      : (() => {
+          const prevRows = dataDb
+            .prepare(
+              `SELECT
+                 COALESCE(SUM(CASE WHEN voucher_type = 'Receipt' THEN amount_paise ELSE 0 END), 0) AS receiptPaise,
+                 COALESCE(SUM(CASE WHEN voucher_type = 'Sales' THEN paid_amount_paise ELSE 0 END), 0) AS salesPaidPaise
+               FROM tally_vouchers
+               WHERE voucher_date >= ? AND voucher_date < ? AND payment_status != 'cancelled'
+               GROUP BY COALESCE(company_id, ''), LOWER(TRIM(party_name))`
+            )
+            .all(prevStartMs, startMs) as Array<{ receiptPaise: number; salesPaidPaise: number }>;
+          return {
+            collectedPaise: prevRows.reduce(
+              (sum, r) => sum + Math.max(Number(r.receiptPaise), Number(r.salesPaidPaise)),
+              0
+            ),
+          };
+        })();
 
   // Receivables Aging Buckets
   const unpaidSalesRows = dataDb
@@ -408,18 +452,28 @@ export function getWorkspaceAnalytics(workspaceId: string, range: AnalyticsDateR
   }
 
   const tallyByDay = new Map<string, { raised: number; collected: number }>();
-  const tallyDayRows = dataDb
+  const tallyDayPartyRows = dataDb
     .prepare(
       `SELECT strftime('%Y-%m-%d', voucher_date / 1000, 'unixepoch') AS dayKey,
               SUM(CASE WHEN voucher_type = 'Sales' THEN amount_paise ELSE 0 END) AS raised,
-              SUM(CASE WHEN voucher_type = 'Receipt' THEN amount_paise WHEN voucher_type = 'Sales' THEN paid_amount_paise ELSE 0 END) AS collected
+              SUM(CASE WHEN voucher_type = 'Receipt' THEN amount_paise ELSE 0 END) AS receiptPaise,
+              SUM(CASE WHEN voucher_type = 'Sales' THEN paid_amount_paise ELSE 0 END) AS salesPaidPaise
        FROM tally_vouchers
-       WHERE voucher_date >= ?
-       GROUP BY dayKey`
+       WHERE voucher_date >= ? AND payment_status != 'cancelled'
+       GROUP BY dayKey, COALESCE(company_id, ''), LOWER(TRIM(party_name))`
     )
-    .all(now - days * 86_400_000) as Array<{ dayKey: string; raised: number; collected: number }>;
-  for (const r of tallyDayRows) {
-    if (r.dayKey) tallyByDay.set(r.dayKey, { raised: Number(r.raised), collected: Number(r.collected) });
+    .all(now - days * 86_400_000) as Array<{
+    dayKey: string;
+    raised: number;
+    receiptPaise: number;
+    salesPaidPaise: number;
+  }>;
+  for (const r of tallyDayPartyRows) {
+    if (!r.dayKey) continue;
+    const prev = tallyByDay.get(r.dayKey) ?? { raised: 0, collected: 0 };
+    prev.raised += Number(r.raised);
+    prev.collected += Math.max(Number(r.receiptPaise), Number(r.salesPaidPaise));
+    tallyByDay.set(r.dayKey, prev);
   }
 
   const walletByDay = new Map<string, number>();
@@ -695,9 +749,9 @@ export function exportWorkspaceAnalyticsCsv(workspaceId: string, range: Analytic
   for (const d of report.dailySeries) {
     lines.push(
       [
-        d.dayKey,
-        d.messagesIn,
-        d.messagesOut,
+        escapeCsvCellSafe(d.dayKey),
+        escapeCsvCellSafe(d.messagesIn),
+        escapeCsvCellSafe(d.messagesOut),
         (d.adSpendPaise / 100).toFixed(2),
         (d.salesLinkedPaise / 100).toFixed(2),
         (d.billsRaisedPaise / 100).toFixed(2),
@@ -750,8 +804,16 @@ export function getPlatformAdminAnalytics() {
       ?.s ?? 0
   );
   const totalInvoicedRevenuePaise = Number(
-    (rawCtrl.prepare("SELECT COALESCE(SUM(total_paise), 0) AS s FROM invoices WHERE status = 'paid'").get() as { s: number } | undefined)
-      ?.s ?? 0
+    (
+      rawCtrl
+        .prepare(
+          `SELECT COALESCE(SUM(total_paise), 0) AS s
+           FROM invoices
+           WHERE (doc_type = 'tax_invoice' AND status IN ('paid','credited'))
+              OR (doc_type = 'credit_note' AND status = 'issued')`
+        )
+        .get() as { s: number } | undefined
+    )?.s ?? 0
   );
   const totalDiskBytes = Number(
     (

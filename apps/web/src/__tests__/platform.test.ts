@@ -105,7 +105,7 @@ describe("RSL Marketing Platform — Core Security, Tenancy, Tally, Backup & Led
       createInvoice: true,
     });
     expect(topup.balancePaise).toBe(500000);
-    expect(topup.invoiceNumber).toMatch(/^RSL\/\d{2}-\d{2}\/0001$/);
+    expect(topup.invoiceNumber).toMatch(/^ADV\/\d{2}-\d{2}\/0001$/);
 
     // Attempting UPDATE or DELETE on ledger_entries MUST fail via SQLite trigger
     const rawCtrl = controlDb().$client;

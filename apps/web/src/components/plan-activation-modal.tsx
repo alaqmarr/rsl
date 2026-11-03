@@ -23,6 +23,8 @@ export interface PlanActivationModalProps {
   isPending?: boolean;
   pendingCycle?: string | null;
   workspaceSlug: string;
+  buyerStateCode?: string;
+  supplierStateCode?: string;
   billingSettings: {
     upiQrMode?: "bank_account" | "upi_id";
     upiId: string;
@@ -30,6 +32,7 @@ export interface PlanActivationModalProps {
     bankName: string;
     accountNumber: string;
     ifscCode: string;
+    gstin?: string;
   };
   triggerLabel?: string;
   triggerClassName?: string;
@@ -103,6 +106,8 @@ export function PlanActivationModal({
   isPending = false,
   pendingCycle,
   workspaceSlug,
+  buyerStateCode,
+  supplierStateCode,
   billingSettings,
   triggerLabel = "Request Activation",
   triggerClassName,
@@ -141,7 +146,14 @@ export function PlanActivationModal({
         ? quarterlyPaise
         : monthlyPaise;
 
-  const gstPaise = Math.round(subtotalPaise * 0.18);
+  const effectiveSupplierState =
+    supplierStateCode?.trim() || billingSettings.gstin?.trim().slice(0, 2) || "27";
+  const effectiveBuyerState = buyerStateCode?.trim() || effectiveSupplierState;
+  const isIntraState = effectiveBuyerState === effectiveSupplierState;
+  const cgstPaise = isIntraState ? Math.round(subtotalPaise * 0.09) : 0;
+  const sgstPaise = isIntraState ? Math.round(subtotalPaise * 0.09) : 0;
+  const igstPaise = isIntraState ? 0 : Math.round(subtotalPaise * 0.18);
+  const gstPaise = cgstPaise + sgstPaise + igstPaise;
   const totalPayablePaise = subtotalPaise + gstPaise;
   const amountDecimalStr = (totalPayablePaise / 100).toFixed(2);
 
@@ -503,18 +515,44 @@ export function PlanActivationModal({
                           {formatInrClient(subtotalPaise, true)}
                         </span>
                       </div>
-                      <div className="mt-1.5 flex items-center justify-between gap-3 text-zinc-600">
-                        <span className="min-w-0 truncate">GST (18% • SAC 998314)</span>
-                        <span className="shrink-0 font-semibold text-slate-900 tabular-nums">
-                          {formatInrClient(gstPaise, true)}
-                        </span>
-                      </div>
+                      {isIntraState ? (
+                        <>
+                          <div className="mt-1.5 flex items-center justify-between gap-3 text-zinc-600">
+                            <span className="min-w-0 truncate">
+                              CGST (9% Intra-State • State {effectiveBuyerState})
+                            </span>
+                            <span className="shrink-0 font-semibold text-slate-900 tabular-nums">
+                              {formatInrClient(cgstPaise, true)}
+                            </span>
+                          </div>
+                          <div className="mt-1 flex items-center justify-between gap-3 text-zinc-600">
+                            <span className="min-w-0 truncate">
+                              SGST (9% Intra-State • SAC 998314)
+                            </span>
+                            <span className="shrink-0 font-semibold text-slate-900 tabular-nums">
+                              {formatInrClient(sgstPaise, true)}
+                            </span>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="mt-1.5 flex items-center justify-between gap-3 text-zinc-600">
+                          <span className="min-w-0 truncate">
+                            IGST (18% Inter-State • POS {effectiveBuyerState} • SAC 998314)
+                          </span>
+                          <span className="shrink-0 font-semibold text-slate-900 tabular-nums">
+                            {formatInrClient(igstPaise, true)}
+                          </span>
+                        </div>
+                      )}
                       <div className="mt-2.5 flex items-center justify-between gap-3 border-t border-zinc-200/75 pt-2.5">
                         <span className="font-bold text-slate-900">Total Payable Now</span>
                         <span className="shrink-0 text-[17px] font-extrabold text-emerald-700 tabular-nums">
                           {formatInrClient(totalPayablePaise, true)}
                         </span>
                       </div>
+                      <p className="mt-1.5 text-[10.5px] text-zinc-500">
+                        Exact paise-rounded tax split matches your statutory GST Tax Invoice to the single paisa.
+                      </p>
                     </div>
                   </div>
 

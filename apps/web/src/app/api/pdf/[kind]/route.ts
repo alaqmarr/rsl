@@ -92,6 +92,8 @@ export async function GET(
 
     const pdfBytes = await generateGstInvoicePdfBytes({
       invoiceNumber: detail.invoiceNumber,
+      docType: detail.docType,
+      linkedInvoiceNumber: detail.linkedInvoiceNumber,
       financialYear: rawInv?.financialYear || "26-27",
       description: detail.description,
       subtotalPaise: detail.subtotalPaise,

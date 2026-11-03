@@ -291,12 +291,30 @@ export default async function AdminInvoicesAndLedgerPage({
                         >
                           {inv.invoiceNumber}
                         </ActionLink>
-                        <div className="mt-0.5 text-[11px] text-zinc-500">
-                          {new Date(inv.issuedAt).toLocaleDateString("en-IN", {
-                            day: "2-digit",
-                            month: "short",
-                            year: "numeric",
-                          })}
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500">
+                          <span>
+                            {new Date(inv.issuedAt).toLocaleDateString("en-IN", {
+                              day: "2-digit",
+                              month: "short",
+                              year: "numeric",
+                            })}
+                          </span>
+                          <StatusPill
+                            label={
+                              inv.docType === "advance_receipt"
+                                ? "ADVANCE"
+                                : inv.docType === "credit_note"
+                                  ? "CREDIT NOTE"
+                                  : "TAX INV"
+                            }
+                            tone={
+                              inv.docType === "credit_note"
+                                ? "ruby"
+                                : inv.docType === "advance_receipt"
+                                  ? "sky"
+                                  : "emerald"
+                            }
+                          />
                         </div>
                       </td>
 
@@ -401,7 +419,7 @@ export default async function AdminInvoicesAndLedgerPage({
                                 </SubmitButton>
                               </form>
                             </>
-                          ) : canManageBilling && inv.status === "paid" ? (
+                          ) : canManageBilling && inv.status === "paid" && inv.docType === "tax_invoice" ? (
                             <form action={staffUpdateInvoiceStatusAction} className="inline-flex">
                               <input type="hidden" name="invoiceId" value={inv.id} />
                               <input type="hidden" name="status" value="void" />
@@ -409,11 +427,17 @@ export default async function AdminInvoicesAndLedgerPage({
                               <SubmitButton
                                 className="adm-btn-secondary py-1 text-[11px]"
                                 spinnerSize="xs"
-                                pendingText="Voiding..."
+                                pendingText="Issuing CN..."
                               >
-                                Mark Void
+                                Issue Credit Note
                               </SubmitButton>
                             </form>
+                          ) : inv.status === "credited" ? (
+                            <span className="text-[11px] text-zinc-500">Credited (Sec. 34)</span>
+                          ) : inv.docType === "credit_note" ? (
+                            <span className="text-[11px] text-rose-700 font-medium">Credit Note</span>
+                          ) : inv.docType === "advance_receipt" ? (
+                            <span className="text-[11px] text-sky-700 font-medium">0% GST Deposit</span>
                           ) : (
                             <span className="text-[11px] text-zinc-400">Voided</span>
                           )}

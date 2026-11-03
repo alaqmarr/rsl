@@ -1,5 +1,14 @@
 import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
-import { formatInr, getEnv, newId, RslError, verifyHmac } from "@rsl/core";
+import {
+  computeIndianFinancialYearIst,
+  escapeCsvCellSafe,
+  formatInr,
+  formatIstDateIso,
+  getEnv,
+  newId,
+  RslError,
+  verifyHmac,
+} from "@rsl/core";
 import { controlSchema } from "@rsl/database";
 import { sendBillingNotification } from "@rsl/notifications";
 import { controlDb, getPlatformRazorpayConfig } from "@rsl/tenancy";
@@ -8,6 +17,7 @@ import {
   type BillingCycle,
   buildUpiPaymentPayload,
   computeDefaultCycleAmountsPaise,
+  computeGstTaxSplit,
   diagnoseUpiPayeeConfig,
   formatBankAccountUpiAddress,
   isEmailLikeHandle,
@@ -1034,13 +1044,77 @@ export function requireEntitlement(workspaceId: string, serviceKey: string): voi
   }
 }
 
-function getIndianFinancialYear(date = new Date()): string {
-  const year = date.getUTCFullYear();
-  const month = date.getUTCMonth() + 1; // 1-12
-  if (month >= 4) {
-    return `${String(year).slice(2)}-${String(year + 1).slice(2)}`;
-  }
-  return `${String(year - 1).slice(2)}-${String(year).slice(2)}`;
+export type BillingDocumentType = "tax_invoice" | "advance_receipt" | "credit_note";
+
+const DOC_SERIES_PREFIX: Readonly<Record<BillingDocumentType, string>> = {
+  tax_invoice: "RSL",
+  advance_receipt: "ADV",
+  credit_note: "CN",
+};
+
+/**
+ * Atomically allocates the next sequential document number (`RSL/YY-YY/0001`, `ADV/YY-YY/0001`, `CN/YY-YY/0001`)
+ * via `controlSchema.invoiceSequences` so deletions, credit notes, or concurrent webhooks never reuse numbers (P1-24 / ACT-5.4).
+ */
+export function allocateNextDocumentNumber(
+  docType: BillingDocumentType,
+  fy = computeIndianFinancialYearIst()
+): string {
+  const db = controlDb();
+  const raw = db.$client;
+  const prefix = DOC_SERIES_PREFIX[docType];
+  const seriesKey = `${prefix}:${fy}`;
+
+  const tx = raw.transaction(() => {
+    const existingSeq = db
+      .select()
+      .from(controlSchema.invoiceSequences)
+      .where(eq(controlSchema.invoiceSequences.seriesKey, seriesKey))
+      .get();
+
+    let nextVal = (existingSeq?.lastValue ?? 0) + 1;
+
+    if (!existingSeq) {
+      const likePrefix = `${prefix}/${fy}/%`;
+      const priorRows = raw
+        .prepare("SELECT invoice_number AS n FROM invoices WHERE invoice_number LIKE ?")
+        .all(likePrefix) as Array<{ n: string }>;
+      let maxObserved = 0;
+      for (const r of priorRows) {
+        const tail = Number(r.n.split("/").pop() || "0");
+        if (Number.isInteger(tail) && tail > maxObserved) {
+          maxObserved = tail;
+        }
+      }
+      nextVal = maxObserved + 1;
+    }
+
+    const now = Date.now();
+    db.insert(controlSchema.invoiceSequences)
+      .values({
+        seriesKey,
+        lastValue: nextVal,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: controlSchema.invoiceSequences.seriesKey,
+        set: {
+          lastValue: nextVal,
+          updatedAt: now,
+        },
+      })
+      .run();
+
+    return `${prefix}/${fy}/${String(nextVal).padStart(4, "0")}`;
+  });
+
+  return raw.inTransaction ? tx() : tx.immediate();
+}
+
+export function getSupplierGstStateCode(): string {
+  const settings = getPlatformBillingSettings();
+  const prefix = (settings.gstin || "").trim().slice(0, 2);
+  return /^\d{2}$/.test(prefix) ? prefix : "27";
 }
 
 export function createGstInvoice(params: {
@@ -1048,58 +1122,134 @@ export function createGstInvoice(params: {
   description: string;
   subtotalPaise: number;
   status?: "paid" | "issued";
+  externalRefKey?: string | null;
 }): typeof controlSchema.invoices.$inferSelect {
   const db = controlDb();
-  const ws = db
-    .select()
-    .from(controlSchema.workspaces)
-    .where(eq(controlSchema.workspaces.id, params.workspaceId))
-    .get();
-  if (!ws) throw new Error("Workspace not found");
+  const raw = db.$client;
 
-  const fy = getIndianFinancialYear();
-  const countRow = db
-    .select({ c: sql<number>`count(*)` })
-    .from(controlSchema.invoices)
-    .where(eq(controlSchema.invoices.financialYear, fy))
-    .get();
+  const tx = raw.transaction(() => {
+    const cleanRef = params.externalRefKey?.trim() || null;
+    if (cleanRef) {
+      const existingByRef = db
+        .select()
+        .from(controlSchema.invoices)
+        .where(eq(controlSchema.invoices.externalRefKey, cleanRef))
+        .get();
+      if (existingByRef) return existingByRef;
+    }
 
-  const seq = (countRow?.c ?? 0) + 1;
-  const invoiceNumber = `RSL/${fy}/${String(seq).padStart(4, "0")}`;
+    const ws = db
+      .select()
+      .from(controlSchema.workspaces)
+      .where(eq(controlSchema.workspaces.id, params.workspaceId))
+      .get();
+    if (!ws) throw new Error("Workspace not found");
 
-  // Platform GST state = 27 (Maharashtra). Intra-state = 9% CGST + 9% SGST; Inter-state = 18% IGST
-  const isIntraState = (ws.stateCode || "27") === "27";
-  const cgstPaise = isIntraState ? Math.round(params.subtotalPaise * 0.09) : 0;
-  const sgstPaise = isIntraState ? Math.round(params.subtotalPaise * 0.09) : 0;
-  const igstPaise = isIntraState ? 0 : Math.round(params.subtotalPaise * 0.18);
-  const totalPaise = params.subtotalPaise + cgstPaise + sgstPaise + igstPaise;
-  const now = Date.now();
-  const id = newId();
-  const status = params.status ?? "paid";
+    const fy = computeIndianFinancialYearIst();
+    const invoiceNumber = allocateNextDocumentNumber("tax_invoice", fy);
 
-  const row = {
-    id,
-    workspaceId: params.workspaceId,
-    invoiceNumber,
-    docType: "tax_invoice",
-    linkedInvoiceId: null,
-    externalRefKey: null,
-    financialYear: fy,
-    description: params.description,
-    subtotalPaise: params.subtotalPaise,
-    cgstPaise,
-    sgstPaise,
-    igstPaise,
-    totalPaise,
-    currency: "INR",
-    hsnSac: "998314",
-    status,
-    issuedAt: now,
-    paidAt: status === "paid" ? now : null,
-  };
+    const supplierStateCode = getSupplierGstStateCode();
+    const split = computeGstTaxSplit({
+      subtotalPaise: params.subtotalPaise,
+      buyerStateCode: ws.stateCode || supplierStateCode,
+      supplierStateCode,
+    });
 
-  db.insert(controlSchema.invoices).values(row).run();
-  return row;
+    const now = Date.now();
+    const id = newId();
+    const status = params.status ?? "paid";
+
+    const row: typeof controlSchema.invoices.$inferSelect = {
+      id,
+      workspaceId: params.workspaceId,
+      invoiceNumber,
+      docType: "tax_invoice",
+      linkedInvoiceId: null,
+      externalRefKey: cleanRef,
+      financialYear: fy,
+      description: params.description,
+      subtotalPaise: split.subtotalPaise,
+      cgstPaise: split.cgstPaise,
+      sgstPaise: split.sgstPaise,
+      igstPaise: split.igstPaise,
+      totalPaise: split.totalPaise,
+      currency: "INR",
+      hsnSac: "998314",
+      status,
+      issuedAt: now,
+      paidAt: status === "paid" ? now : null,
+    };
+
+    db.insert(controlSchema.invoices).values(row).run();
+    return row;
+  });
+
+  return raw.inTransaction ? tx() : tx.immediate();
+}
+
+/**
+ * Issues a statutory Advance Receipt Voucher (`ADV/YY-YY/0001`) at 0% GST when a customer deposits
+ * funds into their refundable/prepaid messaging wallet. GST Tax Invoices (`RSL/...`) are issued
+ * strictly upon taxable plan/service consumption (P0-06 / ACT-2.1).
+ */
+export function createAdvanceReceiptVoucher(params: {
+  workspaceId: string;
+  description: string;
+  amountPaise: number;
+  externalRefKey?: string | null;
+}): typeof controlSchema.invoices.$inferSelect {
+  const db = controlDb();
+  const raw = db.$client;
+
+  const tx = raw.transaction(() => {
+    const cleanRef = params.externalRefKey?.trim() || null;
+    if (cleanRef) {
+      const existingByRef = db
+        .select()
+        .from(controlSchema.invoices)
+        .where(eq(controlSchema.invoices.externalRefKey, cleanRef))
+        .get();
+      if (existingByRef) return existingByRef;
+    }
+
+    const ws = db
+      .select()
+      .from(controlSchema.workspaces)
+      .where(eq(controlSchema.workspaces.id, params.workspaceId))
+      .get();
+    if (!ws) throw new Error("Workspace not found");
+
+    const cleanPaise = Math.max(0, Math.round(params.amountPaise));
+    const fy = computeIndianFinancialYearIst();
+    const voucherNumber = allocateNextDocumentNumber("advance_receipt", fy);
+    const now = Date.now();
+
+    const row: typeof controlSchema.invoices.$inferSelect = {
+      id: newId(),
+      workspaceId: params.workspaceId,
+      invoiceNumber: voucherNumber,
+      docType: "advance_receipt",
+      linkedInvoiceId: null,
+      externalRefKey: cleanRef,
+      financialYear: fy,
+      description: params.description,
+      subtotalPaise: cleanPaise,
+      cgstPaise: 0,
+      sgstPaise: 0,
+      igstPaise: 0,
+      totalPaise: cleanPaise,
+      currency: "INR",
+      hsnSac: "998314",
+      status: "paid",
+      issuedAt: now,
+      paidAt: now,
+    };
+
+    db.insert(controlSchema.invoices).values(row).run();
+    return row;
+  });
+
+  return raw.inTransaction ? tx() : tx.immediate();
 }
 
 export function activateServiceEntitlement(params: {
@@ -1250,6 +1400,12 @@ export function creditWallet(params: {
       .get();
 
     if (!existing) {
+      const debitAccount =
+        params.entryType === "refund"
+          ? "Recognized SaaS & Messaging Revenue"
+          : params.entryType === "staff_adjustment"
+            ? "Manual Staff Wallet Adjustment"
+            : "Bank / Clearing Settlement";
       db.insert(controlSchema.ledgerEntries)
         .values({
           id: newId(),
@@ -1257,6 +1413,8 @@ export function creditWallet(params: {
           entryType: params.entryType ?? "credit",
           amountPaise: params.amountPaise,
           currency: "INR",
+          debitAccount,
+          creditAccount: "Customer Prepaid Wallet Liability",
           description: params.description,
           idempotencyKey: params.idempotencyKey,
           actorId: params.actorId,
@@ -1266,28 +1424,31 @@ export function creditWallet(params: {
     }
 
     let invoiceNumber: string | undefined;
-    if (params.createInvoice && !existing) {
-      const inv = createGstInvoice({
+    if (params.createInvoice) {
+      const extKey = `wallet_credit:${params.workspaceId}:${params.idempotencyKey}`;
+      const inv = createAdvanceReceiptVoucher({
         workspaceId: params.workspaceId,
-        description: `Prepaid Wallet Top-Up — ${params.description}`,
-        subtotalPaise: params.amountPaise,
-        status: "paid",
+        description: `Prepaid Wallet Deposit — ${params.description}`,
+        amountPaise: params.amountPaise,
+        externalRefKey: extKey,
       });
       invoiceNumber = inv.invoiceNumber;
 
-      db.insert(controlSchema.payments)
-        .values({
-          id: newId(),
-          workspaceId: params.workspaceId,
-          invoiceId: inv.id,
-          provider: "razorpay",
-          amountPaise: inv.totalPaise,
-          currency: "INR",
-          purpose: "wallet_topup",
-          status: "captured",
-          createdAt: Date.now(),
-        })
-        .run();
+      if (!existing) {
+        db.insert(controlSchema.payments)
+          .values({
+            id: newId(),
+            workspaceId: params.workspaceId,
+            invoiceId: inv.id,
+            provider: "razorpay",
+            amountPaise: inv.totalPaise,
+            currency: "INR",
+            purpose: "wallet_topup",
+            status: "captured",
+            createdAt: Date.now(),
+          })
+          .run();
+      }
     }
 
     return {
@@ -1344,6 +1505,13 @@ export function debitWallet(params: {
       );
     }
 
+    const creditAccount =
+      params.entryType === "staff_adjustment"
+        ? "Manual Staff Wallet Adjustment"
+        : params.entryType === "reserve"
+          ? "Reserved Outbound Usage Hold"
+          : "Recognized SaaS & Messaging Revenue";
+
     db.insert(controlSchema.ledgerEntries)
       .values({
         id: newId(),
@@ -1351,6 +1519,8 @@ export function debitWallet(params: {
         entryType: params.entryType ?? "debit",
         amountPaise: -Math.abs(params.amountPaise),
         currency: "INR",
+        debitAccount: "Customer Prepaid Wallet Liability",
+        creditAccount,
         serviceKey: params.serviceKey ?? null,
         description: params.description,
         idempotencyKey: params.idempotencyKey,
@@ -1514,11 +1684,11 @@ export function approveWalletRechargeRequest(params: {
     throw new RslError("RSL-VAL-1001", "Recharge request not found or already processed.");
   }
 
-  const inv = createGstInvoice({
+  const inv = createAdvanceReceiptVoucher({
     workspaceId: payment.workspaceId,
-    description: `Wallet Recharge (${payment.provider.toUpperCase()} Ref: ${payment.externalPaymentId ?? payment.id})`,
-    subtotalPaise: payment.amountPaise,
-    status: "paid",
+    description: `Prepaid Wallet Deposit (${payment.provider.toUpperCase()} Ref: ${payment.externalPaymentId ?? payment.id})`,
+    amountPaise: payment.amountPaise,
+    externalRefKey: `wallet_recharge:${payment.id}`,
   });
 
   const credited = creditWallet({
@@ -1584,7 +1754,8 @@ export async function createRazorpayOrderForWallet(params: {
     throw new RslError("RSL-VAL-1001", "Minimum wallet recharge is ₹100.");
   }
 
-  const amountWithGstPaise = Math.round(params.amountPaise * 1.18);
+  // Prepaid wallet deposits are collected at 0% GST (Advance Receipt Voucher); GST applies upon service consumption (P0-06)
+  const amountWithGstPaise = params.amountPaise;
   const authHeader = Buffer.from(`${rzp.keyId}:${rzp.keySecret}`).toString("base64");
   const resp = await fetch("https://api.razorpay.com/v1/orders", {
     method: "POST",
@@ -1662,18 +1833,18 @@ export function verifyRazorpayCheckoutAndCreditWallet(params: {
     throw new RslError("RSL-VAL-1001", "Matching payment order not found.");
   }
 
-  const inv = createGstInvoice({
+  const inv = createAdvanceReceiptVoucher({
     workspaceId: params.workspaceId,
-    description: `Online Wallet Recharge (Payment ${params.paymentId})`,
-    subtotalPaise: orderRow.amountPaise,
-    status: "paid",
+    description: `Online Prepaid Wallet Deposit (Payment ${params.paymentId})`,
+    amountPaise: orderRow.amountPaise,
+    externalRefKey: `rzp_payment:${params.paymentId}`,
   });
 
   const credited = creditWallet({
     workspaceId: params.workspaceId,
     amountPaise: orderRow.amountPaise,
     description: `Razorpay Wallet Recharge (${params.paymentId})`,
-    idempotencyKey: `rzp_pay:${params.paymentId}`,
+    idempotencyKey: `rzp_payment:${params.paymentId}`,
     actorId: params.actorId,
     entryType: "credit",
     createInvoice: false,
@@ -2307,6 +2478,20 @@ export function savePlatformBillingSettings(next: Partial<PlatformBillingSetting
   const candidateUpiId = next.upiId !== undefined ? next.upiId.trim() : current.upiId;
   const candidateIfsc = (next.ifscCode?.trim() || current.ifscCode).toUpperCase();
   const candidateAccount = (next.accountNumber?.trim() || current.accountNumber).replace(/\s+/g, "");
+
+  const candidateGstin = (next.gstin?.trim() || current.gstin).toUpperCase();
+  if (candidateGstin && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(candidateGstin)) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      `Supplier GSTIN "${candidateGstin}" is invalid. Enter a valid 15-character Indian GSTIN (for example: 27AAACR5055K1Z1).`
+    );
+  }
+  if (candidateGstin && !INDIA_GST_STATES[candidateGstin.slice(0, 2)]) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      `Supplier GSTIN prefix "${candidateGstin.slice(0, 2)}" does not match an Indian GST state code.`
+    );
+  }
 
   if (candidateUpiId && isEmailLikeHandle(candidateUpiId)) {
     throw new RslError(
@@ -2949,6 +3134,8 @@ export async function sweepAutomaticBillingReminders(nowMs = Date.now()): Promis
         upiId: settings.upiId,
         payeeName: settings.payeeName,
         subtotalPaise: grp.subtotalPaise,
+        buyerStateCode: ws.stateCode || "27",
+        supplierStateCode: settings.gstin.slice(0, 2) || "27",
         workspaceSlug: ws.slug,
         itemLabel: grp.label,
         billingCycle: grp.cycle,
@@ -3066,6 +3253,8 @@ export async function sendManualBillingReminder(params: {
     upiId: settings.upiId,
     payeeName: settings.payeeName,
     subtotalPaise,
+    buyerStateCode: ws.stateCode || "27",
+    supplierStateCode: settings.gstin.slice(0, 2) || "27",
     workspaceSlug: ws.slug,
     itemLabel: summary,
     billingCycle: cycle,
@@ -3205,11 +3394,104 @@ export function staffCreateCustomInvoice(params: {
   return inv;
 }
 
+/**
+ * Issues a statutory Section 34 GST Credit Note (`CN/YY-YY/0001`) referencing an existing GST Tax Invoice,
+ * preserving the immutable audit trail required for GSTR-1 Table 9B reporting instead of deleting/erasing invoices (ACT-5.2).
+ */
+export function issueGstCreditNote(params: {
+  invoiceId: string;
+  reason?: string;
+  staffId?: string;
+  refundToWallet?: boolean;
+}): typeof controlSchema.invoices.$inferSelect {
+  const db = controlDb();
+  const raw = db.$client;
+
+  const tx = raw.transaction(() => {
+    const inv = db
+      .select()
+      .from(controlSchema.invoices)
+      .where(eq(controlSchema.invoices.id, params.invoiceId))
+      .get();
+    if (!inv) {
+      throw new RslError("RSL-VAL-1001", "Original GST invoice not found.");
+    }
+    if (inv.docType === "credit_note") {
+      return inv;
+    }
+
+    const existingCn = db
+      .select()
+      .from(controlSchema.invoices)
+      .where(
+        and(
+          eq(controlSchema.invoices.linkedInvoiceId, inv.id),
+          eq(controlSchema.invoices.docType, "credit_note")
+        )
+      )
+      .get();
+    if (existingCn) {
+      return existingCn;
+    }
+
+    const fy = computeIndianFinancialYearIst();
+    const cnNumber = allocateNextDocumentNumber("credit_note", fy);
+    const now = Date.now();
+    const reasonText = params.reason?.trim() || "Statutory reversal / cancellation under CGST Sec. 34";
+
+    const cnRow: typeof controlSchema.invoices.$inferSelect = {
+      id: newId(),
+      workspaceId: inv.workspaceId,
+      invoiceNumber: cnNumber,
+      docType: "credit_note",
+      linkedInvoiceId: inv.id,
+      externalRefKey: `credit_note_for:${inv.id}`,
+      financialYear: fy,
+      description: `Credit Note against ${inv.invoiceNumber} — ${reasonText}`,
+      subtotalPaise: -Math.abs(inv.subtotalPaise),
+      cgstPaise: -Math.abs(inv.cgstPaise),
+      sgstPaise: -Math.abs(inv.sgstPaise),
+      igstPaise: -Math.abs(inv.igstPaise),
+      totalPaise: -Math.abs(inv.totalPaise),
+      currency: inv.currency || "INR",
+      hsnSac: inv.hsnSac || "998314",
+      status: "issued",
+      issuedAt: now,
+      paidAt: now,
+    };
+
+    db.insert(controlSchema.invoices).values(cnRow).run();
+
+    db.update(controlSchema.invoices)
+      .set({ status: "credited" })
+      .where(eq(controlSchema.invoices.id, inv.id))
+      .run();
+
+    if (params.refundToWallet && Math.abs(inv.subtotalPaise) > 0) {
+      creditWallet({
+        workspaceId: inv.workspaceId,
+        amountPaise: Math.abs(inv.subtotalPaise),
+        description: `Credit Note ${cnNumber} refund (${inv.invoiceNumber})`,
+        idempotencyKey: `cn_refund:${cnRow.id}`,
+        actorId: params.staffId || "staff_finance",
+        entryType: "refund",
+        createInvoice: false,
+      });
+    }
+
+    return cnRow;
+  });
+
+  return raw.inTransaction ? tx() : tx.immediate();
+}
+
 export function staffUpdateInvoiceStatus(params: {
   invoiceId: string;
   status: "paid" | "void";
   paymentMethod?: string;
   paymentReference?: string;
+  reason?: string;
+  staffId?: string;
 }) {
   const db = controlDb();
   const inv = db
@@ -3219,6 +3501,19 @@ export function staffUpdateInvoiceStatus(params: {
     .get();
   if (!inv) {
     throw new RslError("RSL-VAL-1001", "Invoice not found.");
+  }
+
+  // Statutory Section 34 Credit Note when reversing a GST Tax Invoice (ACT-5.2)
+  if (params.status === "void" && inv.docType === "tax_invoice") {
+    issueGstCreditNote({
+      invoiceId: inv.id,
+      reason: params.reason || params.paymentReference || "Reversed via Staff Finance Console",
+      staffId: params.staffId,
+    });
+    return (
+      db.select().from(controlSchema.invoices).where(eq(controlSchema.invoices.id, inv.id)).get() ??
+      inv
+    );
   }
 
   const now = Date.now();
@@ -3292,6 +3587,9 @@ export const INDIA_GST_STATES: Readonly<Record<string, string>> = {
 export interface GstInvoiceDetail {
   id: string;
   invoiceNumber: string;
+  docType: string;
+  linkedInvoiceId: string | null;
+  linkedInvoiceNumber: string | null;
   workspaceId: string;
   description: string;
   sacCode: string;
@@ -3350,13 +3648,24 @@ export function getInvoiceDetailById(
     .orderBy(desc(controlSchema.payments.createdAt))
     .get();
 
+  const linkedInv = inv.linkedInvoiceId
+    ? db
+        .select({ invoiceNumber: controlSchema.invoices.invoiceNumber })
+        .from(controlSchema.invoices)
+        .where(eq(controlSchema.invoices.id, inv.linkedInvoiceId))
+        .get()
+    : null;
+
   const settings = getPlatformBillingSettings();
-  const supplierStateCode = settings.gstin.slice(0, 2) || "27";
-  const buyerStateCode = biz?.stateCode || "27";
+  const supplierStateCode = getSupplierGstStateCode();
+  const buyerStateCode = biz?.stateCode || supplierStateCode;
 
   return {
     id: inv.id,
     invoiceNumber: inv.invoiceNumber,
+    docType: inv.docType || "tax_invoice",
+    linkedInvoiceId: inv.linkedInvoiceId ?? null,
+    linkedInvoiceNumber: linkedInv?.invoiceNumber ?? null,
     workspaceId: inv.workspaceId,
     description: inv.description,
     sacCode: inv.hsnSac || "998314",
@@ -3388,5 +3697,137 @@ export function getInvoiceDetailById(
     paymentMethod: payment?.provider ?? null,
     paymentReference: payment?.externalPaymentId ?? null,
   };
+}
+
+function buildGstr1CsvFromRows(
+  rows: Array<typeof controlSchema.invoices.$inferSelect>,
+  bizMap: Map<string, typeof controlSchema.workspaces.$inferSelect>,
+  invNumById: Map<string, string>,
+  supplierStateCode: string
+): string {
+  const header = [
+    "DocumentType",
+    "InvoiceNumber",
+    "InvoiceDateIST",
+    "RecipientGSTIN",
+    "RecipientLegalName",
+    "PlaceOfSupplyCode",
+    "PlaceOfSupplyState",
+    "ReverseCharge",
+    "InvoiceType",
+    "HSN_SAC",
+    "TaxRatePct",
+    "TaxableValueINR",
+    "IGSTAmountINR",
+    "CGSTAmountINR",
+    "SGSTAmountINR",
+    "TotalInvoiceValueINR",
+    "LinkedInvoiceNumber",
+    "Status",
+    "Description",
+  ].join(",");
+
+  const lines = rows.map((inv) => {
+    const biz = bizMap.get(inv.workspaceId);
+    const gstin = biz?.gstin?.trim() || "";
+    const posCode = biz?.stateCode || supplierStateCode;
+    const posState = INDIA_GST_STATES[posCode] ?? `State ${posCode}`;
+    const docType = inv.docType || "tax_invoice";
+    const taxRatePct = docType === "advance_receipt" ? 0 : 18;
+    const invoiceType =
+      docType === "credit_note"
+        ? gstin
+          ? "CDNR"
+          : "CDNUR"
+        : docType === "advance_receipt"
+          ? "AT_ADVANCE"
+          : gstin
+            ? "B2B_REGULAR"
+            : "B2C_SMALL";
+    const linkedNo = inv.linkedInvoiceId ? invNumById.get(inv.linkedInvoiceId) || "" : "";
+
+    return [
+      escapeCsvCellSafe(docType),
+      escapeCsvCellSafe(inv.invoiceNumber),
+      escapeCsvCellSafe(formatIstDateIso(inv.issuedAt)),
+      escapeCsvCellSafe(gstin),
+      escapeCsvCellSafe(biz?.name ?? inv.workspaceId),
+      escapeCsvCellSafe(posCode),
+      escapeCsvCellSafe(posState),
+      escapeCsvCellSafe("N"),
+      escapeCsvCellSafe(invoiceType),
+      escapeCsvCellSafe(inv.hsnSac || "998314"),
+      escapeCsvCellSafe(taxRatePct),
+      (inv.subtotalPaise / 100).toFixed(2),
+      (inv.igstPaise / 100).toFixed(2),
+      (inv.cgstPaise / 100).toFixed(2),
+      (inv.sgstPaise / 100).toFixed(2),
+      (inv.totalPaise / 100).toFixed(2),
+      escapeCsvCellSafe(linkedNo),
+      escapeCsvCellSafe(inv.status.toUpperCase()),
+      escapeCsvCellSafe(inv.description),
+    ].join(",");
+  });
+
+  return [header, ...lines].join("\r\n");
+}
+
+/**
+ * Exports GSTR-1 / ITC-ready CSV for a single workspace with OWASP CSV formula neutralization (ACT-5.3, P2-09).
+ */
+export function exportWorkspaceGstInvoicesCsv(workspaceId: string): string {
+  const db = controlDb();
+  const rows = db
+    .select()
+    .from(controlSchema.invoices)
+    .where(eq(controlSchema.invoices.workspaceId, workspaceId))
+    .orderBy(desc(controlSchema.invoices.issuedAt))
+    .all();
+
+  const biz = db
+    .select()
+    .from(controlSchema.workspaces)
+    .where(eq(controlSchema.workspaces.id, workspaceId))
+    .get();
+  const bizMap = new Map<string, typeof controlSchema.workspaces.$inferSelect>();
+  if (biz) bizMap.set(biz.id, biz);
+
+  const invNumById = new Map(rows.map((r) => [r.id, r.invoiceNumber]));
+  return buildGstr1CsvFromRows(rows, bizMap, invNumById, getSupplierGstStateCode());
+}
+
+/**
+ * Exports platform-wide GSTR-1 CSV (B2B / B2CS / CDNR / Advance Receipts) with OWASP CSV formula neutralization (ACT-5.3, P2-09).
+ */
+export function exportPlatformGstr1Csv(filter?: {
+  financialYear?: string;
+  status?: string;
+  q?: string;
+}): string {
+  const db = controlDb();
+  const allRows = db
+    .select()
+    .from(controlSchema.invoices)
+    .orderBy(desc(controlSchema.invoices.issuedAt))
+    .limit(5000)
+    .all();
+
+  const businesses = db.select().from(controlSchema.workspaces).all();
+  const bizMap = new Map(businesses.map((b) => [b.id, b]));
+  const invNumById = new Map(allRows.map((r) => [r.id, r.invoiceNumber]));
+  const q = filter?.q?.trim().toLowerCase() || "";
+
+  const filtered = allRows.filter((r) => {
+    if (filter?.financialYear && r.financialYear !== filter.financialYear) return false;
+    if (filter?.status && filter.status !== "all" && r.status !== filter.status) return false;
+    if (q) {
+      const biz = bizMap.get(r.workspaceId);
+      const hay = `${r.invoiceNumber} ${biz?.name ?? ""} ${biz?.gstin ?? ""} ${r.description}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  return buildGstr1CsvFromRows(filtered, bizMap, invNumById, getSupplierGstStateCode());
 }
 

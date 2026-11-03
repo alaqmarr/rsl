@@ -395,6 +395,10 @@ export function createAdditionalWorkspace(params: {
   const now = Date.now();
   const workspaceId = newId("biz", params.businessName);
   const slug = slugifyWorkspace(params.businessName);
+  const { cleanGstin, cleanStateCode } = validateWorkspaceGstinAndState(
+    params.gstin,
+    params.stateCode
+  );
 
   db.insert(controlSchema.workspaces)
     .values({
@@ -402,8 +406,8 @@ export function createAdditionalWorkspace(params: {
       name: params.businessName.trim(),
       slug,
       industry: params.industry?.trim() || null,
-      gstin: params.gstin?.trim() || null,
-      stateCode: params.stateCode?.trim() || "27",
+      gstin: cleanGstin,
+      stateCode: cleanStateCode,
       currency: "INR",
       timezone: "Asia/Kolkata",
       billingStatus: "active",
@@ -1012,6 +1016,28 @@ export function changeAuthenticatedUserPassword(params: {
 const GSTIN_FORMAT_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 const INDIA_PINCODE_REGEX = /^[1-9][0-9]{5}$/;
 
+function validateWorkspaceGstinAndState(
+  gstin?: string | null,
+  stateCode?: string | null
+): { cleanGstin: string | null; cleanStateCode: string } {
+  const cleanGstin = gstin?.trim().toUpperCase() || null;
+  if (cleanGstin && !GSTIN_FORMAT_REGEX.test(cleanGstin)) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "GSTIN must be a valid 15-character Indian GST number (for example: 27AAAAA0000A1Z5)."
+    );
+  }
+  const explicitState = stateCode?.trim() || "";
+  const cleanStateCode = explicitState || (cleanGstin ? cleanGstin.slice(0, 2) : "27");
+  if (cleanGstin && explicitState && cleanGstin.slice(0, 2) !== cleanStateCode) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      `GSTIN state prefix (${cleanGstin.slice(0, 2)}) must match your selected Billing State (${cleanStateCode}).`
+    );
+  }
+  return { cleanGstin, cleanStateCode };
+}
+
 export function summarizeUserAgent(ua: string | null | undefined): string {
   if (!ua) return "Web Browser Session";
   const lower = ua.toLowerCase();
@@ -1200,13 +1226,10 @@ export function updateWorkspaceBusinessSettings(params: {
     throw new RslError("RSL-VAL-1001", "Business name must be at least 2 characters.");
   }
 
-  const cleanGstin = params.gstin?.trim().toUpperCase() || null;
-  if (cleanGstin && !GSTIN_FORMAT_REGEX.test(cleanGstin)) {
-    throw new RslError(
-      "RSL-VAL-1001",
-      "GSTIN must be a valid 15-character Indian GST number (for example: 27AAAAA0000A1Z5)."
-    );
-  }
+  const { cleanGstin, cleanStateCode } = validateWorkspaceGstinAndState(
+    params.gstin,
+    params.stateCode
+  );
 
   const cleanBillingEmail = params.billingEmail?.trim().toLowerCase() || null;
   if (cleanBillingEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanBillingEmail)) {
@@ -1217,8 +1240,6 @@ export function updateWorkspaceBusinessSettings(params: {
   if (cleanPincode && !INDIA_PINCODE_REGEX.test(cleanPincode)) {
     throw new RslError("RSL-VAL-1001", "PIN code must be a valid 6-digit Indian postal code.");
   }
-
-  const cleanStateCode = (params.stateCode || "27").trim() || "27";
 
   controlDb()
     .update(controlSchema.workspaces)
@@ -1446,13 +1467,17 @@ export function staffUpdateClientWorkspace(params: {
   if (trimmedName.length < 2) {
     throw new RslError("RSL-VAL-1001", "Business name must be at least 2 characters.");
   }
+  const { cleanGstin, cleanStateCode } = validateWorkspaceGstinAndState(
+    params.gstin,
+    params.stateCode
+  );
   const now = Date.now();
   db.update(controlSchema.workspaces)
     .set({
       name: trimmedName,
       industry: params.industry?.trim() || null,
-      gstin: params.gstin?.trim().toUpperCase() || null,
-      stateCode: params.stateCode?.trim() || "27",
+      gstin: cleanGstin,
+      stateCode: cleanStateCode,
       billingStatus: params.billingStatus,
       updatedAt: now,
     })

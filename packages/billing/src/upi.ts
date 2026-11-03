@@ -207,6 +207,53 @@ export function formatBankAccountUpiAddress(
   return `${cleanAccount}@${cleanIfsc}.ifsc.npci`;
 }
 
+export interface GstTaxSplit {
+  subtotalPaise: number;
+  isIntraState: boolean;
+  supplierStateCode: string;
+  buyerStateCode: string;
+  cgstPaise: number;
+  sgstPaise: number;
+  igstPaise: number;
+  gstPaise: number;
+  totalPaise: number;
+}
+
+/**
+ * Canonical 18% GST Tax Split (SAC 998314) shared across UI modals, UPI QR payloads,
+ * database GST Tax Invoices, and PDF stationery so rounding is symmetric to the single paisa (ACT-2.2, ACT-2.3).
+ */
+export function computeGstTaxSplit(params: {
+  subtotalPaise: number;
+  buyerStateCode?: string | null;
+  supplierStateCode?: string | null;
+}): GstTaxSplit {
+  const subtotalPaise = Math.max(0, Math.round(params.subtotalPaise));
+  const cleanSupplier = /^\d{2}$/.test((params.supplierStateCode || "").trim())
+    ? (params.supplierStateCode || "").trim()
+    : "27";
+  const cleanBuyer = /^\d{2}$/.test((params.buyerStateCode || "").trim())
+    ? (params.buyerStateCode || "").trim()
+    : cleanSupplier;
+  const isIntraState = cleanBuyer === cleanSupplier;
+  const cgstPaise = isIntraState ? Math.round(subtotalPaise * 0.09) : 0;
+  const sgstPaise = isIntraState ? Math.round(subtotalPaise * 0.09) : 0;
+  const igstPaise = isIntraState ? 0 : Math.round(subtotalPaise * 0.18);
+  const gstPaise = cgstPaise + sgstPaise + igstPaise;
+  const totalPaise = subtotalPaise + gstPaise;
+  return {
+    subtotalPaise,
+    isIntraState,
+    supplierStateCode: cleanSupplier,
+    buyerStateCode: cleanBuyer,
+    cgstPaise,
+    sgstPaise,
+    igstPaise,
+    gstPaise,
+    totalPaise,
+  };
+}
+
 export interface UpiPaymentPayload {
   routingMode: UpiQrRoutingMode;
   payeeAddress: string;
@@ -216,6 +263,9 @@ export interface UpiPaymentPayload {
   accountNumber?: string;
   ifscCode?: string;
   subtotalPaise: number;
+  cgstPaise: number;
+  sgstPaise: number;
+  igstPaise: number;
   gstPaise: number;
   totalPayablePaise: number;
   amountRupeesFormatted: string;
@@ -239,6 +289,8 @@ export function buildUpiPaymentPayload(params: {
   payeeName: string;
   subtotalPaise: number;
   includeGst?: boolean;
+  buyerStateCode?: string | null;
+  supplierStateCode?: string | null;
   workspaceSlug?: string;
   itemLabel: string;
   billingCycle?: BillingCycle;
@@ -246,8 +298,27 @@ export function buildUpiPaymentPayload(params: {
 }): UpiPaymentPayload {
   const includeGst = params.includeGst !== false;
   const subtotalPaise = Math.max(0, Math.round(params.subtotalPaise));
-  const gstPaise = includeGst ? Math.round(subtotalPaise * 0.18) : 0;
-  const totalPayablePaise = subtotalPaise + gstPaise;
+  const split = includeGst
+    ? computeGstTaxSplit({
+        subtotalPaise,
+        buyerStateCode: params.buyerStateCode,
+        supplierStateCode:
+          params.supplierStateCode ??
+          (params.buyerStateCode ? "27" : "00"), // If buyer state omitted, preserve 18% IGST single-line rounding unless states passed
+      })
+    : {
+        subtotalPaise,
+        isIntraState: false,
+        supplierStateCode: params.supplierStateCode || "27",
+        buyerStateCode: params.buyerStateCode || "27",
+        cgstPaise: 0,
+        sgstPaise: 0,
+        igstPaise: 0,
+        gstPaise: 0,
+        totalPaise: subtotalPaise,
+      };
+  const gstPaise = split.gstPaise;
+  const totalPayablePaise = split.totalPaise;
   const amountRupeesFormatted = (totalPayablePaise / 100).toFixed(2);
 
   const cycleTag = params.billingCycle
@@ -305,6 +376,9 @@ export function buildUpiPaymentPayload(params: {
     accountNumber: params.accountNumber?.trim(),
     ifscCode: params.ifscCode?.trim().toUpperCase(),
     subtotalPaise,
+    cgstPaise: split.cgstPaise,
+    sgstPaise: split.sgstPaise,
+    igstPaise: split.igstPaise,
     gstPaise,
     totalPayablePaise,
     amountRupeesFormatted,
