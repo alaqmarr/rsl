@@ -3,7 +3,7 @@ title: Shared Customer Inbox — 24-Hour Window, Templates, Team Notes & Contact
 summary: Minute-by-minute guide to adding contacts, replying to WhatsApp, Instagram, and Facebook messages in one shared inbox, handling 24-hour Meta service windows, leaving internal team notes, and managing labels.
 section: Daily Operations
 audience: customer
-service: inbox.unified
+service: inbox
 order: 7
 lastReviewed: 2026-11-03
 ---
