@@ -115,6 +115,7 @@ import {
   generateTallyPairingCode,
   getOrCreateTallyWebhookEndpoint,
   ingestTallyBillEventAndEnqueueAutomation,
+  markTallyBillPaidViaReceipt,
   recordTallyVoucher,
   revokeTallyAgentDevice,
   rotateTallyWebhookToken,
@@ -125,6 +126,7 @@ import {
   toggleTallyAutomationRule,
   toggleTallyWebhookEndpoint,
   upsertTallyStockItem,
+  upsertWorkspacePartyLedger,
 } from "@rsl/tally";
 import { controlDb } from "@rsl/tenancy";
 import {
@@ -1080,7 +1082,13 @@ export async function sendTestTallyBillWebhookAction(formData: FormData) {
 
 export async function recordTallyVoucherAction(formData: FormData) {
   const session = await requireWebSession();
-  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.sync", "/tally");
+  const rawReturn = String(formData.get("returnPath") || "").trim();
+  const returnPath =
+    rawReturn.startsWith("/") && !rawReturn.startsWith("//") ? rawReturn : "/tally";
+  const errorReturnPath =
+    rawReturn.startsWith("/") && !rawReturn.startsWith("//") ? rawReturn : "/tally?tab=import";
+
+  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.sync", returnPath);
 
   const lineItemName = String(formData.get("lineItemName") || "").trim();
   const lineItemQty = Number(formData.get("lineItemQty") || 0);
@@ -1123,10 +1131,15 @@ export async function recordTallyVoucherAction(formData: FormData) {
     voucherType: String(formData.get("voucherType") || "Sales") as
       | "Sales"
       | "Receipt"
+      | "Payment"
       | "CreditNote"
+      | "DebitNote"
       | "Purchase",
     partyName: String(formData.get("partyName") || ""),
     partyPhoneE164: String(formData.get("partyPhoneE164") || "") || undefined,
+    againstBillNumber: String(formData.get("againstBillNumber") || "").trim() || undefined,
+    ledgerAccountName: String(formData.get("ledgerAccountName") || "").trim() || undefined,
+    narration: String(formData.get("narration") || "").trim() || undefined,
     amountRupees: effectiveAmountRupees,
     paidAmountRupees: Number(formData.get("paidAmountRupees") || 0),
     voucherDateIso: String(
@@ -1135,14 +1148,84 @@ export async function recordTallyVoucherAction(formData: FormData) {
     dueDateIso: String(formData.get("dueDateIso") || "") || undefined,
     lineItems,
   });
-  if (!res.ok) return goWithError("/tally?tab=import", res.error.message);
+  if (!res.ok) return goWithError(errorReturnPath, res.error.message);
   await flushInlineTallyOutboxIfNoRedis(session.workspace.id);
   const stockSuffix = lineItems ? ` Stock updated for '${lineItems[0]!.itemName}'.` : "";
   return goWithNotice(
-    "/tally",
+    returnPath,
     res.data.queuedJobs && res.data.queuedJobs > 0
-      ? `Bill saved${stockSuffix} ${res.data.queuedJobs} automated WhatsApp message(s) queued for delivery.`
-      : `Bill saved to your Tally register.${stockSuffix}`
+      ? `Voucher saved${stockSuffix} ${res.data.queuedJobs} automated WhatsApp message(s) queued for delivery.`
+      : `Voucher saved and party ledger updated.${stockSuffix}`
+  );
+}
+
+export async function upsertWorkspacePartyLedgerAction(formData: FormData) {
+  const session = await requireWebSession();
+  const rawReturn = String(formData.get("returnPath") || "").trim();
+  const returnPath =
+    rawReturn.startsWith("/") && !rawReturn.startsWith("//") ? rawReturn : "/tally/parties";
+
+  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.sync", returnPath);
+
+  const inputPartyName = String(formData.get("name") || "").trim();
+  const res = await upsertWorkspacePartyLedger(session.ctx, {
+    partyId: String(formData.get("partyId") || "").trim() || undefined,
+    companyName: String(formData.get("companyName") || session.workspace.name).trim(),
+    name: inputPartyName,
+    parentGroup:
+      String(formData.get("parentGroup") || "Sundry Debtors") === "Sundry Creditors"
+        ? "Sundry Creditors"
+        : "Sundry Debtors",
+    phoneE164: String(formData.get("phoneE164") || "").trim() || undefined,
+    email: String(formData.get("email") || "").trim() || undefined,
+    gstin: String(formData.get("gstin") || "").trim() || undefined,
+    pan: String(formData.get("pan") || "").trim() || undefined,
+    contactPerson: String(formData.get("contactPerson") || "").trim() || undefined,
+    stateName: String(formData.get("stateName") || "").trim() || undefined,
+    pincode: String(formData.get("pincode") || "").trim() || undefined,
+    address: String(formData.get("address") || "").trim() || undefined,
+    creditLimitRupees: Number(formData.get("creditLimitRupees") || 0),
+    creditDays: Number(formData.get("creditDays") || 15),
+    openingBalanceRupees: Number(formData.get("openingBalanceRupees") || 0),
+    openingBalanceType:
+      String(formData.get("openingBalanceType") || "Dr") === "Cr" ? "Cr" : "Dr",
+  });
+  if (!res.ok) return goWithError(returnPath, res.error.message);
+  return goWithNotice(
+    `/tally/parties/${encodeURIComponent(res.data.partyId)}`,
+    `Saved party ledger '${inputPartyName}'.`
+  );
+}
+
+export async function markTallyBillPaidAction(formData: FormData) {
+  const session = await requireWebSession();
+  const rawReturn = String(formData.get("returnPath") || "").trim();
+  const returnPath =
+    rawReturn.startsWith("/") && !rawReturn.startsWith("//") ? rawReturn : "/tally";
+
+  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.sync", returnPath);
+
+  const amountStr = String(formData.get("amountRupees") || "").trim();
+  const parsedAmt = amountStr ? Number(amountStr) : undefined;
+
+  const res = await markTallyBillPaidViaReceipt(session.ctx, {
+    billVoucherId: String(
+      formData.get("billVoucherId") || formData.get("voucherId") || ""
+    ).trim(),
+    amountRupees: parsedAmt && Number.isFinite(parsedAmt) && parsedAmt > 0 ? parsedAmt : undefined,
+    paymentModeLedger:
+      String(formData.get("paymentModeLedger") || "Bank / UPI Receipt").trim() ||
+      "Bank / UPI Receipt",
+    settlementVoucherNumber:
+      String(formData.get("settlementVoucherNumber") || "").trim() || undefined,
+    settlementDateIso: String(formData.get("settlementDateIso") || "").trim() || undefined,
+    narration: String(formData.get("narration") || "").trim() || undefined,
+  });
+  if (!res.ok) return goWithError(returnPath, res.error.message);
+  await flushInlineTallyOutboxIfNoRedis(session.workspace.id);
+  return goWithNotice(
+    returnPath,
+    `Recorded ${res.data.settlementVoucherNumber} against Bill #${res.data.billNumber} — status is now ${res.data.updatedStatus.toUpperCase()}.`
   );
 }
 

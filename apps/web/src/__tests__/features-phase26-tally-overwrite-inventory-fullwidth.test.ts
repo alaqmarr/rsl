@@ -41,8 +41,8 @@ describe("Phase 26 — Tally Overwrite Prevention, Live Inventory & Masters Engi
     const wsId = session.workspace.id;
     staffGrantFreeAllToolsAccess({ workspaceId: wsId, durationDays: 30, staffId: "stf_p26" });
 
-    // 1. TDL v2.6 Post-Commit Hook + SVFromDate/SVToDate verification
-    expect(LATEST_TALLY_TDL_VERSION).toBe("2.6");
+    // 1. TDL v2.7 Post-Commit Hook + SVFromDate/SVToDate verification
+    expect(LATEST_TALLY_TDL_VERSION).toBe("2.7");
     const tdl = generateTallyPrimeTdlAddOn({
       workspaceName: "NoOverwriteP26 Enterprises",
       webhookUrl: "https://nooverwrite.tally.rapidshiftlabs.in/api/webhooks/tally",

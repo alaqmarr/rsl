@@ -6,6 +6,8 @@ import { requireEntitlement } from "@rsl/billing";
 import { decryptEnvelope, newId, resolveEndpointsFromHeaders, RslError, signHmac } from "@rsl/core";
 import { controlSchema, ingressSchema } from "@rsl/database";
 import {
+  buildTallyDisplayBrandTitle,
+  buildWorkspaceTdlFilename,
   captureNativePdfsForVouchersFromLocalPort9000,
   computeTallyWebhookLiveStatus,
   generateTallyPrimeTdlAddOn,
@@ -149,7 +151,7 @@ async function resolveWebhookCaller(req: NextRequest): Promise<{
   };
 }
 
-function buildLatestWorkspaceTdl(req: NextRequest, workspaceId: string, webhookToken: string): string {
+function getWorkspaceBranding(workspaceId: string): { name: string; slug: string | null } {
   const ws = controlDb()
     .select({
       name: controlSchema.workspaces.name,
@@ -158,22 +160,41 @@ function buildLatestWorkspaceTdl(req: NextRequest, workspaceId: string, webhookT
     .from(controlSchema.workspaces)
     .where(eq(controlSchema.workspaces.id, workspaceId))
     .get();
+  return {
+    name: ws?.name ?? "RapidShift Workspace",
+    slug: ws?.slug ?? null,
+  };
+}
+
+function buildLatestWorkspaceTdl(req: NextRequest, workspaceId: string, webhookToken: string): {
+  tdlBody: string;
+  filename: string;
+  displayBrandTitle: string;
+} {
+  const ws = getWorkspaceBranding(workspaceId);
   const preferLocal = req.nextUrl.searchParams.get("target") === "local";
   const isolated = req.nextUrl.searchParams.get("isolated") === "1";
   const endpoints = resolveEndpointsFromHeaders(req.headers, {
-    workspaceSlug: ws?.slug ?? null,
+    workspaceSlug: ws.slug,
     preferLocal,
   });
   const routing = getTallyCompanyRoutingConfig(workspaceId);
-  return generateTallyPrimeTdlAddOn({
-    workspaceName: ws?.name ?? "RapidShift Workspace",
+  const tdlBody = generateTallyPrimeTdlAddOn({
+    workspaceName: ws.name,
     webhookUrl: preferLocal
       ? endpoints.tallyWebhookUrl
       : `${endpoints.tallyCloudBaseUrl}/api/webhooks/tally`,
     webhookToken,
     allowedCompanyNames: routing.mode === "selected" ? routing.allowedCompanyNames : undefined,
-    namespaceTag: isolated && ws?.slug ? ws.slug : undefined,
+    namespaceTag: isolated && ws.slug ? ws.slug : undefined,
   });
+  return {
+    tdlBody,
+    filename: buildWorkspaceTdlFilename(ws.name, {
+      isolatedSlug: isolated && ws.slug ? ws.slug : undefined,
+    }),
+    displayBrandTitle: buildTallyDisplayBrandTitle(ws.name),
+  };
 }
 
 export async function GET(req: NextRequest) {
@@ -238,8 +259,8 @@ export async function GET(req: NextRequest) {
 
     // Over-The-Air (OTA) .tdl manifest & auto-update endpoints run even before plan unlock so setup is frictionless
     if (mode === "tdl-manifest") {
-      const tdlBody = buildLatestWorkspaceTdl(req, caller.workspaceId, epRow.webhookToken);
-      const sha256 = crypto.createHash("sha256").update(tdlBody, "utf8").digest("hex");
+      const built = buildLatestWorkspaceTdl(req, caller.workspaceId, epRow.webhookToken);
+      const sha256 = crypto.createHash("sha256").update(built.tdlBody, "utf8").digest("hex");
       const sigPayload = `${LATEST_TALLY_TDL_VERSION}:${sha256}`;
       const manifestHmac = signHmac(sigPayload, epRow.webhookToken);
 
@@ -275,21 +296,23 @@ export async function GET(req: NextRequest) {
         version: LATEST_TALLY_TDL_VERSION,
         tdlVersion: LATEST_TALLY_TDL_VERSION,
         latestTdlVersion: LATEST_TALLY_TDL_VERSION,
+        filename: built.filename,
+        displayBrandTitle: built.displayBrandTitle,
         sha256,
         manifestHmac,
         ...(deviceHmac ? { deviceHmac } : {}),
-        byteLength: Buffer.byteLength(tdlBody, "utf8"),
+        byteLength: Buffer.byteLength(built.tdlBody, "utf8"),
         downloadUrl: `${endpoints.tallyWebhookUrl}?mode=tdl-latest&token=${encodeURIComponent(epRow.webhookToken)}`,
       });
     }
 
     if (mode === "tdl-latest") {
-      const tdlBody = buildLatestWorkspaceTdl(req, caller.workspaceId, epRow.webhookToken);
-      return new NextResponse(tdlBody, {
+      const built = buildLatestWorkspaceTdl(req, caller.workspaceId, epRow.webhookToken);
+      return new NextResponse(built.tdlBody, {
         status: 200,
         headers: {
           "Content-Type": "text/plain; charset=utf-8",
-          "Content-Disposition": `attachment; filename="rsl-tally-whatsapp.tdl"`,
+          "Content-Disposition": `attachment; filename="${built.filename}"`,
           "Cache-Control": "no-store",
           "X-RSL-TDL-Version": LATEST_TALLY_TDL_VERSION,
         },
@@ -306,14 +329,17 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    const wsBrand = getWorkspaceBranding(caller.workspaceId);
+    const displayBrandTitle = buildTallyDisplayBrandTitle(wsBrand.name);
     const updatedEndpoint = getOrCreateTallyWebhookEndpoint(caller.workspaceId);
     const liveStatus = computeTallyWebhookLiveStatus(updatedEndpoint);
-    const okMsg = "Connected to RapidShift Labs! Live Tally voucher sync is active.";
+    const okMsg = `Connected via ${displayBrandTitle}! Live Tally voucher, receipt & ledger sync is active.`;
 
     return NextResponse.json({
       ...buildTallyResultFields("Connected", okMsg, userAgent),
       mode: "handshake",
       workspaceId: caller.workspaceId,
+      displayBrandTitle,
       latestTdlVersion: LATEST_TALLY_TDL_VERSION,
       endpoint: endpoints.tallyWebhookUrl,
       endpointUrl: endpoints.tallyWebhookUrl,
@@ -499,9 +525,11 @@ export async function POST(req: NextRequest) {
           })
         : null;
 
+      const wsBrand = getWorkspaceBranding(caller.workspaceId);
+      const displayBrandTitle = buildTallyDisplayBrandTitle(wsBrand.name);
       const okMsg = pingCompanyName
-        ? `Connected to RapidShift Labs! Tally company '${pingCompanyName}' is verified and live.`
-        : "Connected to RapidShift Labs! Tally webhook endpoint verified and ready.";
+        ? `Connected via ${displayBrandTitle}! Tally company '${pingCompanyName}' is verified and live.`
+        : `Connected via ${displayBrandTitle}! Tally webhook endpoint verified and ready.`;
 
       return NextResponse.json(
         {
@@ -509,6 +537,7 @@ export async function POST(req: NextRequest) {
           mode: "ping",
           status: "handshake_verified",
           workspaceId: caller.workspaceId,
+          displayBrandTitle,
           companyName: pingCompanyName || null,
           pingsReceivedCount: pingInfo?.pingsReceivedCount ?? 1,
           verifiedAt: new Date(now).toISOString(),

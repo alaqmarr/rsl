@@ -100,14 +100,28 @@ const WORKSPACE_NAV_SECTIONS: Array<{
       {
         href: "/tally",
         label: "Tally Prime & Bills",
-        keywords: "tally xml csv tdl webhook automation invoices vouchers receipts overdue reminders pdf",
-        helpTitle: "Automatic WhatsApp Bills & Native Tally PDFs",
+        keywords: "tally xml csv tdl webhook automation invoices vouchers receipts payments paid overdue reminders pdf",
+        helpTitle: "All-in-One Tally Prime Vouchers, Paid-in-Tally Sync & Native PDFs",
         helpSummary:
-          "Connect Tally Prime using our .tdl v2.6 add-on, dedicated *.tally.rapidshiftlabs.in webhook URL, or Windows PC connector so your exact Tally-printed PDF invoices go out on WhatsApp automatically.",
+          "Connect Tally Prime using your personalized '<Business Name> & RSL Sync' .tdl v2.7 add-on, dedicated *.tally.rapidshiftlabs.in webhook URL, or Windows PC connector so bills, receipts, and exact Tally PDFs sync automatically.",
         helpSteps: [
-          "Download the pre-configured Tally Prime .tdl v2.6 add-on or pair the Windows Connector.",
-          "Create an automation rule using tally_tax_invoice_pdf so customers receive your exact untouched Tally-printed PDF invoice.",
-          "Edits, cancellations (Alt+X), deletions (Alt+D), and stock movements sync automatically across single or multiple companies.",
+          "Download your personalized <business>-rsl-sync.tdl v2.7 add-on or pair the 1-click Windows Connector.",
+          "Whenever a Receipt, Payment, or Credit/Debit Note is saved in Tally, linked bills automatically mark Paid and pending overdue WhatsApp reminders cancel.",
+          "Click any Voucher # or Party Name to open the full detailed Voucher or Client Running Balance Statement.",
+        ],
+        guideSlug: "tally-sync-and-import",
+      },
+      {
+        href: "/tally/parties",
+        label: "Client & Party Ledgers",
+        keywords: "clients parties customers suppliers debtors creditors ledgers statement running balance ageing credit limit paid",
+        helpTitle: "Client & Supplier Ledgers, Ageing & Running Balance Statements",
+        helpSummary:
+          "Inspect Sundry Debtors (Customers) and Sundry Creditors (Suppliers) with T-account chronological running balances, 0–90+ day ageing buckets, credit limit alerts, and downloadable PDF statements.",
+        helpSteps: [
+          "Filter by Sundry Debtors, Sundry Creditors, Overdue 30/60/90+ days, or Credit Limit Breaches.",
+          "Click any Party Name to open their T-account running balance statement, open bills, settlement trail, and item purchase history.",
+          "Download branded Party Ledger Statement PDFs or share polite payment follow-ups on WhatsApp in 1 click.",
         ],
         guideSlug: "tally-sync-and-import",
       },
@@ -305,6 +319,7 @@ const ICON_BY_HREF: Record<string, React.ComponentType<{ className?: string }>> 
   "/analytics": BarChart3,
   "/inbox": Inbox,
   "/tally": FileSpreadsheet,
+  "/tally/parties": Users,
   "/whatsapp": MessageSquareShare,
   "/campaigns": Megaphone,
   "/reviews": Star,
@@ -357,10 +372,12 @@ export function SidebarNavLinks({ onNavigate }: { onNavigate?: () => void }) {
               const isActive =
                 item.href === "/"
                   ? pathname === "/"
-                  : pathname === item.href ||
-                    pathname.startsWith(`${item.href}/`) ||
-                    (item.href === "/settings/tokens" &&
-                      (pathname === "/developers" || pathname.startsWith("/developers/")));
+                  : item.href === "/tally"
+                    ? pathname === "/tally" || pathname.startsWith("/tally/vouchers/")
+                    : pathname === item.href ||
+                      pathname.startsWith(`${item.href}/`) ||
+                      (item.href === "/settings/tokens" &&
+                        (pathname === "/developers" || pathname.startsWith("/developers/")));
               const isItemLoading = isPending && pendingHref === item.href;
 
               return (

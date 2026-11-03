@@ -8,6 +8,7 @@ import { IosSpinner, sileo, StatusPill } from "@rsl/ui";
 import { syncLocalTallyPort9000JsonAction } from "@/lib/actions";
 
 export interface TallyLiveSyncBarProps {
+  workspaceName?: string;
   vouchersCount: number;
   eventsReceivedCount: number;
   lastEventAt: number | null;
@@ -31,7 +32,32 @@ export interface TallyLiveSyncBarProps {
   } | null;
 }
 
+function buildBarTdlFilename(workspaceName?: string): string {
+  const slug = (workspaceName || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/g, "");
+  return `${slug || "business"}-rsl-sync.tdl`;
+}
+
+function buildBarBrandTitle(workspaceName?: string): string {
+  const cleaned = (workspaceName || "")
+    .replace(/["'\r\n\t:;[\]]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 38)
+    .trim();
+  if (!cleaned) return "Business & RSL Sync";
+  if (/\brsl\s*sync\b/i.test(cleaned)) return cleaned;
+  return `${cleaned} & RSL Sync`;
+}
+
 export function TallyLiveSyncBar({
+  workspaceName,
   vouchersCount,
   eventsReceivedCount,
   lastEventAt,
@@ -44,6 +70,8 @@ export function TallyLiveSyncBar({
   canManageTally,
   localPortProbe,
 }: TallyLiveSyncBarProps) {
+  const tdlFilename = buildBarTdlFilename(workspaceName);
+  const tallyBrandTitle = buildBarBrandTitle(workspaceName);
   const router = useRouter();
   const [isFetchingLocal, startFetchLocal] = useTransition();
 
@@ -206,10 +234,12 @@ export function TallyLiveSyncBar({
                       TallyPrime-RSL-TDL/{outdatedTdl.detectedVersion}
                     </code>{" "}
                     in memory, which sent blank voucher amounts on save.{" "}
-                    <strong>Version {outdatedTdl.latestVersion}</strong> fixes voucher field capture
-                    on <code className="font-mono">Ctrl + A</code> and adds a 1-click{" "}
-                    <strong>&ldquo;RSL Sync All Bills Now&rdquo;</strong> button on Gateway of Tally
-                    for bills you already created!
+                    <strong>Version {outdatedTdl.latestVersion}</strong> syncs Sales, Receipt,
+                    Payment, Purchase, Credit Note, and Debit Note vouchers live on{" "}
+                    <code className="font-mono">Ctrl + A</code> (automatically marking bills Paid in
+                    Tally) and adds{" "}
+                    <strong>&ldquo;{tallyBrandTitle} - Sync All Now&rdquo;</strong> on Gateway of
+                    Tally!
                   </p>
                 ) : (
                   <p className="leading-relaxed text-amber-900">
@@ -219,14 +249,16 @@ export function TallyLiveSyncBar({
 
                 <ol className="list-decimal space-y-1 pl-4 text-[11px] leading-relaxed text-slate-800">
                   <li>
-                    Click <strong>Download Updated .tdl (v{outdatedTdl.latestVersion})</strong>{" "}
+                    Click{" "}
+                    <strong>
+                      Download {tdlFilename} (v{outdatedTdl.latestVersion})
+                    </strong>{" "}
                     below and <strong>overwrite the exact TDL path configured in Tally Prime</strong>{" "}
                     (e.g.{" "}
                     <code className="rounded bg-white px-1 py-0.5 font-mono">
-                      C:\Program Files\TallyPrime\rsl-tally-whatsapp.tdl
-                    </code>{" "}
-                    — do not leave it in Downloads as{" "}
-                    <code className="font-mono">rsl-tally-whatsapp (1).tdl</code>).
+                      C:\Program Files\TallyPrime\{tdlFilename}
+                    </code>
+                    ).
                   </li>
                   <li>
                     In Tally Prime, press <strong>F1 (Help)</strong> →{" "}
@@ -235,8 +267,8 @@ export function TallyLiveSyncBar({
                   </li>
                   <li>
                     On <strong>Gateway of Tally</strong>, click{" "}
-                    <strong>&ldquo;RSL Sync All Bills Now&rdquo;</strong> to push your already-saved
-                    Sales invoice(s) immediately (or use the 1-click{" "}
+                    <strong>&ldquo;{tallyBrandTitle} - Sync All Now&rdquo;</strong> to push your
+                    already-saved bills and receipts immediately (or use the 1-click{" "}
                     <strong>Fetch Bills from Tally Now</strong> button below if Tally is on this PC).
                   </li>
                 </ol>
@@ -265,7 +297,7 @@ export function TallyLiveSyncBar({
                   </button>
                 )}
                 <a href={tdlHref} className="rsl-btn-secondary text-xs">
-                  Download Updated .tdl (v{outdatedTdl.latestVersion})
+                  Download {tdlFilename} (v{outdatedTdl.latestVersion})
                 </a>
                 <Link href="/tally?tab=connect#setup-guide" className="rsl-btn-secondary text-xs">
                   View Detailed Setup Guide

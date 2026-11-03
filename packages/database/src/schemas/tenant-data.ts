@@ -334,12 +334,24 @@ export const tallyParties = sqliteTable("tally_parties", {
   phoneE164: text("phone_e164"),
   email: text("email"),
   gstin: text("gstin"),
+  pan: text("pan"),
+  contactPerson: text("contact_person"),
   stateName: text("state_name"),
+  pincode: text("pincode"),
   address: text("address"),
   creditLimitPaise: integer("credit_limit_paise").notNull().default(0),
   creditDays: integer("credit_days").notNull().default(0),
   openingBalancePaise: integer("opening_balance_paise").notNull().default(0),
   closingBalancePaise: integer("closing_balance_paise").notNull().default(0),
+  syncedFromTallyMaster: integer("synced_from_tally_master", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  totalInvoicedPaise: integer("total_invoiced_paise").notNull().default(0),
+  totalReceivedPaise: integer("total_received_paise").notNull().default(0),
+  unpaidBillsCount: integer("unpaid_bills_count").notNull().default(0),
+  overdueBillsCount: integer("overdue_bills_count").notNull().default(0),
+  lastVoucherAt: integer("last_voucher_at"),
+  lastPaymentAt: integer("last_payment_at"),
   updatedAt: integer("updated_at").notNull(),
 });
 
@@ -472,11 +484,15 @@ export const tallyVouchers = sqliteTable(
       .notNull()
       .references(() => tallyCompanies.id, { onDelete: "cascade" }),
     voucherNumber: text("voucher_number").notNull(),
-    voucherType: text("voucher_type").notNull(), // Sales | Receipt | CreditNote | Purchase
+    voucherType: text("voucher_type").notNull(), // Sales | Receipt | Payment | CreditNote | DebitNote | Purchase
     partyName: text("party_name").notNull(),
     partyPhoneE164: text("party_phone_e164"),
     amountPaise: integer("amount_paise").notNull(),
     paidAmountPaise: integer("paid_amount_paise").notNull().default(0),
+    directPaidPaise: integer("direct_paid_paise").notNull().default(0),
+    narration: text("narration"),
+    ledgerAccountName: text("ledger_account_name"),
+    billAllocationsJson: text("bill_allocations_json").notNull().default("[]"),
     originalCurrency: text("original_currency").notNull().default("INR"),
     originalAmountMinor: integer("original_amount_minor"),
     exchangeRateMicros: integer("exchange_rate_micros"),
@@ -493,6 +509,33 @@ export const tallyVouchers = sqliteTable(
   (t) => [
     index("idx_vouchers_type_status").on(t.voucherType, t.paymentStatus),
     index("idx_vouchers_due_date").on(t.dueDate),
+  ]
+);
+
+export const tallyBillSettlements = sqliteTable(
+  "tally_bill_settlements",
+  {
+    id: text("id").primaryKey(),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => tallyCompanies.id, { onDelete: "cascade" }),
+    billVoucherId: text("bill_voucher_id")
+      .notNull()
+      .references(() => tallyVouchers.id, { onDelete: "cascade" }),
+    settlementVoucherId: text("settlement_voucher_id").references(() => tallyVouchers.id, {
+      onDelete: "cascade",
+    }),
+    billNumber: text("bill_number").notNull(),
+    settlementVoucherNumber: text("settlement_voucher_number"),
+    settlementVoucherType: text("settlement_voucher_type").notNull(),
+    partyName: text("party_name").notNull(),
+    allocationType: text("allocation_type").notNull().default("agst_ref"),
+    amountPaise: integer("amount_paise").notNull(),
+    settledAt: integer("settled_at").notNull(),
+  },
+  (t) => [
+    index("idx_bill_settlements_bill").on(t.billVoucherId),
+    index("idx_bill_settlements_src").on(t.settlementVoucherId),
   ]
 );
 

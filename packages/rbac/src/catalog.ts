@@ -375,6 +375,11 @@ export const WEB_ROUTE_ACCESS_RULES: Array<{
   },
   { prefix: "/inbox", anyOf: ["inbox:view"], label: "Customer Messages" },
   {
+    prefix: "/tally/parties",
+    anyOf: ["tally:view", "tally:sync.manage", "tally:invoice.send"],
+    label: "Client & Supplier Ledgers",
+  },
+  {
     prefix: "/tally",
     anyOf: ["tally:view", "tally:sync.manage", "tally:invoice.send"],
     label: "Tally Prime & Bills",

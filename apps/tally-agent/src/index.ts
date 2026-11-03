@@ -18,7 +18,7 @@ interface AgentStateFile {
   pairedAt: string;
 }
 
-const AGENT_VERSION = "2.3.0";
+const AGENT_VERSION = "2.4.0";
 const VOUCHER_CHUNK_SIZE = 20;
 const DEFAULT_CLOUD_URL = "https://app.rapidshiftlabs.in";
 const STATE_PATH =
@@ -214,12 +214,13 @@ function buildIncrementalTallyCollectionXml(sinceAlterId: number, companyName?: 
         <TDLMESSAGE>
           <COLLECTION NAME="RSLSyncVouchers" ISMODIFY="No">
             <TYPE>Voucher</TYPE>
-            <NATIVEMETHOD>MasterID, GUID, AlterID, Date, VoucherNumber, VoucherTypeName, PartyLedgerName, PartyMobileNo, Amount, BasicDueDateOfPymt, IsCancelled, IsOptional</NATIVEMETHOD>
-            <NATIVEMETHOD>LedgerEntries.LedgerName, LedgerEntries.IsPartyLedger, LedgerEntries.Amount</NATIVEMETHOD>
-            <NATIVEMETHOD>AllLedgerEntries.LedgerName, AllLedgerEntries.IsPartyLedger, AllLedgerEntries.Amount</NATIVEMETHOD>
+            <NATIVEMETHOD>MasterID, GUID, AlterID, Date, VoucherNumber, VoucherTypeName, PartyLedgerName, PartyMobileNo, Amount, BasicDueDateOfPymt, Narration, IsCancelled, IsOptional</NATIVEMETHOD>
+            <NATIVEMETHOD>LedgerEntries.LedgerName, LedgerEntries.IsPartyLedger, LedgerEntries.Amount, LedgerEntries.BillAllocations.Name, LedgerEntries.BillAllocations.BillType, LedgerEntries.BillAllocations.Amount</NATIVEMETHOD>
+            <NATIVEMETHOD>AllLedgerEntries.LedgerName, AllLedgerEntries.IsPartyLedger, AllLedgerEntries.Amount, AllLedgerEntries.BillAllocations.Name, AllLedgerEntries.BillAllocations.BillType, AllLedgerEntries.BillAllocations.Amount</NATIVEMETHOD>
             <NATIVEMETHOD>AllInventoryEntries.StockItemName, AllInventoryEntries.ActualQty, AllInventoryEntries.BilledQty, AllInventoryEntries.Rate, AllInventoryEntries.Discount, AllInventoryEntries.Amount, AllInventoryEntries.IsDeemedPositive, AllInventoryEntries.BatchAllocations.GodownName, AllInventoryEntries.BatchAllocations.BatchName, AllInventoryEntries.BatchAllocations.ExpiryPeriod</NATIVEMETHOD>
             <NATIVEMETHOD>InventoryEntries.StockItemName, InventoryEntries.ActualQty, InventoryEntries.BilledQty, InventoryEntries.Rate, InventoryEntries.Discount, InventoryEntries.Amount, InventoryEntries.IsDeemedPositive, InventoryEntries.BatchAllocations.GodownName, InventoryEntries.BatchAllocations.BatchName</NATIVEMETHOD>
             <COMPUTE>RSLPartyPhone : $LedgerMobile:Ledger:$PartyLedgerName</COMPUTE>
+            <COMPUTE>RSLPartyGroup : $Parent:Ledger:$PartyLedgerName</COMPUTE>
             <COMPUTE>RSLBaseVchType : $Parent:VoucherType:$VoucherTypeName</COMPUTE>
             <COMPUTE>SVCurrentCompany : $$CurrentCompany</COMPUTE>
             <FILTER>RSLAlterFilter</FILTER>
@@ -462,7 +463,7 @@ function buildTallyStockItemsXml(companyName?: string): string {
     <VERSION>1</VERSION>
     <TALLYREQUEST>Export</TALLYREQUEST>
     <TYPE>Collection</TYPE>
-    <ID>RSLSyncStockItems</ID>
+    <ID>RSLSyncInventoryMasters</ID>
   </HEADER>
   <BODY>
     <DESC>
@@ -473,11 +474,38 @@ function buildTallyStockItemsXml(companyName?: string): string {
       </STATICVARIABLES>
       <TDL>
         <TDLMESSAGE>
+          <COLLECTION NAME="RSLSyncInventoryMasters" ISMODIFY="No">
+            <COLLECTION>RSLSyncStockItems, RSLSyncGodowns, RSLSyncPartyLedgers, RSLSyncSupplierLedgers, RSLSyncBills</COLLECTION>
+          </COLLECTION>
           <COLLECTION NAME="RSLSyncStockItems" ISMODIFY="No">
             <TYPE>StockItem</TYPE>
-            <NATIVEMETHOD>MasterID, GUID, AlterID, Name, Parent, Category, BaseUnits, PartNo, OpeningBalance, OpeningValue, ClosingBalance, ClosingRate, ClosingValue, ReorderBase, MinimumOrderBase</NATIVEMETHOD>
+            <NATIVEMETHOD>MasterID, GUID, AlterID, Name, Parent, Category, BaseUnits, PartNo, HSNCode, GSTIGSTRate, OpeningBalance, OpeningValue, ClosingBalance, ClosingRate, ClosingValue, ReorderBase, MinimumOrderBase</NATIVEMETHOD>
             <NATIVEMETHOD>BatchAllocations.GodownName, BatchAllocations.BatchName, BatchAllocations.ClosingBalance, BatchAllocations.ClosingValue, BatchAllocations.MfdOn, BatchAllocations.ExpiryPeriod</NATIVEMETHOD>
             <NATIVEMETHOD>StandardPriceList.Rate, StandardCostList.Rate</NATIVEMETHOD>
+            <COMPUTE>SVCurrentCompany : $$CurrentCompany</COMPUTE>
+          </COLLECTION>
+          <COLLECTION NAME="RSLSyncGodowns" ISMODIFY="No">
+            <TYPE>Godown</TYPE>
+            <NATIVEMETHOD>GUID, Name, Parent, Address</NATIVEMETHOD>
+            <COMPUTE>SVCurrentCompany : $$CurrentCompany</COMPUTE>
+          </COLLECTION>
+          <COLLECTION NAME="RSLSyncPartyLedgers" ISMODIFY="No">
+            <TYPE>Ledger</TYPE>
+            <CHILDOF>$$GroupSundryDebtors</CHILDOF>
+            <BELONGSTO>Yes</BELONGSTO>
+            <NATIVEMETHOD>GUID, Name, Parent, LedgerMobile, LedgerPhone, LedgerContact, Email, PartyGSTIN, IncomeTaxNumber, LedStateName, Pincode, CreditLimit, BillCreditPeriod, OpeningBalance, ClosingBalance, Address</NATIVEMETHOD>
+            <COMPUTE>SVCurrentCompany : $$CurrentCompany</COMPUTE>
+          </COLLECTION>
+          <COLLECTION NAME="RSLSyncSupplierLedgers" ISMODIFY="No">
+            <TYPE>Ledger</TYPE>
+            <CHILDOF>$$GroupSundryCreditors</CHILDOF>
+            <BELONGSTO>Yes</BELONGSTO>
+            <NATIVEMETHOD>GUID, Name, Parent, LedgerMobile, LedgerPhone, LedgerContact, Email, PartyGSTIN, IncomeTaxNumber, LedStateName, Pincode, CreditLimit, BillCreditPeriod, OpeningBalance, ClosingBalance, Address</NATIVEMETHOD>
+            <COMPUTE>SVCurrentCompany : $$CurrentCompany</COMPUTE>
+          </COLLECTION>
+          <COLLECTION NAME="RSLSyncBills" ISMODIFY="No">
+            <TYPE>Bill</TYPE>
+            <NATIVEMETHOD>Name, Parent, OpeningBalance, ClosingBalance, BillDate, BillCreditPeriod</NATIVEMETHOD>
             <COMPUTE>SVCurrentCompany : $$CurrentCompany</COMPUTE>
           </COLLECTION>
         </TDLMESSAGE>
@@ -504,7 +532,7 @@ async function fetchTallyStockItemsXml(
     clearTimeout(timer);
     if (!resp.ok) return null;
     const xml = await resp.text();
-    return /<(?:STOCKITEM|GODOWN|LEDGER)(?:\s|>)/i.test(xml) ? xml : null;
+    return /<(?:STOCKITEM|GODOWN|LEDGER|BILL)(?:\s|>)/i.test(xml) ? xml : null;
   } catch {
     return null;
   }

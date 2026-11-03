@@ -9,6 +9,7 @@ import {
   IndianRupee,
   Package,
   Search,
+  Users,
   Webhook,
 } from "lucide-react";
 import {
@@ -23,6 +24,8 @@ import { formatInr, resolveEndpointsFromHeaders } from "@rsl/core";
 import { ensureWorkspaceSslProvisioned } from "@rsl/queue";
 import { canRoleAccessWebRoute, canRolePerform, formatRoleLabel } from "@rsl/rbac";
 import {
+  buildTallyDisplayBrandTitle,
+  buildWorkspaceTdlFilename,
   detectOutdatedTdlVersion,
   getTallyWorkspaceSummary,
   probeLocalTallyPort9000,
@@ -41,6 +44,7 @@ import { FlashBanner } from "@/components/flash-banner";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
 import { TallyConnectStudio } from "@/components/tally-connect-studio";
 import { TallyLiveSyncBar } from "@/components/tally-live-sync-bar";
+import { TallySuiteNav } from "@/components/tally-suite-nav";
 import {
   createTallyAutomationAction,
   deleteReminderRuleAction,
@@ -48,6 +52,7 @@ import {
   generatePairingCodeAction,
   importTallyFileAction,
   installStarterTemplatesAction,
+  markTallyBillPaidAction,
   recordTallyVoucherAction,
   runDueTallyRemindersAction,
   saveReminderRuleAction,
@@ -204,6 +209,8 @@ export default async function TallySyncPage({
     billQuery ? `&q=${encodeURIComponent(billQuery)}` : ""
   }`;
 
+  const tdlFilename = buildWorkspaceTdlFilename(session.workspace.name);
+  const tallyBrandTitle = buildTallyDisplayBrandTitle(session.workspace.name);
   const topTdlDownloadHref = endpoints.isLocalDev
     ? "/api/export/tally-tdl?target=local"
     : "/api/export/tally-tdl";
@@ -236,18 +243,29 @@ export default async function TallySyncPage({
 
   return (
     <div className="w-full space-y-6">
+      <TallySuiteNav
+        activeSection="vouchers"
+        vouchersCount={tally.vouchers.length}
+        partiesCount={tally.totals.partiesCount}
+        stockItemsCount={tally.totals.stockItemsCount}
+      />
+
       <PageHeader
-        eyebrow="Tally Prime & Collections"
+        eyebrow="All-in-One Tally Prime Suite"
         badge={
           <StatusPill
             label={tally.connectionOverview.overallLabel}
             tone={overviewTone}
           />
         }
-        title="Tally Prime Bills & Automatic WhatsApp"
-        subtitle={`Sync Tally Prime sales bills, receipts, cancellations, and deletions to ${endpoints.primaryDomain} — and send your exact Tally-printed PDF invoice on WhatsApp automatically.`}
+        title="Tally Prime Bills, Paid Settlements & WhatsApp"
+        subtitle={`Sync Tally Prime sales bills, receipts, supplier payments, client ledgers, and stock to ${endpoints.primaryDomain} — bills marked Paid in Tally update automatically, with "${tallyBrandTitle}" inside Tally Prime.`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <ActionLink href="/tally/parties" spinnerSize="xs" className="rsl-btn-secondary">
+              <Users className="mr-1.5 inline h-3.5 w-3.5" />
+              Client Ledgers ({tally.totals.partiesCount})
+            </ActionLink>
             <ActionLink href="/inventory" spinnerSize="xs" className="rsl-btn-secondary">
               <Package className="mr-1.5 inline h-3.5 w-3.5" />
               Inventory &amp; Stock ({tally.totals.stockItemsCount})
@@ -255,7 +273,7 @@ export default async function TallySyncPage({
             {canManageTally && (
               <>
                 <a href={topTdlDownloadHref} className="rsl-btn-primary">
-                  Download Tally Add-On (.tdl v2.6)
+                  Download {tdlFilename} (v2.7)
                 </a>
                 <a href={topConnectorDownloadHref} className="rsl-btn-secondary">
                   Download Windows Connector
@@ -267,12 +285,18 @@ export default async function TallySyncPage({
                 <summary className="rsl-btn-secondary cursor-pointer list-none select-none">
                   Export Register ▾
                 </summary>
-                <div className="absolute right-0 z-20 mt-1.5 flex w-52 flex-col gap-1 rounded-xl border border-zinc-200 bg-white p-1.5 text-xs shadow-lg">
+                <div className="absolute right-0 z-20 mt-1.5 flex w-56 flex-col gap-1 rounded-xl border border-zinc-200 bg-white p-1.5 text-xs shadow-lg">
                   <a
                     href="/api/pdf/tally-receivables"
                     className="rounded-lg px-3 py-2 font-medium text-slate-800 hover:bg-zinc-50"
                   >
                     Download Receivables PDF
+                  </a>
+                  <a
+                    href="/api/export/party-ledgers-csv"
+                    className="rounded-lg px-3 py-2 font-medium text-slate-800 hover:bg-zinc-50"
+                  >
+                    Export Client Ledgers CSV
                   </a>
                   <a
                     href="/api/export/tally-xml"
@@ -338,6 +362,7 @@ export default async function TallySyncPage({
       )}
 
       <TallyLiveSyncBar
+        workspaceName={session.workspace.name}
         vouchersCount={tally.vouchers.length}
         eventsReceivedCount={tally.webhookEndpoint.eventsReceivedCount}
         lastEventAt={tally.webhookEndpoint.lastEventAt}
@@ -534,8 +559,8 @@ export default async function TallySyncPage({
                 title="No Tally bills or receipts yet"
                 description={
                   localPortProbe?.reachable && canManageTally
-                    ? `Tally Prime is open on this PC (Company: ${localPortProbe.activeCompanyName || "Active"} • ${localPortProbe.voucherCount} bill(s)). Click 'Fetch Bills from Tally Now' in the green bar above to pull your saved invoices and native Tally PDFs in 1 click, or load our .tdl v2.6 add-on.`
-                    : "Connect Tally Prime via our 1-click .tdl v2.6 add-on, pair the Windows Connector, or upload an XML/CSV export to get started."
+                    ? `Tally Prime is open on this PC (Company: ${localPortProbe.activeCompanyName || "Active"} • ${localPortProbe.voucherCount} bill(s)). Click 'Fetch Bills from Tally Now' in the green bar above to pull your saved invoices and native Tally PDFs in 1 click, or load ${tdlFilename} (v2.7).`
+                    : `Connect Tally Prime via our personalized ${tdlFilename} (v2.7) add-on, pair the Windows Connector, or upload an XML/CSV export to get started.`
                 }
                 actionLabel={canManageTally ? "Connect Tally Prime" : "View Connection Guide"}
                 actionHref="/tally?tab=connect"
@@ -553,20 +578,22 @@ export default async function TallySyncPage({
                   <tr>
                     <th className="px-6 py-3">Bill # &amp; Date</th>
                     <th className="px-4 py-3">Type</th>
-                    <th className="px-4 py-3">Customer Party</th>
+                    <th className="px-4 py-3">Client / Supplier Ledger</th>
                     <th className="px-4 py-3 text-right">Amount</th>
                     <th className="px-4 py-3 text-right">Balance Due</th>
-                    <th className="px-4 py-3">Status &amp; Tally PDF</th>
+                    <th className="px-4 py-3">Status, Settlement &amp; PDF</th>
                     <th className="px-6 py-3 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100 bg-white">
                   {filteredVouchers.map((v) => {
                     const isCancelled = v.paymentStatus === "cancelled";
-                    const balance = isCancelled
-                      ? 0
-                      : Math.max(0, v.amountPaise - v.paidAmountPaise);
-                    const isOverdue = !isCancelled && balance > 0 && v.dueDate !== null && v.dueDate < nowMs;
+                    const isBillType = v.voucherType === "Sales" || v.voucherType === "Purchase";
+                    const balance =
+                      isCancelled || !isBillType
+                        ? 0
+                        : Math.max(0, v.amountPaise - v.paidAmountPaise);
+                    const isOverdue = !isCancelled && isBillType && balance > 0 && v.dueDate !== null && v.dueDate < nowMs;
                     const compName = companyNameById.get(v.companyId) ?? null;
                     return (
                       <tr
@@ -574,13 +601,15 @@ export default async function TallySyncPage({
                         className={`hover:bg-zinc-50/60 ${isCancelled ? "opacity-65" : ""}`}
                       >
                         <td className="px-6 py-3.5">
-                          <div
-                            className={`font-mono font-bold ${
+                          <ActionLink
+                            href={`/tally/vouchers/${encodeURIComponent(v.id)}`}
+                            spinnerSize="xs"
+                            className={`font-mono font-bold hover:text-emerald-700 hover:underline ${
                               isCancelled ? "text-zinc-500 line-through" : "text-slate-900"
                             }`}
                           >
                             #{v.voucherNumber}
-                          </div>
+                          </ActionLink>
                           <div className="text-[11px] text-zinc-500">
                             {new Date(v.voucherDate).toLocaleDateString("en-IN", {
                               day: "2-digit",
@@ -591,7 +620,17 @@ export default async function TallySyncPage({
                         </td>
                         <td className="px-4 py-3.5 font-medium text-zinc-700">{v.voucherType}</td>
                         <td className="px-4 py-3.5">
-                          <div className="font-semibold text-slate-900">{v.partyName}</div>
+                          {v.partyId ? (
+                            <ActionLink
+                              href={`/tally/parties/${encodeURIComponent(v.partyId)}`}
+                              spinnerSize="xs"
+                              className="font-semibold text-slate-900 hover:text-emerald-700 hover:underline"
+                            >
+                              {v.partyName}
+                            </ActionLink>
+                          ) : (
+                            <div className="font-semibold text-slate-900">{v.partyName}</div>
+                          )}
                           <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
                             <span>{v.partyPhoneE164 || "No phone added"}</span>
                             {compName && tally.companies.length > 1 && (
@@ -624,7 +663,7 @@ export default async function TallySyncPage({
                           {formatInr(v.amountPaise)}
                         </td>
                         <td className="px-4 py-3.5 text-right font-bold tabular-nums text-slate-900">
-                          {formatInr(balance)}
+                          {isBillType ? formatInr(balance) : "—"}
                         </td>
                         <td className="px-4 py-3.5">
                           <div className="flex flex-wrap items-center gap-1.5">
@@ -665,55 +704,105 @@ export default async function TallySyncPage({
                               </span>
                             )}
                           </div>
+                          {v.settlements && v.settlements.length > 0 && (
+                            <div className="mt-1 flex flex-wrap items-center gap-1">
+                              {v.settlements.slice(0, 2).map((s, sIdx) => (
+                                <span
+                                  key={`${v.id}-set-${sIdx}`}
+                                  className="inline-flex items-center rounded-md border border-emerald-200/80 bg-emerald-50/70 px-1.5 py-0.5 text-[10px] font-medium text-emerald-900"
+                                >
+                                  {s.allocationType === "cash_counter"
+                                    ? "Cash Counter Paid"
+                                    : s.settlementVoucherNumber
+                                      ? `${s.settlementVoucherType} #${s.settlementVoucherNumber} (${formatInr(s.amountPaise)})`
+                                      : `Paid ${formatInr(s.amountPaise)}`}
+                                </span>
+                              ))}
+                              {v.settlements.length > 2 && (
+                                <span className="text-[10px] text-zinc-500">
+                                  +{v.settlements.length - 2} more
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td className="px-6 py-3.5 text-right whitespace-nowrap">
-                          {isCancelled ? (
-                            <span className="text-[11px] text-zinc-400">Cancelled in Tally</span>
-                          ) : v.voucherType === "Sales" ? (
-                            !canSendTallyWhatsApp ? (
-                              <span className="text-[11px] text-zinc-400">Read-only</span>
-                            ) : !hasInvoicingEntitlement ? (
-                              <ActionLink
-                                href="/tally?tab=rules"
-                                spinnerSize="xs"
-                                className="text-[11px] font-semibold text-emerald-700 hover:underline"
-                              >
-                                Unlock WhatsApp Send →
-                              </ActionLink>
-                            ) : !v.partyPhoneE164 ? (
-                              <span className="text-[11px] text-zinc-400">No party WhatsApp #</span>
+                          <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                            <ActionLink
+                              href={`/tally/vouchers/${encodeURIComponent(v.id)}`}
+                              spinnerSize="xs"
+                              className="rsl-btn-secondary py-1 px-2.5 text-[11px]"
+                            >
+                              Details
+                            </ActionLink>
+                            {isCancelled ? (
+                              <span className="text-[11px] text-zinc-400">Cancelled</span>
                             ) : (
-                              <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
-                                <form action={sendBillWhatsAppAction} className="inline-flex">
-                                  <input type="hidden" name="voucherId" value={v.id} />
-                                  <input type="hidden" name="sendKind" value="invoice" />
-                                  <input type="hidden" name="returnPath" value={currentBillsReturnPath} />
-                                  <SubmitButton
-                                    spinnerSize="xs"
-                                    pendingText="Sending..."
-                                    className="rsl-btn-secondary py-1 px-2.5 text-[11px]"
-                                  >
-                                    {v.hasNativePdf ? "Send Tally PDF" : "Send Bill"}
-                                  </SubmitButton>
-                                </form>
-                                {balance > 0 && (
-                                  <ConfirmWhatsAppReminderButton
-                                    voucherId={v.id}
-                                    voucherNumber={v.voucherNumber}
-                                    partyName={v.partyName}
-                                    partyPhoneE164={v.partyPhoneE164}
-                                    balanceFormatted={formatInr(balance)}
-                                    action={sendBillWhatsAppAction}
-                                    returnPath={currentBillsReturnPath}
-                                    buttonLabel={`Send Reminder (${v.remindersSentCount})`}
-                                    buttonClassName="rsl-btn-primary py-1 px-2.5 text-[11px]"
-                                  />
+                              <>
+                                {canManageTally && isBillType && balance > 0 && (
+                                  <form action={markTallyBillPaidAction} className="inline-flex">
+                                    <input type="hidden" name="voucherId" value={v.id} />
+                                    <input
+                                      type="hidden"
+                                      name="returnPath"
+                                      value={currentBillsReturnPath}
+                                    />
+                                    <SubmitButton
+                                      spinnerSize="xs"
+                                      pendingText="Marking..."
+                                      className="rsl-btn-secondary py-1 px-2.5 text-[11px] text-emerald-800"
+                                    >
+                                      Mark Paid
+                                    </SubmitButton>
+                                  </form>
                                 )}
-                              </div>
-                            )
-                          ) : (
-                            <span className="text-[11px] text-zinc-400">Receipt recorded</span>
-                          )}
+                                {v.voucherType === "Sales" &&
+                                  (canSendTallyWhatsApp ? (
+                                    !hasInvoicingEntitlement ? (
+                                      <ActionLink
+                                        href="/tally?tab=rules"
+                                        spinnerSize="xs"
+                                        className="text-[11px] font-semibold text-emerald-700 hover:underline"
+                                      >
+                                        Unlock WhatsApp →
+                                      </ActionLink>
+                                    ) : v.partyPhoneE164 ? (
+                                      <>
+                                        <form action={sendBillWhatsAppAction} className="inline-flex">
+                                          <input type="hidden" name="voucherId" value={v.id} />
+                                          <input type="hidden" name="sendKind" value="invoice" />
+                                          <input
+                                            type="hidden"
+                                            name="returnPath"
+                                            value={currentBillsReturnPath}
+                                          />
+                                          <SubmitButton
+                                            spinnerSize="xs"
+                                            pendingText="Sending..."
+                                            className="rsl-btn-secondary py-1 px-2.5 text-[11px]"
+                                          >
+                                            {v.hasNativePdf ? "Send Tally PDF" : "Send Bill"}
+                                          </SubmitButton>
+                                        </form>
+                                        {balance > 0 && (
+                                          <ConfirmWhatsAppReminderButton
+                                            voucherId={v.id}
+                                            voucherNumber={v.voucherNumber}
+                                            partyName={v.partyName}
+                                            partyPhoneE164={v.partyPhoneE164}
+                                            balanceFormatted={formatInr(balance)}
+                                            action={sendBillWhatsAppAction}
+                                            returnPath={currentBillsReturnPath}
+                                            buttonLabel={`Remind (${v.remindersSentCount})`}
+                                            buttonClassName="rsl-btn-primary py-1 px-2.5 text-[11px]"
+                                          />
+                                        )}
+                                      </>
+                                    ) : null
+                                  ) : null)}
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1148,12 +1237,14 @@ export default async function TallySyncPage({
               <input type="hidden" name="preventOverwrite" value="true" />
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div>
-                  <label className="mb-1 block font-semibold text-zinc-700">Bill Type</label>
+                  <label className="mb-1 block font-semibold text-zinc-700">Voucher Type</label>
                   <select name="voucherType" defaultValue="Sales" className="rsl-input">
                     <option value="Sales">Sales Bill (Deducts Stock)</option>
-                    <option value="Receipt">Payment Receipt</option>
+                    <option value="Receipt">Customer Receipt (Settles Sales Bill)</option>
                     <option value="Purchase">Purchase Bill (Adds Stock)</option>
-                    <option value="CreditNote">Credit Note (Sales Return)</option>
+                    <option value="Payment">Supplier Payment (Settles Purchase Bill)</option>
+                    <option value="CreditNote">Credit Note / Sales Return</option>
+                    <option value="DebitNote">Debit Note / Purchase Return</option>
                   </select>
                 </div>
                 <div>
@@ -1231,6 +1322,29 @@ export default async function TallySyncPage({
                 <div>
                   <label className="mb-1 block font-semibold text-zinc-700">Due Date</label>
                   <input name="dueDateIso" type="date" className="rsl-input" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block font-semibold text-zinc-700">
+                    Settle Against Bill # (Optional — for Receipt / Payment / CN / DN)
+                  </label>
+                  <input
+                    name="againstBillNumber"
+                    placeholder="e.g. GST/26-27/001 (leave blank for FIFO auto-match)"
+                    className="rsl-input font-mono text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block font-semibold text-zinc-700">
+                    Narration / UTR / Cheque Ref (Optional)
+                  </label>
+                  <input
+                    name="narration"
+                    placeholder="e.g. Paid via NEFT UTR 4012908..."
+                    className="rsl-input text-xs"
+                  />
                 </div>
               </div>
 

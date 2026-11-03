@@ -40,14 +40,96 @@ import {
   syncVoucherInventoryLineItems,
   type ParsedTallyVoucherLineItem,
 } from "./inventory";
+import {
+  extractBillAllocationsFromVoucherXml,
+  isCashOrBankPartyName,
+  normalizeBillAllocationType,
+  parseBillAllocationsJson,
+  reconcileCompanyBillSettlementsAndPartyBalances,
+  serializeBillAllocationsJson,
+  type ParsedTallyBillAllocation,
+  type TallySuiteVoucherType,
+} from "./ledgers";
 
 export * from "./inventory";
+export * from "./ledgers";
 
 export const AGENT_HEARTBEAT_STALE_MS = 120_000;
-export const LATEST_TALLY_TDL_VERSION = "2.6";
+export const LATEST_TALLY_TDL_VERSION = "2.7";
 const TALLY_COMPANY_ROUTING_SETTING_KEY = "tally.company_routing";
 const TALLY_BATCH_PREFIX = "tally.sync_batch.";
 const PENDING_PDF_ID_PREFIX = "pending_pdf:";
+
+function toCleanBusinessSlug(workspaceName: string, maxLen = 40): string {
+  const cleaned = (workspaceName || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, maxLen)
+    .replace(/-+$/g, "");
+  return cleaned || "business";
+}
+
+/**
+ * Builds a personalized business-named Tally Prime `.tdl` filename
+ * (e.g. `"Sharma Traders"` -> `"sharma-traders-rsl-sync.tdl"`).
+ */
+export function buildWorkspaceTdlFilename(
+  workspaceName: string,
+  opts?: { isolatedSlug?: string }
+): string {
+  const bizSlug = toCleanBusinessSlug(workspaceName, 38);
+  const isoSlug = opts?.isolatedSlug
+    ? toCleanBusinessSlug(opts.isolatedSlug, 16)
+    : "";
+  if (isoSlug && isoSlug !== bizSlug) {
+    return `${bizSlug}-${isoSlug}-rsl-sync.tdl`;
+  }
+  return `${bizSlug}-rsl-sync.tdl`;
+}
+
+/**
+ * Builds a personalized Windows 1-Click Installer `.bat` filename
+ * (e.g. `"Sharma Traders"` -> `"Install-Sharma-Traders-RSL-Sync.bat"`).
+ */
+export function buildWindowsInstallerFilename(workspaceName: string): string {
+  const words = (workspaceName || "")
+    .replace(/[^A-Za-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 4)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+  const titleSlug = words.length > 0 ? words.join("-") : "Business";
+  return `Install-${titleSlug}-RSL-Sync.bat`;
+}
+
+/**
+ * Builds the sanitized in-Tally display brand title (`"<Business Name> & RSL Sync"`),
+ * guaranteed free of colons, quotes, brackets, or newlines so it is 100% safe inside
+ * Tally Prime Gateway Menu items, `Start Progress` headers, and `Msg Box` titles.
+ */
+export function buildTallyDisplayBrandTitle(
+  workspaceName: string,
+  opts?: { maxBusinessChars?: number }
+): string {
+  const maxChars = opts?.maxBusinessChars ?? 26;
+  let cleanBiz = (workspaceName || "")
+    .replace(/[^\x20-\x7E]/g, " ")
+    .replace(/[:"'[\]\\`\r\n]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  cleanBiz = cleanBiz.replace(/\s*&\s*rsl\s*sync$/i, "").trim();
+  if (!cleanBiz) {
+    cleanBiz = "Business";
+  }
+  if (cleanBiz.length > maxChars) {
+    cleanBiz = cleanBiz.slice(0, maxChars).trim();
+  }
+  return `${cleanBiz} & RSL Sync`;
+}
 
 // =========================================================================
 // Exact Native Tally-Printed PDF Storage & Signed URL Engine
@@ -1186,17 +1268,51 @@ export function getTallyWorkspaceSummary(workspaceId: string) {
     .select({ id: tenantDataSchema.tallyStockItems.id })
     .from(tenantDataSchema.tallyStockItems)
     .all().length;
+  const partyRows = dataDb
+    .select({
+      id: tenantDataSchema.tallyParties.id,
+      companyId: tenantDataSchema.tallyParties.companyId,
+      name: tenantDataSchema.tallyParties.name,
+    })
+    .from(tenantDataSchema.tallyParties)
+    .all();
+  const partyIdLookup = new Map(
+    partyRows.map((p) => [`${p.companyId}::${p.name.trim().toLowerCase()}`, p.id])
+  );
+  const settlementRows = dataDb
+    .select()
+    .from(tenantDataSchema.tallyBillSettlements)
+    .all();
+  const settlementsByBillMap = new Map<
+    string,
+    Array<typeof tenantDataSchema.tallyBillSettlements.$inferSelect>
+  >();
+  const voucherSettledViaReceiptOrCnMap = new Map<string, number>();
+  for (const s of settlementRows) {
+    const arr = settlementsByBillMap.get(s.billVoucherId) ?? [];
+    arr.push(s);
+    settlementsByBillMap.set(s.billVoucherId, arr);
+    if (s.settlementVoucherId) {
+      voucherSettledViaReceiptOrCnMap.set(
+        s.billVoucherId,
+        (voucherSettledViaReceiptOrCnMap.get(s.billVoucherId) ?? 0) + s.amountPaise
+      );
+    }
+  }
+
   const nextSuggestedBillNumber = suggestNextSequentialVoucherNumber(vouchers);
 
   const enrichedVouchers = vouchers.map((v) => {
     const pdfMeta = pdfStatusMap.get(v.id);
     return {
       ...v,
+      partyId: partyIdLookup.get(`${v.companyId}::${v.partyName.trim().toLowerCase()}`) ?? null,
       hasNativePdf: Boolean(pdfMeta),
       nativePdfFilename: pdfMeta?.filename ?? null,
       nativePdfByteSize: pdfMeta?.byteSize ?? null,
       nativePdfCapturedFrom: pdfMeta?.capturedFrom ?? null,
       lineItems: lineItemsMap.get(v.id) ?? [],
+      settlements: settlementsByBillMap.get(v.id) ?? [],
     };
   });
 
@@ -1208,6 +1324,42 @@ export function getTallyWorkspaceSummary(workspaceId: string) {
   let latestVoucherUpdatedAt = 0;
   let nativePdfCount = 0;
 
+  // Deduplicate Receipt vouchers vs settled Sales bills so moneyCollected is never counted twice!
+  const partyReceiptTotals = new Map<string, number>();
+  const partySalesDirectPaidTotals = new Map<string, number>();
+  const partyHasSettlementRows = new Set<string>();
+  for (const v of enrichedVouchers) {
+    if (v.paymentStatus === "cancelled") continue;
+    const pKey = `${v.companyId}::${v.partyName.trim().toLowerCase()}`;
+    if (v.settlements.length > 0) {
+      partyHasSettlementRows.add(pKey);
+    }
+    if (v.voucherType === "Receipt") {
+      partyReceiptTotals.set(pKey, (partyReceiptTotals.get(pKey) ?? 0) + v.amountPaise);
+    } else if (v.voucherType === "Sales") {
+      const settledBySeparateVch = voucherSettledViaReceiptOrCnMap.get(v.id) ?? 0;
+      const nonVoucherPaid = Math.max(0, v.paidAmountPaise - settledBySeparateVch);
+      partySalesDirectPaidTotals.set(
+        pKey,
+        (partySalesDirectPaidTotals.get(pKey) ?? 0) + nonVoucherPaid
+      );
+    }
+  }
+  const allCollectionKeys = new Set([
+    ...partyReceiptTotals.keys(),
+    ...partySalesDirectPaidTotals.keys(),
+  ]);
+  for (const pk of allCollectionKeys) {
+    const rcptAmt = partyReceiptTotals.get(pk) ?? 0;
+    const directSalesAmt = partySalesDirectPaidTotals.get(pk) ?? 0;
+    // When `tally_bill_settlements` is populated, `settledBySeparateVch` already subtracted `rcptAmt`
+    // from `nonVoucherPaid`; if raw SQL rows were inserted without running settlement reconciliation,
+    // `Math.max(rcptAmt, directSalesAmt)` prevents double-counting.
+    totalCollectedPaise += partyHasSettlementRows.has(pk)
+      ? rcptAmt + directSalesAmt
+      : Math.max(rcptAmt, directSalesAmt);
+  }
+
   for (const v of enrichedVouchers) {
     if (v.hasNativePdf) nativePdfCount++;
     if (v.updatedAt > latestVoucherUpdatedAt) {
@@ -1215,15 +1367,12 @@ export function getTallyWorkspaceSummary(workspaceId: string) {
     }
     if (v.voucherType === "Sales" && v.paymentStatus !== "cancelled") {
       totalBilledPaise += v.amountPaise;
-      totalCollectedPaise += v.paidAmountPaise;
       const balance = Math.max(0, v.amountPaise - v.paidAmountPaise);
       totalPendingPaise += balance;
       if (balance > 0 && v.dueDate && v.dueDate < now) {
         overdueCount++;
         overdueAmountPaise += balance;
       }
-    } else if (v.voucherType === "Receipt" && v.paymentStatus !== "cancelled") {
-      totalCollectedPaise += v.amountPaise;
     }
   }
 
@@ -1251,6 +1400,7 @@ export function getTallyWorkspaceSummary(workspaceId: string) {
       overdueAmountPaise,
       nativePdfCount,
       stockItemsCount,
+      partiesCount: partyRows.length,
     },
   };
 }
@@ -1537,11 +1687,14 @@ export const recordTallyVoucher = defineAction({
     companyName: z.string().min(2).max(120).default("Primary Tally Company"),
     voucherId: z.string().optional(),
     voucherNumber: z.string().min(1).max(60),
-    voucherType: z.enum(["Sales", "Receipt", "CreditNote", "Purchase"]),
+    voucherType: z.enum(["Sales", "Receipt", "Payment", "CreditNote", "DebitNote", "Purchase"]),
     partyName: z.string().min(1).max(120),
     partyPhoneE164: z.string().optional(),
     amountRupees: z.coerce.number().positive(),
     paidAmountRupees: z.coerce.number().min(0).default(0),
+    againstBillNumber: z.string().max(64).optional(),
+    ledgerAccountName: z.string().max(120).optional(),
+    narration: z.string().max(300).optional(),
     voucherDateIso: z.string(),
     dueDateIso: z.string().optional(),
     preventOverwrite: z.boolean().default(false),
@@ -1601,26 +1754,42 @@ export const recordTallyVoucher = defineAction({
     const cleanPhoneE164 = normalizePhoneOrNull(input.partyPhoneE164) ?? (input.partyPhoneE164?.trim() || null);
 
     const amountPaise = rupeesToPaise(input.amountRupees);
-    const paidAmountPaise =
-      input.voucherType === "Receipt" || input.voucherType === "CreditNote"
+    const isSettlementVoucher =
+      input.voucherType === "Receipt" ||
+      input.voucherType === "Payment" ||
+      input.voucherType === "CreditNote" ||
+      input.voucherType === "DebitNote";
+    const directPaidPaise = isSettlementVoucher
+      ? amountPaise
+      : isCashOrBankPartyName(cleanPartyName)
         ? amountPaise
         : Math.min(amountPaise, rupeesToPaise(input.paidAmountRupees));
+    const paidAmountPaise = directPaidPaise;
 
     const paymentStatus =
-      input.voucherType === "Receipt" ||
-      input.voucherType === "CreditNote" ||
-      paidAmountPaise >= amountPaise
+      isSettlementVoucher || paidAmountPaise >= amountPaise
         ? "paid"
         : paidAmountPaise > 0
           ? "partial"
           : "unpaid";
+
+    const billAllocationsJson =
+      isSettlementVoucher && input.againstBillNumber?.trim()
+        ? serializeBillAllocationsJson([
+            {
+              billName: input.againstBillNumber.trim(),
+              billType: "Agst Ref",
+              amountPaise,
+            },
+          ])
+        : "[]";
 
     const voucherDate = new Date(input.voucherDateIso).getTime() || now;
     const dueDate = input.dueDateIso
       ? new Date(input.dueDateIso).getTime()
       : voucherDate + 15 * 24 * 60 * 60 * 1000;
 
-    let targetExisting = input.voucherId?.trim()
+    const targetExisting = input.voucherId?.trim()
       ? db
           .select()
           .from(tenantDataSchema.tallyVouchers)
@@ -1698,8 +1867,13 @@ export const recordTallyVoucher = defineAction({
         partyPhoneE164: cleanPhoneE164,
         amountPaise,
         paidAmountPaise,
+        directPaidPaise,
+        narration: input.narration?.trim() || null,
+        ledgerAccountName: input.ledgerAccountName?.trim() || null,
+        billAllocationsJson,
         voucherDate,
-        dueDate: input.voucherType === "Sales" ? dueDate : null,
+        dueDate:
+          input.voucherType === "Sales" || input.voucherType === "Purchase" ? dueDate : null,
         paymentStatus,
         alterId: nextAlterId,
         contentHash,
@@ -1715,8 +1889,13 @@ export const recordTallyVoucher = defineAction({
           partyPhoneE164: cleanPhoneE164,
           amountPaise,
           paidAmountPaise,
+          directPaidPaise,
+          narration: input.narration?.trim() || null,
+          ledgerAccountName: input.ledgerAccountName?.trim() || null,
+          billAllocationsJson,
           voucherDate,
-          dueDate: input.voucherType === "Sales" ? dueDate : null,
+          dueDate:
+            input.voucherType === "Sales" || input.voucherType === "Purchase" ? dueDate : null,
           paymentStatus,
           alterId: nextAlterId,
           contentHash,
@@ -1733,6 +1912,15 @@ export const recordTallyVoucher = defineAction({
       voucherType: input.voucherType,
       phoneE164: cleanPhoneE164,
       now,
+    });
+
+    reconcileCompanyBillSettlementsAndPartyBalances({
+      db,
+      workspaceId: ctx.workspaceId,
+      companyId: company.id,
+      now,
+      cancelPaidVoucherOutbox: (paidVch) =>
+        cancelPendingOutboxJobsForVoucher(ctx.workspaceId, paidVch),
     });
 
     db.insert(tenantDataSchema.syncRuns)
@@ -2701,28 +2889,51 @@ export function exportTallyVouchersAsXml(workspaceId: string): string {
       const amountRupees = (Math.abs(v.amountPaise) / 100).toFixed(2);
       const paidRupees = (Math.abs(v.paidAmountPaise) / 100).toFixed(2);
       const dateStr = formatTallyXmlDate(v.voucherDate);
-      const tallyVoucherType = v.voucherType === "CreditNote" ? "Credit Note" : v.voucherType;
+      const tallyVoucherType =
+        v.voucherType === "CreditNote"
+          ? "Credit Note"
+          : v.voucherType === "DebitNote"
+            ? "Debit Note"
+            : v.voucherType;
 
       // Tally XML double-entry invariant:
       //   Debit  -> ISDEEMEDPOSITIVE=Yes, AMOUNT = -X.XX
       //   Credit -> ISDEEMEDPOSITIVE=No,  AMOUNT =  X.XX
       //   Sum of AMOUNT across ALLLEDGERENTRIES.LIST = 0.00
-      const partyIsDebit = v.voucherType === "Sales";
+      const partyIsDebit =
+        v.voucherType === "Sales" || v.voucherType === "Payment" || v.voucherType === "DebitNote";
       const contraLedgerName =
-        v.voucherType === "Sales"
+        v.ledgerAccountName?.trim() ||
+        (v.voucherType === "Sales"
           ? "Sales Account"
-          : v.voucherType === "Receipt"
+          : v.voucherType === "Receipt" || v.voucherType === "Payment"
             ? "Cash"
             : v.voucherType === "CreditNote"
               ? "Sales Returns"
-              : "Purchase Account";
+              : v.voucherType === "DebitNote"
+                ? "Purchase Returns"
+                : "Purchase Account");
 
       const partyDeemedPositive = partyIsDebit ? "Yes" : "No";
       const partySignedAmount = partyIsDebit ? `-${amountRupees}` : amountRupees;
       const contraDeemedPositive = partyIsDebit ? "No" : "Yes";
       const contraSignedAmount = partyIsDebit ? amountRupees : `-${amountRupees}`;
 
+      const parsedAllocs = parseBillAllocationsJson(v.billAllocationsJson);
+      const billAllocXml =
+        parsedAllocs.length > 0
+          ? "\n" +
+            parsedAllocs
+              .map((a) => {
+                const aRupees = ((a.amountPaise > 0 ? a.amountPaise : Math.abs(v.amountPaise)) / 100).toFixed(2);
+                const signedAllocAmt = partyIsDebit ? `-${aRupees}` : aRupees;
+                return `            <BILLALLOCATIONS.LIST>\n              <NAME>${escapeXml(a.billName)}</NAME>\n              <BILLTYPE>${escapeXml(a.billType)}</BILLTYPE>\n              <AMOUNT>${signedAllocAmt}</AMOUNT>\n            </BILLALLOCATIONS.LIST>`;
+              })
+              .join("\n")
+          : "";
+
       const narrationParts = [`RSL Sync #${v.voucherNumber}`];
+      if (v.narration) narrationParts.push(v.narration);
       if (v.partyPhoneE164) narrationParts.push(`Phone: ${v.partyPhoneE164}`);
       if (v.paidAmountPaise > 0) narrationParts.push(`Paid: INR ${paidRupees}`);
       if (v.originalCurrency && v.originalCurrency !== "INR" && v.originalAmountMinor) {
@@ -2746,7 +2957,7 @@ export function exportTallyVouchersAsXml(workspaceId: string): string {
             <LEDGERNAME>${escapeXml(v.partyName)}</LEDGERNAME>
             <ISPARTYLEDGER>Yes</ISPARTYLEDGER>
             <ISDEEMEDPOSITIVE>${partyDeemedPositive}</ISDEEMEDPOSITIVE>
-            <AMOUNT>${partySignedAmount}</AMOUNT>
+            <AMOUNT>${partySignedAmount}</AMOUNT>${billAllocXml}
           </ALLLEDGERENTRIES.LIST>
           <ALLLEDGERENTRIES.LIST>
             <LEDGERNAME>${escapeXml(contraLedgerName)}</LEDGERNAME>
@@ -3001,12 +3212,16 @@ export interface ParsedTallyXmlVoucher {
   masterId?: string;
   companyName?: string;
   voucherNumber: string;
-  voucherType: "Sales" | "Receipt" | "CreditNote" | "Purchase";
+  voucherType: TallySuiteVoucherType;
   partyName: string;
   partyParentGroup?: string;
   partyPhone?: string;
   amountRupees: number;
   paidAmountRupees: number;
+  hasExplicitPaidAmount?: boolean;
+  narration?: string;
+  ledgerAccountName?: string;
+  billAllocations?: ParsedTallyBillAllocation[];
   originalCurrency?: string;
   originalAmountMinor?: number | null;
   exchangeRateMicros?: number | null;
@@ -3020,13 +3235,15 @@ export interface ParsedTallyXmlVoucher {
 
 function normalizeLedgerParentGroup(
   rawGroup: string | undefined,
-  voucherType: "Sales" | "Receipt" | "CreditNote" | "Purchase"
+  voucherType: TallySuiteVoucherType
 ): string {
   const trimmed = (rawGroup ?? "").trim();
   if (/creditor/i.test(trimmed)) return "Sundry Creditors";
   if (/debtor/i.test(trimmed)) return "Sundry Debtors";
   if (trimmed) return trimmed;
-  return voucherType === "Purchase" ? "Sundry Creditors" : "Sundry Debtors";
+  return voucherType === "Purchase" || voucherType === "Payment" || voucherType === "DebitNote"
+    ? "Sundry Creditors"
+    : "Sundry Debtors";
 }
 
 function upsertWorkspaceTallyParty(params: {
@@ -3034,13 +3251,14 @@ function upsertWorkspaceTallyParty(params: {
   workspaceId: string;
   companyId: string;
   partyName: string;
-  voucherType: "Sales" | "Receipt" | "CreditNote" | "Purchase";
+  voucherType: TallySuiteVoucherType;
   parentGroup?: string;
   phoneE164?: string | null;
   now: number;
 }): void {
   const cleanName = params.partyName.trim();
   if (!cleanName || cleanName === "Customer" || cleanName === "Deleted") return;
+  if (isCashOrBankPartyName(cleanName)) return;
   const partyGuid = `pty_${params.companyId}_${cleanName.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 60)}`;
   const parentGroup = normalizeLedgerParentGroup(params.parentGroup, params.voucherType);
 
@@ -3067,7 +3285,7 @@ function upsertWorkspaceTallyParty(params: {
     })
     .run();
 
-  // Recompute signed closing balance from company vouchers (Sales +, Receipt -, CreditNote -)
+  // Recompute signed closing balance from company vouchers (Sales/Payment/DebitNote +, Receipt/CreditNote/Purchase -)
   const partyVouchers = params.db
     .select({
       voucherType: tenantDataSchema.tallyVouchers.voucherType,
@@ -3086,10 +3304,13 @@ function upsertWorkspaceTallyParty(params: {
   let signedBalancePaise = 0;
   for (const pv of partyVouchers) {
     if (pv.paymentStatus === "cancelled") continue;
-    if (pv.voucherType === "Sales") signedBalancePaise += pv.amountPaise;
-    else if (pv.voucherType === "Receipt" || pv.voucherType === "CreditNote") {
-      signedBalancePaise -= pv.amountPaise;
-    } else if (pv.voucherType === "Purchase") {
+    if (pv.voucherType === "Sales" || pv.voucherType === "Payment" || pv.voucherType === "DebitNote") {
+      signedBalancePaise += pv.amountPaise;
+    } else if (
+      pv.voucherType === "Receipt" ||
+      pv.voucherType === "CreditNote" ||
+      pv.voucherType === "Purchase"
+    ) {
       signedBalancePaise -= pv.amountPaise;
     }
   }
@@ -3188,19 +3409,20 @@ export function parseTallyXmlEnvelope(
         : rawGuid
           ? `VCH-${rawGuid.replace(/[^a-zA-Z0-9]/g, "").slice(-6).toUpperCase()}`
           : `VCH-${vouchers.length + 1}`);
-    const rawType =
-      extractXmlTag(headerOnlyBlock, "RSLBASEVCHTYPE") ||
-      extractXmlTag(headerOnlyBlock, "PARENT") ||
+    const rawBaseType =
+      extractXmlTag(headerOnlyBlock, "RSLBASEVCHTYPE") || extractXmlTag(headerOnlyBlock, "PARENT");
+    const rawTypeName =
       extractXmlTag(headerOnlyBlock, "VOUCHERTYPENAME") ||
       unescapeXml(vchTypeAttrMatch?.[1] ?? "Sales");
+    const rawType = rawBaseType || rawTypeName;
     if (
-      /^(contra|journal|payment|memorandum|reversing\s*journal|stock\s*journal|physical\s*stock|sales\s*order|purchase\s*order|delivery\s*note|receipt\s*note|rejections\s*in|rejections\s*out)$/i.test(
+      /^(contra|journal|memorandum|reversing\s*journal|stock\s*journal|physical\s*stock|sales\s*order|purchase\s*order|delivery\s*note|receipt\s*note|rejections\s*in|rejections\s*out)$/i.test(
         rawType.trim()
       )
     ) {
       continue;
     }
-    const voucherType = normalizeVoucherType(rawType);
+    const voucherType = normalizeVoucherType(rawTypeName, rawBaseType);
 
     const rawExtractedParty =
       extractXmlTag(headerOnlyBlock, "PARTYLEDGERNAME") ||
@@ -3230,11 +3452,32 @@ export function parseTallyXmlEnvelope(
     const amountRupees = amountInfo.inrRupees > 0 ? amountInfo.inrRupees : inventorySumRupees;
     if (amountRupees <= 0 && !isCancelled && !isDeleted) continue;
 
+    const { allocations: xmlBillAllocations, contraLedgerName } =
+      extractBillAllocationsFromVoucherXml(block, partyName);
+    const rslAgstBill = extractXmlTag(headerOnlyBlock, "RSLAGSTBILL").trim();
+    if (
+      rslAgstBill &&
+      !xmlBillAllocations.some((a) => a.billName.toLowerCase() === rslAgstBill.toLowerCase())
+    ) {
+      xmlBillAllocations.push({
+        billName: rslAgstBill,
+        billType: "Agst Ref",
+        amountPaise: rupeesToPaise(amountRupees),
+      });
+    }
+
     const rawPaidTag =
       extractXmlTag(headerOnlyBlock, "RSLPAIDAMOUNT") || narrationPaidMatch?.[1]?.trim() || "";
     const rawPaid = parseTallyNumericAmount(rawPaidTag);
-    const paidAmountRupees =
-      voucherType === "Receipt" || voucherType === "CreditNote"
+    const isCashCounter = isCashOrBankPartyName(partyName);
+    const isSettlementVoucher =
+      voucherType === "Receipt" ||
+      voucherType === "Payment" ||
+      voucherType === "CreditNote" ||
+      voucherType === "DebitNote";
+    const paidAmountRupees = isSettlementVoucher
+      ? amountRupees
+      : isCashCounter
         ? amountRupees
         : rawPaid > 0
           ? Math.min(amountRupees, rawPaid)
@@ -3247,7 +3490,9 @@ export function parseTallyXmlEnvelope(
       extractXmlTag(headerOnlyBlock, "BASICDUEDATEOFPYMT") ||
       extractXmlTag(headerOnlyBlock, "DUEDATE");
     const dueDate =
-      voucherType === "Sales" ? parseTallyDueDateOrCreditDays(rawDue, vDate) : null;
+      voucherType === "Sales" || voucherType === "Purchase"
+        ? parseTallyDueDateOrCreditDays(rawDue, vDate)
+        : null;
 
     const alterIdNum = Number(extractXmlTag(headerOnlyBlock, "ALTERID").replace(/\D/g, "") || 0);
     if (Number.isFinite(alterIdNum) && alterIdNum > maxAlterId) {
@@ -3267,6 +3512,10 @@ export function parseTallyXmlEnvelope(
       partyPhone: partyPhone || undefined,
       amountRupees,
       paidAmountRupees,
+      hasExplicitPaidAmount: rawPaid > 0 || isCashCounter,
+      narration: narration || undefined,
+      ledgerAccountName: contraLedgerName || undefined,
+      billAllocations: xmlBillAllocations.length > 0 ? xmlBillAllocations : undefined,
       originalCurrency: amountInfo.originalCurrency,
       originalAmountMinor: amountInfo.originalAmountMinor,
       exchangeRateMicros: amountInfo.exchangeRateMicros,
@@ -3290,7 +3539,7 @@ export function parseTallyXmlEnvelope(
 }
 
 /**
- * Bulk Import Tally Bills, Receipts & Inventory Masters from either Tally Prime XML (<ENVELOPE>/<VOUCHER>/<STOCKITEM>)
+ * Bulk Import Tally Bills, Receipts, Payments & Inventory Masters from either Tally Prime XML (<ENVELOPE>/<VOUCHER>/<STOCKITEM>)
  * or Accounting CSV!
  */
 export const bulkImportTallyData = defineAction({
@@ -3302,7 +3551,7 @@ export const bulkImportTallyData = defineAction({
     rawContent: z.string().min(10),
   }),
   summarize: (input, out?: { importedCount: number }) =>
-    `Imported ${out?.importedCount ?? 0} Tally bills/receipts via ${input.format.toUpperCase()}`,
+    `Imported ${out?.importedCount ?? 0} Tally vouchers via ${input.format.toUpperCase()}`,
   handler: (ctx, input) => {
     const db = tenantDataDb(ctx);
     const now = Date.now();
@@ -3311,12 +3560,16 @@ export const bulkImportTallyData = defineAction({
       guid?: string;
       masterId?: string;
       voucherNumber: string;
-      voucherType: "Sales" | "Receipt" | "CreditNote" | "Purchase";
+      voucherType: TallySuiteVoucherType;
       partyName: string;
       partyParentGroup?: string;
       partyPhone?: string;
       amountPaise: number;
       paidAmountPaise: number;
+      directPaidPaise: number;
+      narration?: string | null;
+      ledgerAccountName?: string | null;
+      billAllocationsJson?: string;
       originalCurrency: string;
       originalAmountMinor: number | null;
       exchangeRateMicros: number | null;
@@ -3333,7 +3586,7 @@ export const bulkImportTallyData = defineAction({
     let stockItemsUpserted = 0;
 
     if (input.format === "tally_xml") {
-      if (/<(?:STOCKITEM|GODOWN|LEDGER)(?:\s|>)/i.test(input.rawContent)) {
+      if (/<(?:STOCKITEM|GODOWN|LEDGER|BILL)(?:\s|>)/i.test(input.rawContent)) {
         const routing = getTallyCompanyRoutingConfig(ctx.workspaceId);
         const mastersOut = ingestTallyMastersXmlForWorkspace({
           workspaceId: ctx.workspaceId,
@@ -3343,7 +3596,10 @@ export const bulkImportTallyData = defineAction({
         });
         stockItemsUpserted = mastersOut.stockItemsUpserted;
         mastersImportedTotal =
-          mastersOut.stockItemsUpserted + mastersOut.godownsUpserted + mastersOut.partiesUpserted;
+          mastersOut.stockItemsUpserted +
+          mastersOut.godownsUpserted +
+          mastersOut.partiesUpserted +
+          mastersOut.billClearancesApplied;
       }
 
       const xmlResult = parseTallyXmlEnvelope(input.rawContent, resolvedCompanyName);
@@ -3354,6 +3610,8 @@ export const bulkImportTallyData = defineAction({
         resolvedCompanyName = xmlResult.detectedCompanyName;
       }
       for (const v of xmlResult.vouchers) {
+        const amtPaise = Math.max(0, rupeesToPaise(v.amountRupees));
+        const paidPaise = Math.max(0, rupeesToPaise(v.paidAmountRupees));
         parsedItems.push({
           guid: v.guid,
           masterId: v.masterId,
@@ -3362,8 +3620,12 @@ export const bulkImportTallyData = defineAction({
           partyName: v.partyName,
           partyParentGroup: v.partyParentGroup,
           partyPhone: normalizePhoneOrNull(v.partyPhone) ?? v.partyPhone,
-          amountPaise: Math.max(0, rupeesToPaise(v.amountRupees)),
-          paidAmountPaise: Math.max(0, rupeesToPaise(v.paidAmountRupees)),
+          amountPaise: amtPaise,
+          paidAmountPaise: paidPaise,
+          directPaidPaise: paidPaise,
+          narration: v.narration ?? null,
+          ledgerAccountName: v.ledgerAccountName ?? null,
+          billAllocationsJson: serializeBillAllocationsJson(v.billAllocations ?? []),
           originalCurrency: v.originalCurrency ?? "INR",
           originalAmountMinor: v.originalAmountMinor ?? null,
           exchangeRateMicros: v.exchangeRateMicros ?? null,
@@ -3394,6 +3656,9 @@ export const bulkImportTallyData = defineAction({
       const iPaid = idx(["paid", "received"]);
       const iDate = idx(["voucherdate", "billdate", "date"]);
       const iDue = idx(["duedate", "due"]);
+      const iAgst = idx(["againstbill", "agstref", "refbill", "against"]);
+      const iNarr = idx(["narration", "remarks", "notes"]);
+      const iAcct = idx(["ledgeraccount", "bank", "cashledger", "account"]);
 
       for (let r = 1; r < lines.length; r++) {
         const cols = lines[r]!
@@ -3411,8 +3676,14 @@ export const bulkImportTallyData = defineAction({
         if (amountPaise <= 0) continue;
 
         const paidRaw = iPaid >= 0 ? parseTallyNumericAmount(cols[iPaid] || "0") : 0;
-        const paidAmountPaise =
-          voucherType === "Receipt" || voucherType === "CreditNote"
+        const isSettlementVch =
+          voucherType === "Receipt" ||
+          voucherType === "Payment" ||
+          voucherType === "CreditNote" ||
+          voucherType === "DebitNote";
+        const paidAmountPaise = isSettlementVch
+          ? amountPaise
+          : isCashOrBankPartyName(partyName)
             ? amountPaise
             : Math.min(amountPaise, rupeesToPaise(paidRaw));
 
@@ -3421,6 +3692,9 @@ export const bulkImportTallyData = defineAction({
           iDue >= 0 && cols[iDue]
             ? new Date(cols[iDue]!).getTime() || vDate + 15 * 86400_000
             : vDate + 15 * 86400_000;
+        const agstBill = iAgst >= 0 && cols[iAgst] ? cols[iAgst]!.trim() : "";
+        const narration = iNarr >= 0 && cols[iNarr] ? cols[iNarr]!.trim() : null;
+        const ledgerAccountName = iAcct >= 0 && cols[iAcct] ? cols[iAcct]!.trim() : null;
 
         parsedItems.push({
           voucherNumber,
@@ -3429,11 +3703,19 @@ export const bulkImportTallyData = defineAction({
           partyPhone: partyPhone || undefined,
           amountPaise,
           paidAmountPaise,
+          directPaidPaise: paidAmountPaise,
+          narration,
+          ledgerAccountName,
+          billAllocationsJson: agstBill
+            ? serializeBillAllocationsJson([
+                { billName: agstBill, billType: "Agst Ref", amountPaise },
+              ])
+            : "[]",
           originalCurrency: amtInfo.originalCurrency,
           originalAmountMinor: amtInfo.originalAmountMinor,
           exchangeRateMicros: amtInfo.exchangeRateMicros,
           voucherDate: vDate,
-          dueDate: voucherType === "Sales" ? dDate : null,
+          dueDate: voucherType === "Sales" || voucherType === "Purchase" ? dDate : null,
         });
       }
     }
@@ -3490,7 +3772,9 @@ export const bulkImportTallyData = defineAction({
         const paymentStatus = item.isCancelled
           ? "cancelled"
           : item.voucherType === "Receipt" ||
+              item.voucherType === "Payment" ||
               item.voucherType === "CreditNote" ||
+              item.voucherType === "DebitNote" ||
               item.paidAmountPaise >= item.amountPaise
             ? "paid"
             : item.paidAmountPaise > 0
@@ -3514,6 +3798,10 @@ export const bulkImportTallyData = defineAction({
             partyPhoneE164: item.partyPhone || null,
             amountPaise: item.amountPaise,
             paidAmountPaise: item.paidAmountPaise,
+            directPaidPaise: item.directPaidPaise,
+            narration: item.narration ?? null,
+            ledgerAccountName: item.ledgerAccountName ?? null,
+            billAllocationsJson: item.billAllocationsJson ?? "[]",
             originalCurrency: item.originalCurrency,
             originalAmountMinor: item.originalAmountMinor,
             exchangeRateMicros: item.exchangeRateMicros,
@@ -3534,6 +3822,10 @@ export const bulkImportTallyData = defineAction({
               partyName: item.partyName,
               amountPaise: item.amountPaise,
               paidAmountPaise: item.paidAmountPaise,
+              directPaidPaise: item.directPaidPaise,
+              narration: item.narration ?? null,
+              ledgerAccountName: item.ledgerAccountName ?? null,
+              billAllocationsJson: item.billAllocationsJson ?? "[]",
               originalCurrency: item.originalCurrency,
               originalAmountMinor: item.originalAmountMinor,
               exchangeRateMicros: item.exchangeRateMicros,
@@ -3577,6 +3869,14 @@ export const bulkImportTallyData = defineAction({
           }
         }
       }
+
+      reconcileCompanyBillSettlementsAndPartyBalances({
+        db,
+        workspaceId: ctx.workspaceId,
+        companyId: company.id,
+        now,
+        cancelPaidVoucherOutbox: (v) => cancelPendingOutboxJobsForVoucher(ctx.workspaceId, v),
+      });
 
       db.insert(tenantDataSchema.syncRuns)
         .values({
@@ -3705,7 +4005,15 @@ export const createTallyAutomationRule = defineAction({
   permission: "tally:sync.manage",
   input: z.object({
     name: z.string().min(2).max(120),
-    triggerEvent: z.enum(["Sales", "Receipt", "CreditNote", "Purchase", "All"]),
+    triggerEvent: z.enum([
+      "Sales",
+      "Receipt",
+      "Payment",
+      "CreditNote",
+      "DebitNote",
+      "Purchase",
+      "All",
+    ]),
     templateId: z.string().min(6),
     minAmountRupees: z.coerce.number().min(0).default(0),
     delaySeconds: z.coerce.number().int().min(0).max(3600).default(0),
@@ -3828,6 +4136,10 @@ export function generateTallyPrimeTdlAddOn(params: {
     "Business Workspace";
   const cleanNs = (params.namespaceTag ?? "").replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 8);
   const p = cleanNs ? `RSL_${cleanNs}_` : "RSL";
+  const brandSyncTitle = buildTallyDisplayBrandTitle(params.workspaceName);
+  const tdlFilename = buildWorkspaceTdlFilename(params.workspaceName, {
+    isolatedSlug: cleanNs ? params.namespaceTag : undefined,
+  });
 
   const cleanedAllowedCompanies = (params.allowedCompanyNames ?? [])
     .map((c) => c.replace(/[^\x20-\x7E]/g, "").replace(/["\r\n]/g, "").trim())
@@ -3847,11 +4159,11 @@ export function generateTallyPrimeTdlAddOn(params: {
       : "All Open Tally Companies (Automatic Multi-Company Sync)";
 
   const menuTestTitle = cleanNs
-    ? `RSL Test (${safeBizName.slice(0, 18)})`
-    : "RSL Cloud Connection Test";
+    ? `${brandSyncTitle} - Test`
+    : `${brandSyncTitle} - Connection Test`;
   const menuSyncTitle = cleanNs
-    ? `RSL Sync Bills (${safeBizName.slice(0, 16)})`
-    : "RSL Sync All Bills Now";
+    ? `${brandSyncTitle} - Sync All`
+    : `${brandSyncTitle} - Sync All Now`;
 
   const isLocalEndpoint = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(cleanEndpoint);
   const unreachableMsg = isLocalEndpoint
@@ -3898,33 +4210,36 @@ export function generateTallyPrimeTdlAddOn(params: {
     09 : If : $$LastResult
     10 :     Delete Target
     11 :     If : ##DShouldSync And (##DGuid != "")
-    12 :         Set : ${p}VGuid      : ##DGuid
-    13 :         Set : ${p}VMasterId  : ##DMasterId
-    14 :         Set : ${p}VAlterId   : "0"
-    15 :         Set : ${p}VCompany   : ##DCompany
-    16 :         Set : ${p}VVchNo     : ##DVchNo
-    17 :         Set : ${p}VVchType   : ##DVchType
-    18 :         Set : ${p}VBaseType  : ##DBaseType
-    19 :         Set : ${p}VParty     : "Deleted"
-    20 :         Set : ${p}VPhone     : ""
-    21 :         Set : ${p}VAmount    : "0"
-    22 :         Set : ${p}VDate      : ""
-    23 :         Set : ${p}VDueDate   : ""
-    24 :         Set : ${p}VCancelled : "No"
-    25 :         Set : ${p}VDeleted   : "Yes"
-    26 :         Set : ${p}VOptional  : "No"
-    27 :         Set : ${p}VSyncBatch : ""
-    28 :         Set : DProgSub : "Removing deleted " + ##DVchType + " #" + ##DVchNo
-    29 :         Start Progress : 1 : "RapidShift Labs Cloud Sync" : ##DCompany : ##DProgSub
-    30 :         Show Progress  : 0
-    31 :         Walk Collection : ${p}CloudVoucherPost
-    32 :             Set : DRespStatus : $RSLOkStatus
-    33 :         End Walk
-    34 :         Show Progress  : 1
-    35 :         End Progress
-    36 :     End If
-    37 : End If
-    38 : Return
+    12 :         Set : ${p}VGuid       : ##DGuid
+    13 :         Set : ${p}VMasterId   : ##DMasterId
+    14 :         Set : ${p}VAlterId    : "0"
+    15 :         Set : ${p}VCompany    : ##DCompany
+    16 :         Set : ${p}VVchNo      : ##DVchNo
+    17 :         Set : ${p}VVchType    : ##DVchType
+    18 :         Set : ${p}VBaseType   : ##DBaseType
+    19 :         Set : ${p}VParty      : "Deleted"
+    20 :         Set : ${p}VPartyGroup : ""
+    21 :         Set : ${p}VPhone      : ""
+    22 :         Set : ${p}VAmount     : "0"
+    23 :         Set : ${p}VDate       : ""
+    24 :         Set : ${p}VDueDate    : ""
+    25 :         Set : ${p}VAgstBill   : ""
+    26 :         Set : ${p}VNarration  : ""
+    27 :         Set : ${p}VCancelled  : "No"
+    28 :         Set : ${p}VDeleted    : "Yes"
+    29 :         Set : ${p}VOptional   : "No"
+    30 :         Set : ${p}VSyncBatch  : ""
+    31 :         Set : DProgSub : "Removing deleted " + ##DVchType + " #" + ##DVchNo
+    32 :         Start Progress : 1 : "${brandSyncTitle}" : ##DCompany : ##DProgSub
+    33 :         Show Progress  : 0
+    34 :         Walk Collection : ${p}CloudVoucherPost
+    35 :             Set : DRespStatus : $RSLOkStatus
+    36 :         End Walk
+    37 :         Show Progress  : 1
+    38 :         End Progress
+    39 :     End If
+    40 : End If
+    41 : Return
 
 [Function: ${p}HandleVoucherCancel]
     Variable : CGuid       : String  : ""
@@ -3957,61 +4272,66 @@ export function generateTallyPrimeTdlAddOn(params: {
     14 : If : $$LastResult
     15 :     Cancel Object
     16 :     If : ##CShouldSync And (##CGuid != "")
-    17 :         Set : ${p}VGuid      : ##CGuid
-    18 :         Set : ${p}VMasterId  : ##CMasterId
-    19 :         Set : ${p}VAlterId   : ##CAlterId
-    20 :         Set : ${p}VCompany   : ##CCompany
-    21 :         Set : ${p}VVchNo     : ##CVchNo
-    22 :         Set : ${p}VVchType   : ##CVchType
-    23 :         Set : ${p}VBaseType  : ##CBaseType
-    24 :         Set : ${p}VParty     : ##CParty
-    25 :         Set : ${p}VPhone     : ##CPhone
-    26 :         Set : ${p}VAmount    : ##CAmount
-    27 :         Set : ${p}VDate      : ##CDate
-    28 :         Set : ${p}VDueDate   : ""
-    29 :         Set : ${p}VCancelled : "Yes"
-    30 :         Set : ${p}VDeleted   : "No"
-    31 :         Set : ${p}VOptional  : "No"
-    32 :         Set : ${p}VSyncBatch : ""
-    33 :         Set : CProgSub : "Syncing cancelled " + ##CVchType + " #" + ##CVchNo
-    34 :         Start Progress : 1 : "RapidShift Labs Cloud Sync" : ##CCompany : ##CProgSub
-    35 :         Show Progress  : 0
-    36 :         Walk Collection : ${p}CloudVoucherPost
-    37 :             Set : CRespStatus : $RSLOkStatus
-    38 :         End Walk
-    39 :         Show Progress  : 1
-    40 :         End Progress
-    41 :     End If
-    42 : End If
-    43 : Return
+    17 :         Set : ${p}VGuid       : ##CGuid
+    18 :         Set : ${p}VMasterId   : ##CMasterId
+    19 :         Set : ${p}VAlterId    : ##CAlterId
+    20 :         Set : ${p}VCompany    : ##CCompany
+    21 :         Set : ${p}VVchNo      : ##CVchNo
+    22 :         Set : ${p}VVchType    : ##CVchType
+    23 :         Set : ${p}VBaseType   : ##CBaseType
+    24 :         Set : ${p}VParty      : ##CParty
+    25 :         Set : ${p}VPartyGroup : ""
+    26 :         Set : ${p}VPhone      : ##CPhone
+    27 :         Set : ${p}VAmount     : ##CAmount
+    28 :         Set : ${p}VDate       : ##CDate
+    29 :         Set : ${p}VDueDate    : ""
+    30 :         Set : ${p}VAgstBill   : ""
+    31 :         Set : ${p}VNarration  : ""
+    32 :         Set : ${p}VCancelled  : "Yes"
+    33 :         Set : ${p}VDeleted    : "No"
+    34 :         Set : ${p}VOptional   : "No"
+    35 :         Set : ${p}VSyncBatch  : ""
+    36 :         Set : CProgSub : "Syncing cancelled " + ##CVchType + " #" + ##CVchNo
+    37 :         Start Progress : 1 : "${brandSyncTitle}" : ##CCompany : ##CProgSub
+    38 :         Show Progress  : 0
+    39 :         Walk Collection : ${p}CloudVoucherPost
+    40 :             Set : CRespStatus : $RSLOkStatus
+    41 :         End Walk
+    42 :         Show Progress  : 1
+    43 :         End Progress
+    44 :     End If
+    45 : End If
+    46 : Return
 `;
 
   return `;; ============================================================================
-;; RapidShift Labs (rapidshiftlabs.in) - Tally Prime Cloud Sync & WhatsApp Add-On (v2.6)
+;; ${brandSyncTitle} - Tally Prime Cloud Sync, Ledgers & WhatsApp Add-On (v2.7)
 ;; Business Workspace : ${safeBizName}
+;; Recommended File   : ${tdlFilename}
 ;; Cloud Endpoint     : ${cleanEndpoint}
 ;; Company Scope      : ${companyScopeComment}
 ;;
 ;; THIN-CLIENT ARCHITECTURE (ZERO RE-DOWNLOADS FOR NEW FEATURES):
-;;   - Templates, WhatsApp PDF attachment, multi-company routing, wallet overdraft,
-;;     and reminder rules are controlled 100% server-side on rapidshiftlabs.in!
+;;   - Templates, WhatsApp PDF attachment, multi-company routing, paid-bill settlement,
+;;     client ledgers, and reminder rules are controlled 100% server-side on rapidshiftlabs.in!
 ;;   - OTA Manifest: ${cleanEndpoint}?mode=tdl-manifest
 ;;
 ;; SETUP IN TALLY PRIME (Release 2.0 / 3.0 / 4.0 / 5.0+):
-;;   1. Copy/overwrite this file to the EXACT TDL path configured in Tally Prime
-;;      (for example C:\\RSL\\rsl-tally-whatsapp.tdl).
+;;   1. Copy/overwrite this file to your TDL folder
+;;      (for example C:\\RSL\\${tdlFilename}).
 ;;   2. Press F1 (Help) -> TDLs & Add-Ons -> F4 (Manage Local TDLs)
 ;;   3. Set "Load selected TDL files on startup" = Yes
-;;   4. Select rsl-tally-whatsapp.tdl and press Ctrl+A to reload (or restart Tally)
+;;   4. Select ${tdlFilename} and press Ctrl+A to reload (or restart Tally)
 ;;   5. On Gateway of Tally:
 ;;        - Click "${menuTestTitle}" to verify connectivity
 ;;        - Click "${menuSyncTitle}" to sync & reconcile all open Tally companies!
 ;;
 ;; LIVE SYNC COVERAGE:
-;;   - Create / Edit (Ctrl+A) -> Post-commit capture of permanent GUID + MasterID + VoucherNumber
-;;   - Delete (Alt+D)         -> Instantly removes deleted invoice & cancels queued WhatsApp
-;;   - Cancel (Alt+X)         -> Instantly marks invoice Cancelled & stops reminders
-;;   - Sync All Bills Now     -> Multi-year full history sync & Day Book delete reconciliation
+;;   - Create / Edit (Ctrl+A) -> Sales, Receipt, Payment, Credit Note, Debit Note, Purchase + Bill-Wise Agst Ref
+;;   - Paid in Tally          -> Receipts & Credit Notes automatically mark Sales invoices Paid & stop reminders
+;;   - Delete (Alt+D)         -> Instantly removes deleted voucher & recomputes bill settlements
+;;   - Cancel (Alt+X)         -> Instantly marks voucher Cancelled & stops reminders
+;;   - ${menuSyncTitle} -> Multi-year full history sync & Day Book delete reconciliation
 ;; ============================================================================
 
 [#Menu: Gateway of Tally]
@@ -4054,6 +4374,10 @@ export function generateTallyPrimeTdlAddOn(params: {
     Type        : String
     Persistent  : No
 
+[Variable: ${p}VPartyGroup]
+    Type        : String
+    Persistent  : No
+
 [Variable: ${p}VPhone]
     Type        : String
     Persistent  : No
@@ -4067,6 +4391,14 @@ export function generateTallyPrimeTdlAddOn(params: {
     Persistent  : No
 
 [Variable: ${p}VDueDate]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}VAgstBill]
+    Type        : String
+    Persistent  : No
+
+[Variable: ${p}VNarration]
     Type        : String
     Persistent  : No
 
@@ -4088,32 +4420,40 @@ export function generateTallyPrimeTdlAddOn(params: {
 
 [System: Variable]
     ${p}VPendingPost : No
-    ${p}VGuid      : ""
-    ${p}VMasterId  : ""
-    ${p}VAlterId   : ""
-    ${p}VCompany   : ""
-    ${p}VVchNo     : ""
-    ${p}VVchType   : ""
-    ${p}VBaseType  : ""
-    ${p}VParty     : ""
-    ${p}VPhone     : ""
-    ${p}VAmount    : "0"
-    ${p}VDate      : ""
-    ${p}VDueDate   : ""
-    ${p}VCancelled : "No"
-    ${p}VDeleted   : "No"
-    ${p}VOptional  : "No"
-    ${p}VSyncBatch : ""
+    ${p}VGuid        : ""
+    ${p}VMasterId    : ""
+    ${p}VAlterId     : ""
+    ${p}VCompany     : ""
+    ${p}VVchNo       : ""
+    ${p}VVchType     : ""
+    ${p}VBaseType    : ""
+    ${p}VParty       : ""
+    ${p}VPartyGroup  : ""
+    ${p}VPhone       : ""
+    ${p}VAmount      : "0"
+    ${p}VDate        : ""
+    ${p}VDueDate     : ""
+    ${p}VAgstBill    : ""
+    ${p}VNarration   : ""
+    ${p}VCancelled   : "No"
+    ${p}VDeleted     : "No"
+    ${p}VOptional    : "No"
+    ${p}VSyncBatch   : ""
 
 [System: Formula]
     ${p}BaseTypeName        : $Parent:VoucherType:$VoucherTypeName
-    ${p}IsTargetVch         : ($VoucherTypeName = "Sales") Or ($VoucherTypeName = "Receipt") Or ($VoucherTypeName = "Credit Note") Or ($VoucherTypeName = "Purchase") Or (@@${p}BaseTypeName = "Sales") Or (@@${p}BaseTypeName = "Receipt") Or (@@${p}BaseTypeName = "Credit Note") Or (@@${p}BaseTypeName = "Purchase")
+    ${p}IsTargetVch         : ($VoucherTypeName = "Sales") Or ($VoucherTypeName = "Receipt") Or ($VoucherTypeName = "Payment") Or ($VoucherTypeName = "Credit Note") Or ($VoucherTypeName = "Debit Note") Or ($VoucherTypeName = "Purchase") Or (@@${p}BaseTypeName = "Sales") Or (@@${p}BaseTypeName = "Receipt") Or (@@${p}BaseTypeName = "Payment") Or (@@${p}BaseTypeName = "Credit Note") Or (@@${p}BaseTypeName = "Debit Note") Or (@@${p}BaseTypeName = "Purchase")
     ${p}IsAllowedActiveComp : ${activeCompanyFilterExpr}
     ${p}IsAllowedCompObj    : ${collectionCompanyFilterExpr}
     ${p}ShouldPostOnSave    : (($$InCreateMode And (Not $IsOptional) And (Not $$IsEmpty:$PartyLedgerName)) Or $$InAlterMode) And @@${p}IsTargetVch And @@${p}IsAllowedActiveComp
     ${p}SyncableSavedVoucher: (Not $IsOptional) And ((Not $$IsEmpty:$PartyLedgerName) Or $IsCancelled) And @@${p}IsTargetVch
     ${p}MatchesJustSavedVch : ($VoucherTypeName = ##${p}VVchType) And ($PartyLedgerName = ##${p}VParty) And (Not $IsOptional)
     ${p}PartyPhoneExpr      : If Not $$IsEmpty:($LedgerMobile:Ledger:$PartyLedgerName) Then $LedgerMobile:Ledger:$PartyLedgerName Else (If Not $$IsEmpty:$PartyMobileNo Then $PartyMobileNo Else $LedgerPhone:Ledger:$PartyLedgerName)
+    ${p}PartyGroupExpr      : $Parent:Ledger:$PartyLedgerName
+    ${p}AgstBillLed1        : $LedgerEntries[1].BillAllocations[1].Name
+    ${p}AgstBillAll1        : $AllLedgerEntries[1].BillAllocations[1].Name
+    ${p}FormAgstBillStr     : If Not $$IsEmpty:@@${p}AgstBillLed1 Then @@${p}AgstBillLed1 Else @@${p}AgstBillAll1
+    ${p}FormNarrationStr    : $Narration
     ${p}IsPartyLedLine      : $IsPartyLedger Or ($LedgerName = $PartyLedgerName)
     ${p}AmtFilteredParty    : $$Number:($$Abs:($$FilterValue:$Amount:AllLedgerEntries:1:${p}IsPartyLedLine))
     ${p}AmtPartyLed         : $$Number:($$Abs:$LedgerEntries[1].Amount)
@@ -4152,16 +4492,19 @@ ${voucherDeleteCancelDefinitions}
     06 : Set : ${p}VVchType     : $VoucherTypeName
     07 : Set : ${p}VBaseType    : @@${p}FormBaseTypeStr
     08 : Set : ${p}VParty       : $PartyLedgerName
-    09 : Set : ${p}VPhone       : @@${p}PartyPhoneExpr
-    10 : Set : ${p}VAmount      : @@${p}FormAmountStr
-    11 : Set : ${p}VDate        : @@${p}FormDateStr
-    12 : Set : ${p}VDueDate     : @@${p}FormDueDateStr
-    13 : Set : ${p}VCancelled   : @@${p}FormCancelledStr
-    14 : Set : ${p}VDeleted     : "No"
-    15 : Set : ${p}VOptional    : @@${p}FormOptionalStr
-    16 : Set : ${p}VSyncBatch   : ""
-    17 : Set : ${p}VPendingPost : Yes
-    18 : Return
+    09 : Set : ${p}VPartyGroup  : @@${p}PartyGroupExpr
+    10 : Set : ${p}VPhone       : @@${p}PartyPhoneExpr
+    11 : Set : ${p}VAmount      : @@${p}FormAmountStr
+    12 : Set : ${p}VDate        : @@${p}FormDateStr
+    13 : Set : ${p}VDueDate     : @@${p}FormDueDateStr
+    14 : Set : ${p}VAgstBill    : @@${p}FormAgstBillStr
+    15 : Set : ${p}VNarration   : @@${p}FormNarrationStr
+    16 : Set : ${p}VCancelled   : @@${p}FormCancelledStr
+    17 : Set : ${p}VDeleted     : "No"
+    18 : Set : ${p}VOptional    : @@${p}FormOptionalStr
+    19 : Set : ${p}VSyncBatch   : ""
+    20 : Set : ${p}VPendingPost : Yes
+    21 : Return
 
 [Function: ${p}PostCapturedVoucherAfterAccept]
     Variable  : RSLProgressSub : String : ""
@@ -4182,7 +4525,7 @@ ${voucherDeleteCancelDefinitions}
     13 :     End Walk
     14 : End If
     15 : Set : RSLProgressSub  : "Syncing " + ##${p}VVchType + " #" + ##${p}VVchNo
-    16 : Start Progress : 1 : "RapidShift Labs Cloud Sync" : ##${p}VCompany : ##RSLProgressSub
+    16 : Start Progress : 1 : "${brandSyncTitle}" : ##${p}VCompany : ##RSLProgressSub
     17 : Show Progress  : 0
     18 : Walk Collection : ${p}CloudVoucherPost
     19 :     Set : RSLRespStatus : $RSLOkStatus
@@ -4222,7 +4565,7 @@ ${voucherDeleteCancelDefinitions}
     01 : Set : RSLOrigCompany   : ##SVCurrentCompany
     02 : Set : RSLOpenCompCount : @@${p}OpenCompCountFormula
     03 : If  : ##RSLOpenCompCount = 0
-    04 :     Msg Box : "RSL Cloud Sync" : "No allowed Tally company is currently open. Open your company in Tally Prime and try again."
+    04 :     Msg Box : "${brandSyncTitle}" : "No allowed Tally company is currently open. Open your company in Tally Prime and try again."
     05 :     Return
     06 : End If
     07 : Walk Collection : ${p}OpenCompaniesColl
@@ -4235,76 +4578,79 @@ ${voucherDeleteCancelDefinitions}
     14 :     Set : RSLCompFailed    : 0
     15 :     Set : RSLStepIdx       : 0
     16 :     If  : ##RSLCompVchTotal > 0
-    17 :         Start Progress : ##RSLCompVchTotal : "RapidShift Labs - Syncing Bills" : ##SVCurrentCompany : "Syncing created & updated vouchers..."
+    17 :         Start Progress : ##RSLCompVchTotal : "${brandSyncTitle} - Syncing" : ##SVCurrentCompany : "Syncing bills, receipts, payments & ledgers..."
     18 :         Walk Collection : ${p}ExistingVouchersColl
-    19 :             Set : ${p}VGuid      : $GUID
-    20 :             Set : ${p}VMasterId  : @@${p}FormMasterIdStr
-    21 :             Set : ${p}VAlterId   : @@${p}FormAlterIdStr
-    22 :             Set : ${p}VCompany   : ##SVCurrentCompany
-    23 :             Set : ${p}VVchNo     : $VoucherNumber
-    24 :             Set : ${p}VVchType   : $VoucherTypeName
-    25 :             Set : ${p}VBaseType  : @@${p}FormBaseTypeStr
-    26 :             Set : ${p}VParty     : $PartyLedgerName
-    27 :             Set : ${p}VPhone     : @@${p}PartyPhoneExpr
-    28 :             Set : ${p}VAmount    : @@${p}FormAmountStr
-    29 :             Set : ${p}VDate      : @@${p}FormDateStr
-    30 :             Set : ${p}VDueDate   : @@${p}FormDueDateStr
-    31 :             Set : ${p}VCancelled : @@${p}FormCancelledStr
-    32 :             Set : ${p}VDeleted   : "No"
-    33 :             Set : ${p}VOptional  : "No"
-    34 :             Set : RSLStepStatus  : ""
-    35 :             Walk Collection : ${p}CloudVoucherPost
-    36 :                 Set : RSLStepStatus : $RSLOkStatus
-    37 :                 Set : RSLStepMsg    : $RSLMessage
-    38 :             End Walk
-    39 :             If : ##RSLStepStatus = "Connected"
-    40 :                 Increment : RSLSyncedCount
-    41 :             Else
-    42 :                 Increment : RSLFailedCount
-    43 :                 Increment : RSLCompFailed
-    44 :             End If
-    45 :             Increment : RSLStepIdx
-    46 :             Show Progress : ##RSLStepIdx
-    47 :         End Walk
-    48 :         End Progress
-    49 :     End If
-    50 :     If  : ##RSLCompFailed = 0
-    51 :         Start Progress : 1 : "RapidShift Labs - Reconciling" : ##SVCurrentCompany : "Checking for deleted bills..."
-    52 :         Show Progress  : 0
-    53 :         Set : RSLRecDeletedStr : "0"
-    54 :         Walk Collection : ${p}CloudReconcilePost
-    55 :             Set : RSLStepStatus    : $RSLOkStatus
-    56 :             Set : RSLRecDeletedStr : $RSLDeletedCount
-    57 :         End Walk
-    58 :         If : ##RSLRecDeletedStr != ""
-    59 :             Set : RSLDeletedTotal : @@${p}RecDeletedNumFormula
-    60 :         End If
-    61 :         Show Progress  : 1
-    62 :         End Progress
-    63 :     End If
-    64 : End Walk
-    65 : Set : SVCurrentCompany : ##RSLOrigCompany
-    66 : Set : ${p}VSyncBatch   : ""
-    67 : Set : RSLSyncedStr     : @@${p}SyncedCountFormula
-    68 : Set : RSLFailedStr     : @@${p}FailedCountFormula
-    69 : Set : RSLDeletedStr    : @@${p}DeletedTotalFormula
-    70 : Set : RSLCompCountStr  : @@${p}CompIdxStrFormula
-    71 : If  : ##RSLFailedCount > 0
-    72 :     If : ##RSLStepMsg = ""
-    73 :         Set : RSLDisplayMsg : "Synced " + ##RSLSyncedStr + " bill(s); " + ##RSLFailedStr + " failed. Run 'RSL Cloud Connection Test' to verify connectivity."
-    74 :     Else
-    75 :         Set : RSLDisplayMsg : "Synced " + ##RSLSyncedStr + " bill(s); " + ##RSLFailedStr + " failed - " + ##RSLStepMsg
-    76 :     End If
-    77 :     Msg Box : "RSL Cloud Sync - Action Needed" : ##RSLDisplayMsg
-    78 : Else
-    79 :     If : ##RSLDeletedTotal > 0
-    80 :         Set : RSLDisplayMsg : "Synced " + ##RSLSyncedStr + " bill(s) and removed " + ##RSLDeletedStr + " deleted bill(s) across " + ##RSLCompCountStr + " Tally company(ies)!"
-    81 :     Else
-    82 :         Set : RSLDisplayMsg : "Successfully synced " + ##RSLSyncedStr + " bill(s) across " + ##RSLCompCountStr + " Tally company(ies) to RapidShift Labs!"
-    83 :     End If
-    84 :     Msg Box : "RSL Cloud Sync - Complete" : ##RSLDisplayMsg
-    85 : End If
-    86 : Return
+    19 :             Set : ${p}VGuid       : $GUID
+    20 :             Set : ${p}VMasterId   : @@${p}FormMasterIdStr
+    21 :             Set : ${p}VAlterId    : @@${p}FormAlterIdStr
+    22 :             Set : ${p}VCompany    : ##SVCurrentCompany
+    23 :             Set : ${p}VVchNo      : $VoucherNumber
+    24 :             Set : ${p}VVchType    : $VoucherTypeName
+    25 :             Set : ${p}VBaseType   : @@${p}FormBaseTypeStr
+    26 :             Set : ${p}VParty      : $PartyLedgerName
+    27 :             Set : ${p}VPartyGroup : @@${p}PartyGroupExpr
+    28 :             Set : ${p}VPhone      : @@${p}PartyPhoneExpr
+    29 :             Set : ${p}VAmount     : @@${p}FormAmountStr
+    30 :             Set : ${p}VDate       : @@${p}FormDateStr
+    31 :             Set : ${p}VDueDate    : @@${p}FormDueDateStr
+    32 :             Set : ${p}VAgstBill   : @@${p}FormAgstBillStr
+    33 :             Set : ${p}VNarration  : @@${p}FormNarrationStr
+    34 :             Set : ${p}VCancelled  : @@${p}FormCancelledStr
+    35 :             Set : ${p}VDeleted    : "No"
+    36 :             Set : ${p}VOptional   : "No"
+    37 :             Set : RSLStepStatus  : ""
+    38 :             Walk Collection : ${p}CloudVoucherPost
+    39 :                 Set : RSLStepStatus : $RSLOkStatus
+    40 :                 Set : RSLStepMsg    : $RSLMessage
+    41 :             End Walk
+    42 :             If : ##RSLStepStatus = "Connected"
+    43 :                 Increment : RSLSyncedCount
+    44 :             Else
+    45 :                 Increment : RSLFailedCount
+    46 :                 Increment : RSLCompFailed
+    47 :             End If
+    48 :             Increment : RSLStepIdx
+    49 :             Show Progress : ##RSLStepIdx
+    50 :         End Walk
+    51 :         End Progress
+    52 :     End If
+    53 :     If  : ##RSLCompFailed = 0
+    54 :         Start Progress : 1 : "${brandSyncTitle} - Reconciling" : ##SVCurrentCompany : "Checking for deleted bills & paid settlements..."
+    55 :         Show Progress  : 0
+    56 :         Set : RSLRecDeletedStr : "0"
+    57 :         Walk Collection : ${p}CloudReconcilePost
+    58 :             Set : RSLStepStatus    : $RSLOkStatus
+    59 :             Set : RSLRecDeletedStr : $RSLDeletedCount
+    60 :         End Walk
+    61 :         If : ##RSLRecDeletedStr != ""
+    62 :             Set : RSLDeletedTotal : @@${p}RecDeletedNumFormula
+    63 :         End If
+    64 :         Show Progress  : 1
+    65 :         End Progress
+    66 :     End If
+    67 : End Walk
+    68 : Set : SVCurrentCompany : ##RSLOrigCompany
+    69 : Set : ${p}VSyncBatch   : ""
+    70 : Set : RSLSyncedStr     : @@${p}SyncedCountFormula
+    71 : Set : RSLFailedStr     : @@${p}FailedCountFormula
+    72 : Set : RSLDeletedStr    : @@${p}DeletedTotalFormula
+    73 : Set : RSLCompCountStr  : @@${p}CompIdxStrFormula
+    74 : If  : ##RSLFailedCount > 0
+    75 :     If : ##RSLStepMsg = ""
+    76 :         Set : RSLDisplayMsg : "Synced " + ##RSLSyncedStr + " voucher(s); " + ##RSLFailedStr + " failed. Run '${menuTestTitle}' to verify connectivity."
+    77 :     Else
+    78 :         Set : RSLDisplayMsg : "Synced " + ##RSLSyncedStr + " voucher(s); " + ##RSLFailedStr + " failed - " + ##RSLStepMsg
+    79 :     End If
+    80 :     Msg Box : "${brandSyncTitle} - Action Needed" : ##RSLDisplayMsg
+    81 : Else
+    82 :     If : ##RSLDeletedTotal > 0
+    83 :         Set : RSLDisplayMsg : "Synced " + ##RSLSyncedStr + " voucher(s) and removed " + ##RSLDeletedStr + " deleted voucher(s) across " + ##RSLCompCountStr + " Tally company(ies)!"
+    84 :     Else
+    85 :         Set : RSLDisplayMsg : "Successfully synced " + ##RSLSyncedStr + " voucher(s) across " + ##RSLCompCountStr + " Tally company(ies) via ${brandSyncTitle}!"
+    86 :     End If
+    87 :     Msg Box : "${brandSyncTitle} - Complete" : ##RSLDisplayMsg
+    88 : End If
+    89 : Return
 
 [Collection: ${p}OpenCompaniesColl]
     Type        : Company
@@ -4315,15 +4661,15 @@ ${voucherDeleteCancelDefinitions}
     Type        : Voucher
     Parm Var    : SVFromDate : Date : "01-04-2000"
     Parm Var    : SVToDate   : Date : "31-03-2099"
-    Fetch       : MasterID, GUID, AlterID, Date, VoucherNumber, VoucherTypeName, PartyLedgerName, PartyMobileNo, Amount, BasicDueDateOfPymt, IsCancelled, IsOptional
-    Fetch       : LedgerEntries.Amount, AllLedgerEntries.Amount
+    Fetch       : MasterID, GUID, AlterID, Date, VoucherNumber, VoucherTypeName, PartyLedgerName, PartyMobileNo, Amount, BasicDueDateOfPymt, Narration, IsCancelled, IsOptional
+    Fetch       : LedgerEntries.Amount, AllLedgerEntries.Amount, LedgerEntries.BillAllocations.Name, AllLedgerEntries.BillAllocations.Name
     Filter      : ${p}SyncableSavedVoucher
 
 [Function: ${p}TestCloudHandshake]
     Variable : RSLPingStatus : String : ""
     Variable : RSLPingMsg    : String : ""
     Variable : RSLDisplayMsg : String : ""
-    01 : Start Progress : 1 : "RapidShift Labs Cloud Sync" : ##SVCurrentCompany : "Verifying cloud connection..."
+    01 : Start Progress : 1 : "${brandSyncTitle}" : ##SVCurrentCompany : "Verifying cloud connection..."
     02 : Show Progress  : 0
     03 : Walk Collection : ${p}CloudPingCheck
     04 :     Set : RSLPingStatus : $RSLOkStatus
@@ -4333,18 +4679,18 @@ ${voucherDeleteCancelDefinitions}
     08 : End Progress
     09 : If  : ##RSLPingStatus = ""
     10 :     Set : RSLDisplayMsg : "${unreachableMsg}"
-    11 :     Msg Box : "RSL Cloud Sync" : ##RSLDisplayMsg
+    11 :     Msg Box : "${brandSyncTitle}" : ##RSLDisplayMsg
     12 : Else
     13 :     If : ##RSLPingStatus = "Error"
     14 :         Set : RSLDisplayMsg : ##RSLPingMsg
-    15 :         Msg Box : "RSL Cloud Sync - Action Needed" : ##RSLDisplayMsg
+    15 :         Msg Box : "${brandSyncTitle} - Action Needed" : ##RSLDisplayMsg
     16 :     Else
     17 :         If : ##RSLPingMsg = ""
-    18 :             Set : RSLDisplayMsg : "Connected to RapidShift Labs! Live voucher sync is active."
+    18 :             Set : RSLDisplayMsg : "Connected via ${brandSyncTitle}! Live voucher & paid-bill sync is active."
     19 :         Else
     20 :             Set : RSLDisplayMsg : ##RSLPingMsg
     21 :         End If
-    22 :         Msg Box : "RSL Cloud Sync - Connected" : ##RSLDisplayMsg
+    22 :         Msg Box : "${brandSyncTitle} - Connected" : ##RSLDisplayMsg
     23 :     End If
     24 : End If
     25 : Return
@@ -4354,7 +4700,7 @@ ${voucherDeleteCancelDefinitions}
     RemoteRequest   : ${p}VoucherJsonReport : UTF-8
     JSON Object Path: "tallyResult:1"
     Header          : "Content-Type: application/json; charset=utf-8"
-    Header          : "User-Agent: TallyPrime-RSL-TDL/2.6"${tokenHeaderLine}
+    Header          : "User-Agent: TallyPrime-RSL-TDL/2.7"${tokenHeaderLine}
     Fetch           : RSLOkStatus, RSLMessage
 
 [Collection: ${p}CloudReconcilePost]
@@ -4362,7 +4708,7 @@ ${voucherDeleteCancelDefinitions}
     RemoteRequest   : ${p}ReconcileJsonReport : UTF-8
     JSON Object Path: "tallyResult:1"
     Header          : "Content-Type: application/json; charset=utf-8"
-    Header          : "User-Agent: TallyPrime-RSL-TDL/2.6"${tokenHeaderLine}
+    Header          : "User-Agent: TallyPrime-RSL-TDL/2.7"${tokenHeaderLine}
     Fetch           : RSLOkStatus, RSLMessage, RSLDeletedCount
 
 [Collection: ${p}CloudPingCheck]
@@ -4370,7 +4716,7 @@ ${voucherDeleteCancelDefinitions}
     RemoteRequest   : ${p}PingJsonReport : UTF-8
     JSON Object Path: "tallyResult:1"
     Header          : "Content-Type: application/json; charset=utf-8"
-    Header          : "User-Agent: TallyPrime-RSL-TDL/2.6"${tokenHeaderLine}
+    Header          : "User-Agent: TallyPrime-RSL-TDL/2.7"${tokenHeaderLine}
     Fetch           : RSLOkStatus, RSLMessage
 
 [Report: ${p}PingJsonReport]
@@ -4436,7 +4782,7 @@ ${voucherDeleteCancelDefinitions}
     Scroll      : Vertical
 
 [Line: ${p}VoucherJsonLine]
-    Fields      : ${p}Guid, ${p}MasterId, ${p}AlterId, ${p}Company, ${p}VchNo, ${p}VchType, ${p}BaseType, ${p}Party, ${p}Phone, ${p}Amount, ${p}Date, ${p}DueDate, ${p}Cancelled, ${p}Deleted, ${p}Optional, ${p}SyncBatch
+    Fields      : ${p}Guid, ${p}MasterId, ${p}AlterId, ${p}Company, ${p}VchNo, ${p}VchType, ${p}BaseType, ${p}Party, ${p}PartyGroup, ${p}Phone, ${p}Amount, ${p}Date, ${p}DueDate, ${p}AgstBill, ${p}NarrationField, ${p}Cancelled, ${p}Deleted, ${p}Optional, ${p}SyncBatch
 
 [Field: ${p}Guid]
     Set As      : ##${p}VGuid
@@ -4470,6 +4816,10 @@ ${voucherDeleteCancelDefinitions}
     Set As      : ##${p}VParty
     JSONTag     : "partyName"
 
+[Field: ${p}PartyGroup]
+    Set As      : ##${p}VPartyGroup
+    JSONTag     : "partyParentGroup"
+
 [Field: ${p}Phone]
     Set As      : ##${p}VPhone
     JSONTag     : "partyPhone"
@@ -4485,6 +4835,14 @@ ${voucherDeleteCancelDefinitions}
 [Field: ${p}DueDate]
     Set As      : ##${p}VDueDate
     JSONTag     : "dueDate"
+
+[Field: ${p}AgstBill]
+    Set As      : ##${p}VAgstBill
+    JSONTag     : "againstBillNumber"
+
+[Field: ${p}NarrationField]
+    Set As      : ##${p}VNarration
+    JSONTag     : "narration"
 
 [Field: ${p}Cancelled]
     Set As      : ##${p}VCancelled
@@ -4510,15 +4868,18 @@ export function generateStandaloneTallyConnectorMjs(params: {
 }): string {
   const defaultServer = params.serverUrl.replace(/\/+$/, "");
   const safeName = params.workspaceName.replace(/[\r\n"']/g, "").trim() || "Business Workspace";
+  const tdlFilename = buildWorkspaceTdlFilename(params.workspaceName);
+  const brandTitle = buildTallyDisplayBrandTitle(params.workspaceName);
 
   return `#!/usr/bin/env node
 /**
- * RapidShift Labs (rapidshiftlabs.in) — Standalone Windows Tally Prime Connector (Zero Dependencies)
+ * ${brandTitle} — Standalone Windows Tally Prime Connector (Zero Dependencies)
  * Workspace     : ${safeName}
  * Cloud Ingress : ${defaultServer}
  *
  * Features:
- *   - Multi-Company Live Sync (Create, Update, Cancel, Delete Reconciliation)
+ *   - Multi-Company Live Sync (Sales, Receipt, Payment, Credit Note, Debit Note, Purchase + Paid-in-Tally Settlements)
+ *   - Client & Supplier Ledgers + Inventory & Godown Masters Sync
  *   - Exact Native Tally-Printed PDF Capture (%PDF-1.x via Tally Voucher Print Engine — zero design modifications!)
  *   - Automatic Over-The-Air .tdl Self-Updater (never manually re-download .tdl files!)
  *
@@ -4530,7 +4891,7 @@ export function generateStandaloneTallyConnectorMjs(params: {
  *   3. Start live background sync (30s heartbeat + native Tally PDF capture + .tdl auto-update):
  *      node rsl-tally-connector.mjs
  *   4. Optional: keep local .tdl file auto-updated in place:
- *      node rsl-tally-connector.mjs --tdl-path "C:\\\\RSL\\\\rsl-tally-whatsapp.tdl" --webhook-token tlwh_...
+ *      node rsl-tally-connector.mjs --tdl-path "C:\\\\RSL\\\\${tdlFilename}" --webhook-token tlwh_...
  */
 
 import { execFileSync } from "node:child_process";
@@ -4541,7 +4902,7 @@ import os from "node:os";
 import path from "node:path";
 import zlib from "node:zlib";
 
-const AGENT_VERSION = "2.4.0";
+const AGENT_VERSION = "2.5.0";
 const DEFAULT_SERVER_URL = ${JSON.stringify(defaultServer)};
 
 function parseCliFlags(argv) {
@@ -4694,13 +5055,14 @@ function buildTallyXmlQuery(sinceAlterId = 0, companyName = "") {
         <TDLMESSAGE>
           <COLLECTION NAME="RSLSyncVouchers" ISMODIFY="No">
             <TYPE>Voucher</TYPE>
-            <NATIVEMETHOD>MasterID, GUID, AlterID, Date, VoucherNumber, VoucherTypeName, PartyLedgerName, PartyMobileNo, Amount, BasicDueDateOfPymt, IsCancelled, IsOptional</NATIVEMETHOD>
-            <NATIVEMETHOD>LedgerEntries.LedgerName, LedgerEntries.IsPartyLedger, LedgerEntries.Amount</NATIVEMETHOD>
-            <NATIVEMETHOD>AllLedgerEntries.LedgerName, AllLedgerEntries.IsPartyLedger, AllLedgerEntries.Amount</NATIVEMETHOD>
+            <NATIVEMETHOD>MasterID, GUID, AlterID, Date, VoucherNumber, VoucherTypeName, PartyLedgerName, PartyMobileNo, Amount, BasicDueDateOfPymt, Narration, IsCancelled, IsOptional</NATIVEMETHOD>
+            <NATIVEMETHOD>LedgerEntries.LedgerName, LedgerEntries.IsPartyLedger, LedgerEntries.Amount, LedgerEntries.BillAllocations.Name, LedgerEntries.BillAllocations.BillType, LedgerEntries.BillAllocations.Amount</NATIVEMETHOD>
+            <NATIVEMETHOD>AllLedgerEntries.LedgerName, AllLedgerEntries.IsPartyLedger, AllLedgerEntries.Amount, AllLedgerEntries.BillAllocations.Name, AllLedgerEntries.BillAllocations.BillType, AllLedgerEntries.BillAllocations.Amount</NATIVEMETHOD>
             <NATIVEMETHOD>AllInventoryEntries.StockItemName, AllInventoryEntries.BilledQty, AllInventoryEntries.ActualQty, AllInventoryEntries.Rate, AllInventoryEntries.Discount, AllInventoryEntries.Amount, AllInventoryEntries.GodownName</NATIVEMETHOD>
             <NATIVEMETHOD>AllInventoryEntries.BatchAllocations.GodownName, AllInventoryEntries.BatchAllocations.BatchName, AllInventoryEntries.BatchAllocations.MfdOn, AllInventoryEntries.BatchAllocations.ExpiryPeriod</NATIVEMETHOD>
             <NATIVEMETHOD>InventoryEntries.StockItemName, InventoryEntries.BilledQty, InventoryEntries.ActualQty, InventoryEntries.Rate, InventoryEntries.Discount, InventoryEntries.Amount, InventoryEntries.GodownName</NATIVEMETHOD>
             <COMPUTE>RSLPartyPhone : $LedgerMobile:Ledger:$PartyLedgerName</COMPUTE>
+            <COMPUTE>RSLPartyGroup : $Parent:Ledger:$PartyLedgerName</COMPUTE>
             <COMPUTE>RSLBaseVchType : $Parent:VoucherType:$VoucherTypeName</COMPUTE>
             <COMPUTE>SVCurrentCompany : $$CurrentCompany</COMPUTE>
             <FILTER>RSLAlterFilter</FILTER>
@@ -4735,7 +5097,7 @@ function buildTallyStockItemsXmlQuery(companyName = "") {
       <TDL>
         <TDLMESSAGE>
           <COLLECTION NAME="RSLSyncInventoryMasters" ISMODIFY="No">
-            <COLLECTION>RSLStockItemsColl, RSLGodownsColl, RSLPartyLedgersColl</COLLECTION>
+            <COLLECTION>RSLStockItemsColl, RSLGodownsColl, RSLPartyLedgersColl, RSLSupplierLedgersColl, RSLBillsColl</COLLECTION>
           </COLLECTION>
           <COLLECTION NAME="RSLStockItemsColl" ISMODIFY="No">
             <TYPE>StockItem</TYPE>
@@ -4752,7 +5114,19 @@ function buildTallyStockItemsXmlQuery(companyName = "") {
             <TYPE>Ledger</TYPE>
             <CHILDOF>$$GroupSundryDebtors</CHILDOF>
             <BELONGSTO>Yes</BELONGSTO>
-            <NATIVEMETHOD>GUID, Name, Parent, LedgerMobile, LedgerPhone, Email, PartyGSTIN, LedStateName, CreditLimit, BillCreditPeriod, OpeningBalance, ClosingBalance, Address</NATIVEMETHOD>
+            <NATIVEMETHOD>GUID, Name, Parent, LedgerMobile, LedgerPhone, LedgerContact, Email, PartyGSTIN, IncomeTaxNumber, LedStateName, Pincode, CreditLimit, BillCreditPeriod, OpeningBalance, ClosingBalance, Address</NATIVEMETHOD>
+            <COMPUTE>SVCurrentCompany : $$CurrentCompany</COMPUTE>
+          </COLLECTION>
+          <COLLECTION NAME="RSLSupplierLedgersColl" ISMODIFY="No">
+            <TYPE>Ledger</TYPE>
+            <CHILDOF>$$GroupSundryCreditors</CHILDOF>
+            <BELONGSTO>Yes</BELONGSTO>
+            <NATIVEMETHOD>GUID, Name, Parent, LedgerMobile, LedgerPhone, LedgerContact, Email, PartyGSTIN, IncomeTaxNumber, LedStateName, Pincode, CreditLimit, BillCreditPeriod, OpeningBalance, ClosingBalance, Address</NATIVEMETHOD>
+            <COMPUTE>SVCurrentCompany : $$CurrentCompany</COMPUTE>
+          </COLLECTION>
+          <COLLECTION NAME="RSLBillsColl" ISMODIFY="No">
+            <TYPE>Bill</TYPE>
+            <NATIVEMETHOD>Name, Parent, OpeningBalance, ClosingBalance, BillDate, BillCreditPeriod</NATIVEMETHOD>
             <COMPUTE>SVCurrentCompany : $$CurrentCompany</COMPUTE>
           </COLLECTION>
         </TDLMESSAGE>
@@ -4998,7 +5372,7 @@ async function collectUpdatedNativeVoucherPdfs(host, port, companyName, xml, exp
     const vchNo = extractXmlTag(block, "VOUCHERNUMBER");
     const vchType = extractXmlTag(block, "RSLBASEVCHTYPE") || extractXmlTag(block, "VOUCHERTYPENAME") || "Sales";
     if (!guid || !masterId) continue;
-    if (!/sales|receipt|credit/i.test(vchType)) continue;
+    if (!/sales|receipt|payment|credit|debit/i.test(vchType)) continue;
 
     const cacheKey = \`\${companyName}::\${guid}\`;
     if (exportedPdfAlterIds[cacheKey] === alterId && alterId > 0) continue;
@@ -5122,7 +5496,7 @@ async function main() {
             queryTallyCompanyStockItems(state.tallyHost, state.tallyPort, companyName),
           ]);
           const hasVouchers = /<VOUCHER(?:\\s|>)/i.test(xml);
-          const hasMasters = /<(?:STOCKITEM|GODOWN|LEDGER)(?:\\s|>)/i.test(mastersXml);
+          const hasMasters = /<(?:STOCKITEM|GODOWN|LEDGER|BILL)(?:\\s|>)/i.test(mastersXml);
           if (!hasVouchers && !hasMasters) {
             continue;
           }
@@ -5187,17 +5561,23 @@ export function generateWindowsTallyInstallerBat(params: {
   pairingCode?: string;
 }): string {
   const cleanServer = params.serverUrl.trim().replace(/\/+$/, "");
-  const safeBiz = params.workspaceName.replace(/["&|<>^%\r\n]/g, "").trim() || "Accounts Desk";
+  const cleanBrandTitle = buildTallyDisplayBrandTitle(params.workspaceName)
+    .replace(/[!%"|<>^\r\n]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const escapedBatBrand = cleanBrandTitle.replace(/&/g, "^&");
+  const tdlFilename = buildWorkspaceTdlFilename(params.workspaceName);
   const whToken = (params.webhookToken ?? "").replace(/[^a-zA-Z0-9_-]/g, "");
   const presetCode = (params.pairingCode ?? "").replace(/[^A-Za-z0-9-]/g, "");
 
   const lines = [
     "@echo off",
+    `rem ${cleanBrandTitle} - 1-Click Tally Prime Sync Setup`,
     "setlocal EnableDelayedExpansion",
-    `title RapidShift Labs - 1-Click Tally Prime Sync Setup (${safeBiz})`,
+    `title ${escapedBatBrand} - 1-Click Tally Prime Sync Setup`,
     "color 0A",
     "echo ======================================================================",
-    `echo   RapidShift Labs - 1-Click Tally Prime Setup for ${safeBiz}`,
+    `echo   ${escapedBatBrand} - 1-Click Tally Prime Setup`,
     "echo ======================================================================",
     "echo.",
     'set "RSL_DIR=%LOCALAPPDATA%\\RapidShiftLabs"',
@@ -5219,7 +5599,7 @@ export function generateWindowsTallyInstallerBat(params: {
     "",
     "echo [Step 1/4] Downloading verified Tally Connector and TDL Add-On...",
     whToken
-      ? `powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -UseBasicParsing -Uri '${cleanServer}/api/webhooks/tally?mode=tdl-latest&token=${whToken}' -OutFile '%RSL_DIR%\\rsl-tally-whatsapp.tdl'"`
+      ? `powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -UseBasicParsing -Uri '${cleanServer}/api/webhooks/tally?mode=tdl-latest&token=${whToken}' -OutFile '%RSL_DIR%\\${tdlFilename}'"`
       : "rem TDL file can also be downloaded from the Connect Tally screen",
     `powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -UseBasicParsing -Uri '${cleanServer}/api/agent/connector-script' -OutFile '%RSL_DIR%\\rsl-tally-connector.mjs'" 2>nul`,
     "",
@@ -5235,7 +5615,7 @@ export function generateWindowsTallyInstallerBat(params: {
     'if not "%PAIR_CODE%"=="" (',
     "  echo [Step 2/4] Pairing this Windows PC with RapidShift Labs...",
     whToken
-      ? `  node "%RSL_DIR%\\rsl-tally-connector.mjs" --server "${cleanServer}" --pair "%PAIR_CODE%" --device "%COMPUTERNAME%" --tdl-path "%RSL_DIR%\\rsl-tally-whatsapp.tdl" --webhook-token "${whToken}"`
+      ? `  node "%RSL_DIR%\\rsl-tally-connector.mjs" --server "${cleanServer}" --pair "%PAIR_CODE%" --device "%COMPUTERNAME%" --tdl-path "%RSL_DIR%\\${tdlFilename}" --webhook-token "${whToken}"`
       : `  node "%RSL_DIR%\\rsl-tally-connector.mjs" --server "${cleanServer}" --pair "%PAIR_CODE%" --device "%COMPUTERNAME%"`,
     "  if %ERRORLEVEL% NEQ 0 (",
     "    echo.",
@@ -5254,9 +5634,9 @@ export function generateWindowsTallyInstallerBat(params: {
     'wscript.exe "%STARTUP_VBS%"',
     "echo.",
     "echo ======================================================================",
-    "echo   SUCCESS: RapidShift Labs Tally Sync is now running in the background.",
-    "echo   TDL File Path (for Tally F1 - TDLs & Add-Ons):",
-    "echo   %RSL_DIR%\\rsl-tally-whatsapp.tdl",
+    `echo   SUCCESS: ${escapedBatBrand} is now running in the background.`,
+    "echo   TDL File Path (for Tally F1 - TDLs ^& Add-Ons):",
+    `echo   %RSL_DIR%\\${tdlFilename}`,
     "echo ======================================================================",
     "echo.",
     "pause",
@@ -5270,13 +5650,16 @@ export interface IncomingTallyBillItem {
   masterId?: string;
   companyName?: string;
   voucherNumber: string;
-  voucherType: "Sales" | "Receipt" | "CreditNote" | "Purchase";
+  voucherType: TallySuiteVoucherType;
   partyName: string;
   partyParentGroup?: string;
   partyPhone?: string;
   amountRupees: number;
   paidAmountRupees?: number;
   hasExplicitPaidAmount?: boolean;
+  narration?: string;
+  ledgerAccountName?: string;
+  billAllocations?: ParsedTallyBillAllocation[];
   originalCurrency?: string;
   originalAmountMinor?: number | null;
   exchangeRateMicros?: number | null;
@@ -5305,10 +5688,12 @@ function normalizePhoneOrNull(raw?: string | null): string | null {
 function normalizeVoucherType(
   raw?: string,
   baseRaw?: string
-): "Sales" | "Receipt" | "CreditNote" | "Purchase" {
+): TallySuiteVoucherType {
   const combined = `${baseRaw || ""} ${raw || "Sales"}`.trim();
   if (/receipt/i.test(combined)) return "Receipt";
+  if (/payment/i.test(combined)) return "Payment";
   if (/credit\s*note|creditnote/i.test(combined)) return "CreditNote";
+  if (/debit\s*note|debitnote/i.test(combined)) return "DebitNote";
   if (/purchase/i.test(combined)) return "Purchase";
   return "Sales";
 }
@@ -5661,6 +6046,14 @@ export function reconcileTallyCompanySnapshot(params: {
   }
 
   if (deletedVoucherNumbers.length > 0) {
+    reconcileCompanyBillSettlementsAndPartyBalances({
+      db,
+      workspaceId: params.workspaceId,
+      companyId: company.id,
+      now,
+      cancelPaidVoucherOutbox: (v) => cancelPendingOutboxJobsForVoucher(params.workspaceId, v),
+    });
+
     db.update(tenantDataSchema.tallyCompanies)
       .set({ lastSyncedAt: now })
       .where(eq(tenantDataSchema.tallyCompanies.id, company.id))
@@ -5822,7 +6215,10 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
   const routing = getTallyCompanyRoutingConfig(params.workspaceId);
 
   const wsRow = ctrl
-    .select({ defaultTallyCompany: controlSchema.workspaces.defaultTallyCompany })
+    .select({
+      name: controlSchema.workspaces.name,
+      defaultTallyCompany: controlSchema.workspaces.defaultTallyCompany,
+    })
     .from(controlSchema.workspaces)
     .where(eq(controlSchema.workspaces.id, params.workspaceId))
     .get();
@@ -5853,7 +6249,7 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
   let xmlHasExplicitDateSpan: boolean | undefined = params.fullCompanySnapshot?.hasExplicitDateSpan;
 
   if (typeof params.rawPayload === "string" && params.rawPayload.trim().startsWith("<")) {
-    if (/<(?:STOCKITEM|GODOWN|LEDGER)(?:\s|>)/i.test(params.rawPayload)) {
+    if (/<(?:STOCKITEM|GODOWN|LEDGER|BILL)(?:\s|>)/i.test(params.rawPayload)) {
       const mOut = ingestTallyMastersXmlForWorkspace({
         workspaceId: params.workspaceId,
         rawXml: params.rawPayload,
@@ -5900,7 +6296,10 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         partyPhone: v.partyPhone,
         amountRupees: v.amountRupees,
         paidAmountRupees: v.paidAmountRupees,
-        hasExplicitPaidAmount: v.paidAmountRupees > 0,
+        hasExplicitPaidAmount: Boolean(v.hasExplicitPaidAmount),
+        narration: v.narration,
+        ledgerAccountName: v.ledgerAccountName,
+        billAllocations: v.billAllocations,
         originalCurrency: v.originalCurrency,
         originalAmountMinor: v.originalAmountMinor,
         exchangeRateMicros: v.exchangeRateMicros,
@@ -5997,7 +6396,7 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         entry.baseVoucherType ?? entry.voucherType ?? entry.type ?? "Sales"
       ).trim();
       if (
-        /^(contra|journal|payment|memorandum|reversing\s*journal|stock\s*journal|physical\s*stock|sales\s*order|purchase\s*order|delivery\s*note|receipt\s*note|rejections\s*in|rejections\s*out)$/i.test(
+        /^(contra|journal|memorandum|reversing\s*journal|stock\s*journal|physical\s*stock|sales\s*order|purchase\s*order|delivery\s*note|receipt\s*note|rejections\s*in|rejections\s*out)$/i.test(
           rawTypeCandidate
         )
       ) {
@@ -6115,6 +6514,50 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         ? parseTallyNumericAmount(String(entry.paidAmountRupees))
         : 0;
 
+      const parsedBillAllocations: ParsedTallyBillAllocation[] = [];
+      if (Array.isArray(entry.billAllocations)) {
+        for (const ba of entry.billAllocations as Array<Record<string, unknown>>) {
+          const bName = String(ba.billName ?? ba.name ?? "").trim();
+          if (!bName) continue;
+          const bAmtPaise =
+            ba.amountPaise !== undefined
+              ? Math.max(0, Math.round(Number(ba.amountPaise) || 0))
+              : rupeesToPaise(Math.max(0, Number(ba.amountRupees ?? ba.amount ?? amountRupees) || 0));
+          if (bAmtPaise <= 0) continue;
+          parsedBillAllocations.push({
+            billName: bName,
+            billType: normalizeBillAllocationType(String(ba.billType ?? "Agst Ref")),
+            amountPaise: bAmtPaise,
+          });
+        }
+      }
+      const explicitAgstBill = String(
+        entry.againstBillNumber ?? entry.agstRef ?? entry.refBillNumber ?? ""
+      ).trim();
+      if (
+        explicitAgstBill &&
+        !parsedBillAllocations.some(
+          (a) => a.billName.toLowerCase() === explicitAgstBill.toLowerCase()
+        )
+      ) {
+        parsedBillAllocations.push({
+          billName: explicitAgstBill,
+          billType: "Agst Ref",
+          amountPaise: Math.max(0, rupeesToPaise(amountRupees)),
+        });
+      }
+
+      const rawNarrationStr = entry.narration
+        ? String(entry.narration).trim()
+        : entry.remarks
+          ? String(entry.remarks).trim()
+          : undefined;
+      const rawLedgerAcctStr = entry.ledgerAccountName
+        ? String(entry.ledgerAccountName).trim()
+        : entry.bankOrCashLedger
+          ? String(entry.bankOrCashLedger).trim()
+          : undefined;
+
       const syncBatchId = entry.syncBatchId ? String(entry.syncBatchId).trim() : undefined;
       const inlinePdfB64 =
         typeof entry.nativePdfBase64 === "string" && entry.nativePdfBase64.trim()
@@ -6146,6 +6589,9 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         amountRupees: Number.isFinite(amountRupees) && amountRupees > 0 ? amountRupees : 0,
         paidAmountRupees: parsedPaidRupees,
         hasExplicitPaidAmount,
+        narration: rawNarrationStr,
+        ledgerAccountName: rawLedgerAcctStr,
+        billAllocations: parsedBillAllocations.length > 0 ? parsedBillAllocations : undefined,
         originalCurrency,
         originalAmountMinor,
         exchangeRateMicros,
@@ -6162,6 +6608,7 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
   }
 
   let deletedCount = 0;
+  const touchedCompanyIds = new Set<string>();
 
   // If a previously synced voucher was edited in Tally and marked Optional, remove it cleanly
   for (const optRef of convertedToOptionalRefs) {
@@ -6189,6 +6636,7 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
           now,
         });
       }
+      touchedCompanyIds.add(comp.id);
       deletedCount++;
     }
   }
@@ -6215,9 +6663,11 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
     }
     const outdatedCheck = detectOutdatedTdlVersion(params.userAgent);
     if (outdatedCheck.isOutdated) {
+      const expectedTdlFile = buildWorkspaceTdlFilename(wsRow?.name ?? "business");
+      const expectedBrandTitle = buildTallyDisplayBrandTitle(wsRow?.name ?? "Business");
       throw new RslError(
         "RSL-VAL-1001",
-        `Tally Prime is still running an older .tdl add-on (v${outdatedCheck.detectedVersion}) that sent empty voucher fields. Download rsl-tally-whatsapp.tdl v${outdatedCheck.latestVersion} from Connect Tally Prime, overwrite your existing .tdl file, reload it in Tally Prime (F1 -> TDLs & Add-Ons -> F4 -> Ctrl+A), and click 'RSL Sync All Bills Now'.`
+        `Tally Prime is still running an older .tdl add-on (v${outdatedCheck.detectedVersion}) that sent empty voucher fields. Download ${expectedTdlFile} v${outdatedCheck.latestVersion} from Connect Tally Prime, overwrite your existing .tdl file, reload it in Tally Prime (F1 -> TDLs & Add-Ons -> F4 -> Ctrl+A), and click '${expectedBrandTitle} - Sync All Now'.`
       );
     }
     throw new RslError(
@@ -6271,6 +6721,7 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
               now,
             });
           }
+          touchedCompanyIds.add(company.id);
           deletedCount++;
           void dispatchWorkspaceWebhookEvent(params.workspaceId, "tally.bill.cancelled", {
             voucherId: existingToDel.id,
@@ -6312,6 +6763,8 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         .run();
     }
 
+    touchedCompanyIds.add(company.id);
+
     const guid = resolveCanonicalVoucherGuid(
       db,
       company.id,
@@ -6348,20 +6801,30 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         ? existingRow.amountPaise
         : rawAmountPaise;
 
-    const paidAmountPaise =
-      item.voucherType === "Receipt" || item.voucherType === "CreditNote"
+    const isSettlementVoucher =
+      item.voucherType === "Receipt" ||
+      item.voucherType === "Payment" ||
+      item.voucherType === "CreditNote" ||
+      item.voucherType === "DebitNote";
+    const directPaidPaise = isSettlementVoucher
+      ? amountPaise
+      : isCashOrBankPartyName(effectivePartyName)
         ? amountPaise
         : item.hasExplicitPaidAmount
           ? Math.min(amountPaise, rupeesToPaise(item.paidAmountRupees ?? 0))
           : existingRow
-            ? Math.min(amountPaise, existingRow.paidAmountPaise)
+            ? Math.min(amountPaise, existingRow.directPaidPaise)
             : 0;
+    const paidAmountPaise = isSettlementVoucher
+      ? amountPaise
+      : Math.max(
+          directPaidPaise,
+          existingRow && !item.isCancelled ? Math.min(amountPaise, existingRow.paidAmountPaise) : 0
+        );
 
     const paymentStatus = item.isCancelled
       ? "cancelled"
-      : item.voucherType === "Receipt" ||
-          item.voucherType === "CreditNote" ||
-          (amountPaise > 0 && paidAmountPaise >= amountPaise)
+      : isSettlementVoucher || (amountPaise > 0 && paidAmountPaise >= amountPaise)
         ? "paid"
         : paidAmountPaise > 0
           ? "partial"
@@ -6369,7 +6832,7 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
 
     const vDate = item.voucherDate ? parseTallyXmlDate(item.voucherDate) : existingRow?.voucherDate ?? now;
     const dueDate =
-      item.voucherType === "Sales"
+      item.voucherType === "Sales" || item.voucherType === "Purchase"
         ? item.dueDate
           ? parseTallyDueDateOrCreditDays(item.dueDate, vDate)
           : vDate + 15 * 86400_000
@@ -6385,11 +6848,23 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
       item.exchangeRateMicros !== undefined
         ? item.exchangeRateMicros
         : existingRow?.exchangeRateMicros ?? null;
+    const resolvedNarration =
+      item.narration !== undefined && item.narration !== ""
+        ? item.narration
+        : existingRow?.narration ?? null;
+    const resolvedLedgerAcct =
+      item.ledgerAccountName !== undefined && item.ledgerAccountName !== ""
+        ? item.ledgerAccountName
+        : existingRow?.ledgerAccountName ?? null;
+    const resolvedBillAllocationsJson =
+      item.billAllocations && item.billAllocations.length > 0
+        ? serializeBillAllocationsJson(item.billAllocations)
+        : existingRow?.billAllocationsJson ?? "[]";
 
     const contentHash = crypto
       .createHash("sha256")
       .update(
-        `${guid}|${item.voucherNumber}|${effectivePartyName}|${amountPaise}|${paidAmountPaise}|${paymentStatus}|${vDate}|${dueDate ?? 0}|${resolvedCurrency}`
+        `${guid}|${item.voucherNumber}|${effectivePartyName}|${amountPaise}|${directPaidPaise}|${paymentStatus}|${vDate}|${dueDate ?? 0}|${resolvedCurrency}|${resolvedBillAllocationsJson}`
       )
       .digest("hex")
       .slice(0, 32);
@@ -6420,6 +6895,10 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         partyPhoneE164: phoneE164,
         amountPaise,
         paidAmountPaise,
+        directPaidPaise,
+        narration: resolvedNarration,
+        ledgerAccountName: resolvedLedgerAcct,
+        billAllocationsJson: resolvedBillAllocationsJson,
         originalCurrency: resolvedCurrency,
         originalAmountMinor: resolvedOrigMinor,
         exchangeRateMicros: resolvedExRateMicros,
@@ -6442,6 +6921,10 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
           partyPhoneE164: phoneE164,
           amountPaise,
           paidAmountPaise,
+          directPaidPaise,
+          narration: resolvedNarration,
+          ledgerAccountName: resolvedLedgerAcct,
+          billAllocationsJson: resolvedBillAllocationsJson,
           originalCurrency: resolvedCurrency,
           originalAmountMinor: resolvedOrigMinor,
           exchangeRateMicros: resolvedExRateMicros,
@@ -6573,6 +7056,30 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
     deletedCount += snapRes.deletedCount;
   }
 
+  // Reconcile Bill-Wise settlements (Paid in Tally: Cash Counter, Agst Ref, Credit/Debit Note, FIFO)
+  // and recompute Client/Supplier Ledger closing balances across all touched companies!
+  for (const compId of touchedCompanyIds) {
+    reconcileCompanyBillSettlementsAndPartyBalances({
+      db,
+      workspaceId: params.workspaceId,
+      companyId: compId,
+      now,
+      cancelPaidVoucherOutbox: (v) => cancelPendingOutboxJobsForVoucher(params.workspaceId, v),
+    });
+  }
+
+  // Refresh savedVouchers rows after settlement reconciliation so returned paymentStatus/paidAmountPaise are 100% current
+  for (const sv of savedVouchers) {
+    const refreshed = db
+      .select()
+      .from(tenantDataSchema.tallyVouchers)
+      .where(eq(tenantDataSchema.tallyVouchers.id, sv.row.id))
+      .get();
+    if (refreshed) {
+      sv.row = refreshed;
+    }
+  }
+
   const totalMutated = savedVouchers.length + deletedCount + stockItemsUpserted;
   if (totalMutated > 0) {
     db.insert(tenantDataSchema.syncRuns)
@@ -6620,7 +7127,7 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
     const eventName =
       entry.row.paymentStatus === "cancelled"
         ? "tally.bill.cancelled"
-        : entry.row.voucherType === "Receipt"
+        : entry.row.voucherType === "Receipt" || entry.row.voucherType === "Payment"
           ? "tally.payment.received"
           : "tally.bill.created";
     void dispatchWorkspaceWebhookEvent(params.workspaceId, eventName, {
@@ -6771,12 +7278,13 @@ export function buildLocalTallyExportXml(sinceAlterId = 0, companyName?: string)
         <TDLMESSAGE>
           <COLLECTION NAME="RSLSyncVouchers" ISMODIFY="No">
             <TYPE>Voucher</TYPE>
-            <NATIVEMETHOD>MasterID, GUID, AlterID, Date, VoucherNumber, VoucherTypeName, PartyLedgerName, PartyMobileNo, Amount, BasicDueDateOfPymt, IsCancelled, IsOptional</NATIVEMETHOD>
-            <NATIVEMETHOD>LedgerEntries.LedgerName, LedgerEntries.IsPartyLedger, LedgerEntries.Amount</NATIVEMETHOD>
-            <NATIVEMETHOD>AllLedgerEntries.LedgerName, AllLedgerEntries.IsPartyLedger, AllLedgerEntries.Amount</NATIVEMETHOD>
+            <NATIVEMETHOD>MasterID, GUID, AlterID, Date, VoucherNumber, VoucherTypeName, PartyLedgerName, PartyMobileNo, Amount, BasicDueDateOfPymt, Narration, IsCancelled, IsOptional</NATIVEMETHOD>
+            <NATIVEMETHOD>LedgerEntries.LedgerName, LedgerEntries.IsPartyLedger, LedgerEntries.Amount, LedgerEntries.BillAllocations.Name, LedgerEntries.BillAllocations.BillType, LedgerEntries.BillAllocations.Amount</NATIVEMETHOD>
+            <NATIVEMETHOD>AllLedgerEntries.LedgerName, AllLedgerEntries.IsPartyLedger, AllLedgerEntries.Amount, AllLedgerEntries.BillAllocations.Name, AllLedgerEntries.BillAllocations.BillType, AllLedgerEntries.BillAllocations.Amount</NATIVEMETHOD>
             <NATIVEMETHOD>AllInventoryEntries.StockItemName, AllInventoryEntries.ActualQty, AllInventoryEntries.BilledQty, AllInventoryEntries.Rate, AllInventoryEntries.Discount, AllInventoryEntries.Amount, AllInventoryEntries.IsDeemedPositive, AllInventoryEntries.BatchAllocations.GodownName, AllInventoryEntries.BatchAllocations.BatchName, AllInventoryEntries.BatchAllocations.ExpiryPeriod</NATIVEMETHOD>
             <NATIVEMETHOD>InventoryEntries.StockItemName, InventoryEntries.ActualQty, InventoryEntries.BilledQty, InventoryEntries.Rate, InventoryEntries.Discount, InventoryEntries.Amount, InventoryEntries.IsDeemedPositive, InventoryEntries.BatchAllocations.GodownName, InventoryEntries.BatchAllocations.BatchName</NATIVEMETHOD>
             <COMPUTE>RSLPartyPhone : $LedgerMobile:Ledger:$PartyLedgerName</COMPUTE>
+            <COMPUTE>RSLPartyGroup : $Parent:Ledger:$PartyLedgerName</COMPUTE>
             <COMPUTE>RSLBaseVchType : $Parent:VoucherType:$VoucherTypeName</COMPUTE>
             <COMPUTE>SVCurrentCompany : $$CurrentCompany</COMPUTE>
             <FILTER>RSLAlterFilter</FILTER>

@@ -1,6 +1,6 @@
 ---
-title: Tally Prime Cloud Sync, Party Mobile Setup, Exact PDF Invoices & Rules
-summary: Complete minute-by-minute guide to enter mobile numbers in Tally Party Ledgers, enable Port 9000, load .tdl v2.5 without Windows filename mistakes, send 100% untouched Tally-printed PDF invoices on WhatsApp, route multiple companies, and handle edits/deletions.
+title: Tally Prime Cloud Sync, Client Ledgers, Auto Paid-Bill Sync & Exact PDF Invoices
+summary: Complete minute-by-minute guide to enter mobile numbers in Tally Party Ledgers, enable Port 9000, load your personalized <business>-rsl-sync.tdl v2.7 add-on, automatically settle invoices when marked Paid in Tally, view Client & Supplier Ledgers, and send untouched Tally-printed PDF invoices on WhatsApp.
 section: Daily Operations
 audience: customer
 service: tally.sync
@@ -61,7 +61,7 @@ For Tally Prime to tell WhatsApp *which* phone number should receive a customer'
 
 ---
 
-## Step 3 — Find Your Exact Tally Prime Folder & Download `.tdl v2.5` Safely
+## Step 3 — Find Your Exact Tally Prime Folder & Download Your Personalized `.tdl v2.7` Safely
 
 1. **Find your exact Tally folder on Windows**:
    - Minimize Tally Prime to your Windows Desktop.
@@ -69,13 +69,13 @@ For Tally Prime to tell WhatsApp *which* phone number should receive a customer'
    - Click inside the top folder address bar in Windows File Explorer and press **Ctrl + C** to copy that folder path (or create a dedicated simple folder `C:\TallyPrime` so there are no Windows Administrator permission prompts).
 2. **Prevent Windows from Hiding `.txt` or Renaming `(1)`**:
    - In Windows File Explorer, click **View -> Show -> File name extensions** (make sure there is a checkmark next to **File name extensions**).
-   - Back in RapidShift Labs (**Tally Prime & Bills -> Connect Tally Prime**), click **Download Pre-Configured `.tdl v2.5`**.
-   - Save the file directly into `C:\TallyPrime\rsl-tally-whatsapp.tdl`.
-   - **Critical Check:** If an older `rsl-tally-whatsapp.tdl` already exists in that folder, **overwrite/replace** it — never let Chrome/Edge save it as `rsl-tally-whatsapp (1).tdl`, because Tally Prime will keep loading the old file.
+   - Back in RapidShift Labs (**Tally Prime & Bills -> Connect Tally Prime**), click **Download Personalized `.tdl v2.7`**.
+   - Save the file directly into `C:\TallyPrime\<your-business>-rsl-sync.tdl` (RapidShift automatically names the `.tdl` file with your workspace's business slug, such as `sharma-traders-rsl-sync.tdl`).
+   - **Critical Check:** If an older `.tdl` file already exists in that folder, **overwrite/replace** it — never let Chrome/Edge save it with ` (1).tdl`, because Tally Prime will keep loading the old file.
 
 ---
 
-## Step 4 — Load `.tdl v2.5` into Tally Prime Memory (Exact Keystrokes)
+## Step 4 — Load `.tdl v2.7` into Tally Prime Memory (Exact Keystrokes)
 
 1. Switch to **Tally Prime** and press **F1 (Help)** at the top right.
 2. Arrow down to **TDLs & Add-Ons** and press **Enter**.
@@ -83,25 +83,25 @@ For Tally Prime to tell WhatsApp *which* phone number should receive a customer'
 4. Set **Load selected TDL files on startup** = **Yes** and press **Enter**.
 5. On the first empty row under **List of TDL Files to preload on startup**:
    - Choose **Specify Path** (or paste the path directly).
-   - Type or paste (`Ctrl + V`): `C:\TallyPrime\rsl-tally-whatsapp.tdl` and press **Enter**.
+   - Type or paste (`Ctrl + V`): `C:\TallyPrime\<your-business>-rsl-sync.tdl` and press **Enter**.
    - Set **Load TDL** = **Yes** and press **Enter**.
    - On the next blank line, select **End of List**.
 6. Press **Ctrl + A** to accept and compile the TDL.
-7. Look at the **TDLs & Add-Ons** list before pressing Escape: next to `rsl-tally-whatsapp.tdl`, confirm the status says **`Loaded`** (not `Error` or `Not Loaded`).
-8. Press **Esc** once to return to **Gateway of Tally**. Look at the bottom of the **Gateway of Tally** menu — you will now see two new items:
-   - **RSL Cloud Connection Test**
-   - **RSL Sync All Bills Now**
+7. Look at the **TDLs & Add-Ons** list before pressing Escape: next to `<your-business>-rsl-sync.tdl`, confirm the status says **`Loaded`** (not `Error` or `Not Loaded`).
+8. Press **Esc** once to return to **Gateway of Tally**. Look at the bottom of the **Gateway of Tally** menu — you will now see two items bearing your business name:
+   - **`<Your Business Name> & RSL Sync - Connection Test`**
+   - **`<Your Business Name> & RSL Sync - Sync All Now`**
 
 ---
 
-## Step 5 — Test Connection & Sync Existing Tally Bills
+## Step 5 — Test Connection & Sync Existing Tally Bills, Receipts & Ledgers
 
-1. On **Gateway of Tally**, arrow down to **RSL Cloud Connection Test** and press **Enter**:
+1. On **Gateway of Tally**, arrow down to **`<Your Business Name> & RSL Sync - Connection Test`** and press **Enter**:
    - Tally Prime sends a live handshake to `https://<your-slug>.tally.rapidshiftlabs.in` and pops up a confirmation box showing **Connected**.
-2. Next, arrow down to **RSL Sync All Bills Now** and press **Enter**:
-   - Tally Prime pushes your open company's bills and receipts to RapidShift Labs and reconciles any previously deleted Day Book vouchers.
+2. Next, arrow down to **`<Your Business Name> & RSL Sync - Sync All Now`** and press **Enter**:
+   - Tally Prime pushes your open company's Sales, Receipt, Payment, Credit Note, Debit Note, and Purchase vouchers to RapidShift Labs, computes Paid/Partial bill settlements, updates Client & Supplier Ledgers (`/tally/parties`), and reconciles any previously deleted Day Book vouchers.
 3. Switch to your browser at `https://app.rapidshiftlabs.in/tally`:
-   - Confirm the status banner turns green (**Live Connected**) and your synced bills appear in the **Synced Tally Bills & Receipts** table.
+   - Confirm the status banner turns green (**Live Connected**), your synced bills appear in `/tally`, and your customer/supplier running balances appear under **Client & Supplier Ledgers** (`/tally/parties`).
 
 ---
 
@@ -121,12 +121,13 @@ For Tally Prime to tell WhatsApp *which* phone number should receive a customer'
 
 ---
 
-## How Live Edits, Cancellations (`Alt + X`) & Deletions (`Alt + D`) Work Automatically
+## How Live Paid-in-Tally Sync, Edits, Cancellations (`Alt + X`) & Deletions (`Alt + D`) Work Automatically
 
-- **New or Altered Bill (`F8 Sales`, `F6 Receipt`, `Alt + F6 Credit Note` -> `Ctrl + A`)**: Syncs to RapidShift within seconds; updates amount/due date without creating duplicate vouchers.
+- **Invoices Marked Paid in Tally (`F6 Receipt`, `F5 Payment`, `Alt + F6 Credit Note`, `Alt + F5 Debit Note`)**: Whenever an invoice is settled in Tally Prime via Bill-Wise `Agst Ref`, Cash/Bank counter sale, or an on-account Receipt/Payment against the same Party Ledger (FIFO), RapidShift automatically marks the corresponding Sales/Purchase invoice **Paid** or **Partially Paid**, updates the party's T-account running balance in `/tally/parties`, and cancels any pending overdue WhatsApp reminders.
+- **New or Altered Bill (`F8 Sales`, `F9 Purchase`, `F6 Receipt`, `F5 Payment` -> `Ctrl + A`)**: Syncs to RapidShift within seconds; updates amount/due date without overwriting other bills or creating duplicate vouchers.
 - **Optional Vouchers (`Ctrl + L` Optional)**: Automatically skipped so proforma/draft memos never trigger customer WhatsApp messages until converted to a Regular voucher.
-- **Cancelled Voucher (`Alt + X` in Day Book or Voucher)**: Immediately marks the voucher **Cancelled** in RapidShift with `₹0` balance due and cancels any queued payment reminders.
-- **Deleted Voucher (`Alt + D` inside Voucher Alteration)**: Sends a real-time delete event to RapidShift Labs, removing the voucher and cancelling unsent reminders. *(If someone deletes a bill from Day Book list view without opening it, clicking **RSL Sync All Bills Now** or running the Windows Connector reconciles and removes it automatically.)*
+- **Cancelled Voucher (`Alt + X` in Day Book or Voucher)**: Immediately marks the voucher **Cancelled** in RapidShift with `₹0` balance due, reverses any receipt settlement allocations cleanly, and cancels any queued payment reminders.
+- **Deleted Voucher (`Alt + D` inside Voucher Alteration)**: Sends a real-time delete event to RapidShift Labs, removing the voucher, recomputing bill settlements, and cancelling unsent reminders. *(If someone deletes a bill from Day Book list view without opening it, clicking **`<Your Business Name> & RSL Sync - Sync All Now`** or running the Windows Connector reconciles and removes it automatically.)*
 
 ---
 
@@ -142,7 +143,7 @@ For Tally Prime to tell WhatsApp *which* phone number should receive a customer'
 
 | Message / Symptom | Exact Root Cause | Minute-by-Minute Fix |
 | --- | --- | --- |
-| `Bad formula! '##RSLPingMsg Then ...'` | An older `.tdl` (`v2.3`/`v2.4`) is still loaded in Tally memory | Download `.tdl v2.5`, overwrite `C:\TallyPrime\rsl-tally-whatsapp.tdl`, press `F1 -> TDLs & Add-Ons -> F4 -> Ctrl + A` |
+| `Bad formula! '##RSLPingMsg Then ...'` | An older `.tdl` (`v2.3`/`v2.4`) is still loaded in Tally memory | Download `.tdl v2.7`, overwrite `C:\TallyPrime\<your-business>-rsl-sync.tdl`, press `F1 -> TDLs & Add-Ons -> F4 -> Ctrl + A` |
 | Bill synced, but **No WhatsApp Sent** | Party Ledger in Tally has blank `Mobile no.`, or template not `APPROVED` | Open Party Ledger in Tally (`Alter -> Ledger -> F12 Provide Contact Details: Yes`), add 10-digit mobile, re-save voucher (`Ctrl + A`) |
-| WhatsApp text arrived without PDF | Tally Local Port `9000` is off or rule used a text-only template | Enable Port `9000` (`F1 -> Settings -> Connectivity -> Client/Server -> Both / 9000`), pair Windows Connector (`v2.2`), and select `tally_tax_invoice_pdf` |
-| `Tally File Not Found` in `F4` | Windows saved file as `rsl-tally-whatsapp.tdl.txt` | Enable `View -> Show -> File name extensions` in File Explorer and rename to exact `.tdl` |
+| WhatsApp text arrived without PDF | Tally Local Port `9000` is off or rule used a text-only template | Enable Port `9000` (`F1 -> Settings -> Connectivity -> Client/Server -> Both / 9000`), pair Windows Connector (`v2.5`), and select `tally_tax_invoice_pdf` |
+| `Tally File Not Found` in `F4` | Windows saved file as `<your-business>-rsl-sync.tdl.txt` | Enable `View -> Show -> File name extensions` in File Explorer and rename to exact `.tdl` |

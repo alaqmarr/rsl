@@ -252,7 +252,7 @@ describe("Phase 16 Suite (Subdomain Endpoints on rapidshiftlabs.in, Tally Sync E
     });
 
     expect(tdl).toContain("[#Menu: Gateway of Tally]");
-    expect(tdl).toContain('"RSL Cloud Connection Test"');
+    expect(tdl).toContain('"Shah Traders & RSL Sync - Connection Test"');
     expect(tdl).toContain("[#Form: Voucher]");
     expect(tdl).toContain("Add : On : Form Accept : Yes : Form Accept");
     expect(tdl).toContain("Walk Collection : RSLCloudPingCheck");
@@ -262,8 +262,8 @@ describe("Phase 16 Suite (Subdomain Endpoints on rapidshiftlabs.in, Tally Sync E
       'Data Source     : HTTP JSON : "https://shah-traders.tally.rapidshiftlabs.in/api/webhooks/tally?token=tlwh_testtoken123456"'
     );
     expect(tdl).toContain('Header          : "X-Tally-Webhook-Token: tlwh_testtoken123456"');
-    expect(tdl).toContain('Header          : "User-Agent: TallyPrime-RSL-TDL/2.6"');
-    expect(tdl).toContain('"RSL Sync All Bills Now"');
+    expect(tdl).toContain('Header          : "User-Agent: TallyPrime-RSL-TDL/2.7"');
+    expect(tdl).toContain('"Shah Traders & RSL Sync - Sync All Now"');
     expect(tdl).toContain("[System: Variable]");
     expect(tdl).toContain("Start Progress");
     expect(tdl).not.toContain("Else If");

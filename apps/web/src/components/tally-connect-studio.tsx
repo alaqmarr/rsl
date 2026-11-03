@@ -168,6 +168,43 @@ function normalizeDisplayLocalhostToIpv4(url: string): string {
   return url.replace(/^http:\/\/localhost(?=[:/]|$)/i, "http://127.0.0.1");
 }
 
+function buildClientTdlFilename(workspaceName: string): string {
+  const slug = workspaceName
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 44);
+  if (!slug) return "business-rsl-sync.tdl";
+  return slug.endsWith("-rsl-sync") ? `${slug}.tdl` : `${slug}-rsl-sync.tdl`;
+}
+
+function buildClientInstallerFilename(workspaceName: string): string {
+  const words = workspaceName
+    .trim()
+    .replace(/&/g, " And ")
+    .replace(/[^a-zA-Z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 5)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+  const prefix = words.length > 0 ? words.join("-") : "Business";
+  return `Install-${prefix}-RSL-Sync.bat`.slice(0, 72);
+}
+
+function buildClientTallyBrandTitle(workspaceName: string): string {
+  const clean = workspaceName
+    .replace(/["'`:;[\]\\$#\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 34);
+  if (!clean) return "Business & RSL Sync";
+  if (/rsl\s*sync/i.test(clean)) return clean;
+  return `${clean} & RSL Sync`;
+}
+
 export function TallyConnectStudio({
   workspaceName,
   workspaceSlug,
@@ -474,10 +511,16 @@ export function TallyConnectStudio({
     });
   }
 
+  const personalTdlFilename = buildClientTdlFilename(workspaceName);
+  const personalInstallerFilename = buildClientInstallerFilename(workspaceName);
+  const personalBrandTitle = buildClientTallyBrandTitle(workspaceName);
+  const menuTestLabel = `${personalBrandTitle} - Connection Test`;
+  const menuSyncLabel = `${personalBrandTitle} - Sync All Now`;
+
   const pairCmd = `node rsl-tally-connector.mjs --pair ${pairingCode || "RSL-XXXX-XXXX"} --server ${activeTallyBase} --device "${workspaceName} Accounts PC"`;
   const doctorCmd = `node rsl-tally-connector.mjs --doctor --server ${activeTallyBase}`;
   const curlPingCmd = `curl -X POST "${cleanWebhookEndpoint}?mode=ping" -H "X-Tally-Webhook-Token: ${revealToken && token ? token : "<YOUR_TALLY_TOKEN>"}" -H "Content-Type: application/json" -d "{\\"mode\\":\\"ping\\"}"`;
-  const otaScheduledTaskCmd = `schtasks /Create /SC DAILY /TN "RSL_Tally_TDL_AutoUpdate" /TR "powershell -NoProfile -WindowStyle Hidden -Command \\"Invoke-WebRequest -UseBasicParsing '${otaLatestTdlUrl}' -OutFile 'C:\\TallyPrime\\rsl-tally-whatsapp.tdl'\\"" /ST 08:30 /F`;
+  const otaScheduledTaskCmd = `schtasks /Create /SC DAILY /TN "RSL_Tally_TDL_AutoUpdate" /TR "powershell -NoProfile -WindowStyle Hidden -Command \\"Invoke-WebRequest -UseBasicParsing '${otaLatestTdlUrl}' -OutFile 'C:\\TallyPrime\\${personalTdlFilename}'\\"" /ST 08:30 /F`;
 
   return (
     <div className="w-full space-y-6">
@@ -546,7 +589,7 @@ export function TallyConnectStudio({
                   {lastCheckReceipt.ok && (
                     <span className="ml-1 text-emerald-800">
                       (Endpoint verification tests your URL &amp; token — to pull existing Tally
-                      bills, click <strong>&ldquo;RSL Sync All Bills Now&rdquo;</strong> in Tally
+                      bills, click <strong>&ldquo;{menuSyncLabel}&rdquo;</strong> in Tally
                       Prime or <strong>&ldquo;Fetch Bills from Tally Now&rdquo;</strong>.)
                     </span>
                   )}
@@ -794,7 +837,7 @@ export function TallyConnectStudio({
                   outdatedTdl?.isOutdated ? "font-bold text-amber-700" : "text-zinc-500"
                 }`}
               >
-                {webhookEndpoint.lastUserAgent || "TallyPrime-RSL-TDL/2.6"}
+                {webhookEndpoint.lastUserAgent || "TallyPrime-RSL-TDL/2.7"}
                 {outdatedTdl?.isOutdated ? ` (Update to v${outdatedTdl.latestVersion})` : ""}
               </div>
             </div>
@@ -1107,7 +1150,7 @@ export function TallyConnectStudio({
                 <li>
                   <strong>3. Optional 1-Line Windows Auto-Updater (For .tdl-Only PCs):</strong> Run
                   this command once in PowerShell on the Tally PC so Windows automatically refreshes{" "}
-                  <code className="font-mono">C:\TallyPrime\rsl-tally-whatsapp.tdl</code> from your
+                  <code className="font-mono">C:\TallyPrime\{personalTdlFilename}</code> from your
                   endpoint before Tally starts each morning:
                 </li>
               </ul>
@@ -1132,17 +1175,17 @@ export function TallyConnectStudio({
 
       {/* 4. DETAILED SETUP GUIDE — TWO CONNECTION METHODS SIDE-BY-SIDE */}
       <div id="setup-guide" className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        {/* METHOD A: TALLY PRIME .TDL ADD-ON (v2.6) */}
+        {/* METHOD A: PERSONALIZED TALLY PRIME .TDL ADD-ON (v2.7) */}
         <SectionCard
-          title="Method A — Tally Prime Cloud Add-On (.tdl v2.6)"
-          subtitle="Instant post-commit push on Create, Update, Cancel (Alt+X), Delete (Alt+D) & full multi-date reconcile"
-          action={<StatusPill label="v2.6 • Post-Commit GUID Safe" tone="emerald" showDot={false} />}
+          title={`Method A — ${personalBrandTitle} Add-On (${personalTdlFilename})`}
+          subtitle="Instant post-commit push on Sales, Receipt, Payment, Credit/Debit Note, Purchase + Auto Paid-in-Tally Sync"
+          action={<StatusPill label="v2.7 • Paid-in-Tally + GUID Safe" tone="emerald" showDot={false} />}
         >
           <div className="space-y-4 text-xs">
             {canManageTally && (
               <div className="flex flex-wrap items-center gap-2">
                 <a href={tdlDownloadHref} className="rsl-btn-primary text-xs">
-                  Download Pre-Configured .tdl v2.6 (
+                  Download {personalTdlFilename} (v2.7 •{" "}
                   {targetMode === "local" ? "127.0.0.1:4500" : `${workspaceSlug}.tally.${primaryDomain}`}
                   )
                 </a>
@@ -1170,55 +1213,53 @@ export function TallyConnectStudio({
 
             <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/70 p-4">
               <div className="font-semibold text-slate-900">
-                Complete Step-by-Step Setup in Tally Prime (Release 2.0 – 5.0+)
+                Complete Step-by-Step Setup in Tally Prime (Shows &ldquo;{personalBrandTitle}&rdquo; in Gateway of Tally)
               </div>
               <ol className="mt-2.5 list-decimal space-y-2.5 pl-4 leading-relaxed text-zinc-700">
                 <li>
-                  <strong>Enable Tally Port 9000 for Native PDF Capture:</strong> In Tally Prime,
+                  <strong>Enable Tally Port 9000 for Native PDF, Ledger &amp; Stock Capture:</strong> In Tally Prime,
                   press <strong>F1 (Help)</strong> → <strong>Settings</strong> →{" "}
                   <strong>Connectivity</strong> → <strong>Client/Server Configuration</strong> → set{" "}
                   <strong>TallyPrime acts as = Both</strong> and <strong>Port = 9000</strong>. This
-                  lets RapidShift capture your exact Tally-printed invoice PDF automatically!
+                  lets RapidShift capture your exact Tally-printed invoice PDF, Client Ledgers, and Stock Items automatically!
                 </li>
                 <li>
-                  <strong>Save &amp; Overwrite Exact TDL Path:</strong> Save{" "}
+                  <strong>Save Your Personalized TDL File:</strong> Save{" "}
                   <code className="rounded bg-white px-1.5 py-0.5 font-mono text-[11px] text-slate-900">
-                    rsl-tally-whatsapp.tdl
+                    {personalTdlFilename}
                   </code>{" "}
                   to{" "}
                   <code className="font-mono text-slate-900">
-                    C:\TallyPrime\rsl-tally-whatsapp.tdl
+                    C:\TallyPrime\{personalTdlFilename}
                   </code>{" "}
-                  (overwriting any older copy — do not leave duplicates like{" "}
-                  <code className="font-mono">rsl-tally-whatsapp (1).tdl</code> in Downloads).
+                  (overwriting any older copy — do not leave duplicates with <code className="font-mono">(1).tdl</code> in Downloads).
                 </li>
                 <li>
                   <strong>Load / Reload into Tally Memory:</strong> Press <strong>F1 (Help)</strong>{" "}
                   → <strong>TDLs &amp; Add-Ons</strong> → <strong>F4 (Manage Local TDLs)</strong> →
                   set <strong>Load selected TDL files on startup = Yes</strong>, enter{" "}
                   <code className="font-mono text-slate-900">
-                    C:\TallyPrime\rsl-tally-whatsapp.tdl
+                    C:\TallyPrime\{personalTdlFilename}
                   </code>
                   , and press <strong>Ctrl + A</strong>.
                 </li>
                 <li>
                   <strong>Step A — Test Connection:</strong> On <strong>Gateway of Tally</strong>,
-                  click <strong>&ldquo;RSL Cloud Connection Test&rdquo;</strong>. Tally will verify{" "}
+                  click <strong>&ldquo;{menuTestLabel}&rdquo;</strong>. Tally will verify{" "}
                   <code className="font-mono text-emerald-800">{cleanWebhookEndpoint}</code> and pop
-                  up <strong>RSL Cloud Sync — Connected</strong>.
+                  up <strong>{personalBrandTitle} — Connected</strong>.
                 </li>
                 <li>
-                  <strong>Step B — Sync &amp; Reconcile All Existing Bills:</strong> Click{" "}
-                  <strong>&ldquo;RSL Sync All Bills Now&rdquo;</strong> on Gateway of Tally (or
+                  <strong>Step B — Sync &amp; Reconcile All Existing Bills &amp; Receipts:</strong> Click{" "}
+                  <strong>&ldquo;{menuSyncLabel}&rdquo;</strong> on Gateway of Tally (or
                   press <code className="font-mono">Alt + R</code> in Day Book) to sync all saved
-                  bills AND remove any deleted vouchers!
+                  bills, receipts, payments, and settlements!
                 </li>
                 <li>
-                  <strong>Step C — Live Create, Update, Cancel &amp; Delete:</strong> Every Sales
-                  (F8), Receipt (F6), or Credit Note (Alt+F6) saved with{" "}
+                  <strong>Step C — Live Paid-in-Tally, Update, Cancel &amp; Delete:</strong> Every Sales
+                  (F8), Receipt (F6), Payment (F5), Purchase (F9), Credit Note (Alt+F6), or Debit Note (Alt+F5) saved with{" "}
                   <strong>Ctrl + A</strong>, altered, cancelled with <strong>Alt + X</strong>, or
-                  deleted with <strong>Alt + D</strong> reflects live in your portal and sends your
-                  exact Tally PDF invoice on WhatsApp automatically!
+                  deleted with <strong>Alt + D</strong> updates your Client Ledgers &amp; Paid status live!
                 </li>
               </ol>
             </div>
@@ -1227,13 +1268,13 @@ export function TallyConnectStudio({
 
         {/* METHOD B: LOCAL PORT-9000 XML PULL & WINDOWS PC CONNECTOR */}
         <SectionCard
-          title={`Method B — Tally Port 9000 & Windows Connector v2.2 (${devices.length} Paired)`}
-          subtitle="Recommended for Remote Cloud • Exports exact native Tally PDFs + auto-updates .tdl over-the-air"
+          title={`Method B — Tally Port 9000 & Windows Connector v2.5 (${devices.length} Paired)`}
+          subtitle="Recommended for Remote Cloud • Syncs Client Ledgers, Inventory, Native Tally PDFs + OTA .tdl updates"
           action={
             canManageTally ? (
               <div className="flex flex-wrap items-center gap-1.5">
                 <a href={installerDownloadHref} className="rsl-btn-primary py-1.5 text-xs">
-                  1-Click Windows Setup (.bat)
+                  1-Click Setup ({personalInstallerFilename})
                 </a>
                 <a href={connectorDownloadHref} className="rsl-btn-secondary py-1.5 text-xs">
                   Connector (.mjs)
@@ -1421,12 +1462,12 @@ export function TallyConnectStudio({
           <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/60 p-3.5">
             <div className="flex items-center gap-2 font-semibold text-slate-900">
               <HelpCircle className="h-4 w-4 shrink-0 text-emerald-600" />
-              <span>1. Reload .tdl v2.6 in Tally Memory</span>
+              <span>1. Reload .tdl v2.7 in Tally Memory</span>
             </div>
             <p className="mt-1.5 leading-relaxed text-zinc-600">
               Check <strong>Last Client Source</strong> above — it must show{" "}
-              <code className="font-mono text-slate-900">TallyPrime-RSL-TDL/2.6</code>. Overwrite
-              your exact TDL file path and press{" "}
+              <code className="font-mono text-slate-900">TallyPrime-RSL-TDL/2.7</code>. Overwrite{" "}
+              <code className="font-mono text-slate-900">{personalTdlFilename}</code> and press{" "}
               <strong>F1 → TDLs &amp; Add-Ons → F4 → Ctrl + A</strong> (press <code className="font-mono">Esc</code>{" "}
               if any old dialog is open).
             </p>
@@ -1440,7 +1481,7 @@ export function TallyConnectStudio({
             <p className="mt-1.5 leading-relaxed text-zinc-600">
               <strong>Run Live Endpoint Check</strong> only verifies your token. To sync bills saved
               earlier or remove deleted bills, click{" "}
-              <strong>&ldquo;RSL Sync All Bills Now&rdquo;</strong> on Gateway of Tally (or{" "}
+              <strong>&ldquo;{menuSyncLabel}&rdquo;</strong> on Gateway of Tally (or{" "}
               <strong>Fetch Bills &amp; Tally PDFs</strong> above).
             </p>
           </div>
@@ -1583,8 +1624,8 @@ export function TallyConnectStudio({
               <Activity className="h-4 w-4 shrink-0 text-zinc-400" />
               <span>
                 No voucher sync batches recorded yet. Load{" "}
-                <code className="font-mono text-slate-800">rsl-tally-whatsapp.tdl</code> (v2.5) in
-                Tally Prime and click <strong>&ldquo;RSL Sync All Bills Now&rdquo;</strong> on
+                <code className="font-mono text-slate-800">{personalTdlFilename}</code> (v2.7) in
+                Tally Prime and click <strong>&ldquo;{menuSyncLabel}&rdquo;</strong> on
                 Gateway of Tally, or save a new Sales bill with{" "}
                 <code className="font-mono">Ctrl + A</code>.
               </span>

@@ -66,8 +66,8 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     dependsOn: [],
     pricingModel: "per_seat",
     meteredUnit: "team members",
-    defaultMonthlyPaise: 99900,
-    defaultUnitPaise: 29900,
+    defaultMonthlyPaise: 24900,
+    defaultUnitPaise: 9900,
     sortOrder: 1,
   },
   {
@@ -78,7 +78,7 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     dependsOn: [],
     pricingModel: "wallet_plus_monthly",
     meteredUnit: "conversations",
-    defaultMonthlyPaise: 149900,
+    defaultMonthlyPaise: 29900,
     defaultUnitPaise: 85,
     sortOrder: 2,
   },
@@ -90,31 +90,32 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     dependsOn: ["whatsapp.messaging"],
     pricingModel: "usage",
     meteredUnit: "recipients",
-    defaultMonthlyPaise: 49900,
+    defaultMonthlyPaise: 19900,
     defaultUnitPaise: 95,
     sortOrder: 3,
   },
   {
     key: "tally.sync",
-    name: "Tally Prime Live Sync",
-    plainSummary: "Keep your Tally Prime bills, customer balances, and payment receipts synced automatically.",
+    name: "All-in-One Tally Prime Sync, Ledgers & Inventory",
+    plainSummary:
+      "Sync Sales, Receipts, Payments, Credit/Debit Notes, Client & Supplier Ledgers, Paid-in-Tally status, and Stock & Godown Inventory.",
     category: "WhatsApp & Tally",
     dependsOn: [],
     pricingModel: "flat_monthly",
     meteredUnit: "Tally companies",
-    defaultMonthlyPaise: 129900,
+    defaultMonthlyPaise: 29900,
     defaultUnitPaise: 0,
     sortOrder: 4,
   },
   {
     key: "tally.invoicing",
     name: "Tally Bills & Payment Reminders on WhatsApp",
-    plainSummary: "Automatically send Tally sales bills and polite overdue payment reminders on WhatsApp.",
+    plainSummary: "Automatically send Tally sales bills, ledger statements, and polite overdue payment reminders on WhatsApp.",
     category: "WhatsApp & Tally",
     dependsOn: ["tally.sync", "whatsapp.messaging"],
     pricingModel: "wallet_plus_monthly",
     meteredUnit: "bill messages",
-    defaultMonthlyPaise: 79900,
+    defaultMonthlyPaise: 19900,
     defaultUnitPaise: 85,
     sortOrder: 5,
   },
@@ -126,7 +127,7 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     dependsOn: [],
     pricingModel: "flat_monthly",
     meteredUnit: "Facebook pages",
-    defaultMonthlyPaise: 69900,
+    defaultMonthlyPaise: 19900,
     defaultUnitPaise: 0,
     sortOrder: 6,
   },
@@ -138,7 +139,7 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     dependsOn: [],
     pricingModel: "flat_monthly",
     meteredUnit: "Instagram accounts",
-    defaultMonthlyPaise: 89900,
+    defaultMonthlyPaise: 24900,
     defaultUnitPaise: 0,
     sortOrder: 7,
   },
@@ -150,7 +151,7 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     dependsOn: [],
     pricingModel: "flat_monthly",
     meteredUnit: "events / month",
-    defaultMonthlyPaise: 99900,
+    defaultMonthlyPaise: 24900,
     defaultUnitPaise: 0,
     sortOrder: 8,
   },
@@ -162,7 +163,7 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     dependsOn: [],
     pricingModel: "flat_monthly",
     meteredUnit: "ad accounts",
-    defaultMonthlyPaise: 199900,
+    defaultMonthlyPaise: 39900,
     defaultUnitPaise: 0,
     sortOrder: 9,
   },
@@ -174,7 +175,7 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     dependsOn: [],
     pricingModel: "flat_monthly",
     meteredUnit: "store locations",
-    defaultMonthlyPaise: 79900,
+    defaultMonthlyPaise: 19900,
     defaultUnitPaise: 0,
     sortOrder: 10,
   },
@@ -186,7 +187,7 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     dependsOn: ["google.reviews"],
     pricingModel: "usage",
     meteredUnit: "reply drafts",
-    defaultMonthlyPaise: 39900,
+    defaultMonthlyPaise: 14900,
     defaultUnitPaise: 100,
     sortOrder: 11,
   },
@@ -198,7 +199,7 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     dependsOn: [],
     pricingModel: "flat_monthly",
     meteredUnit: "backup runs",
-    defaultMonthlyPaise: 59900,
+    defaultMonthlyPaise: 14900,
     defaultUnitPaise: 0,
     sortOrder: 12,
   },
@@ -210,7 +211,7 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     dependsOn: [],
     pricingModel: "wallet_plus_monthly",
     meteredUnit: "GB stored",
-    defaultMonthlyPaise: 39900,
+    defaultMonthlyPaise: 9900,
     defaultUnitPaise: 1500,
     sortOrder: 13,
   },
@@ -222,7 +223,7 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     dependsOn: ["backup.export"],
     pricingModel: "flat_monthly",
     meteredUnit: "storage adapters",
-    defaultMonthlyPaise: 249900,
+    defaultMonthlyPaise: 99900,
     defaultUnitPaise: 0,
     sortOrder: 14,
   },
@@ -234,7 +235,7 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     dependsOn: [],
     pricingModel: "flat_monthly",
     meteredUnit: "requests / month",
-    defaultMonthlyPaise: 149900,
+    defaultMonthlyPaise: 29900,
     defaultUnitPaise: 0,
     sortOrder: 15,
   },
@@ -284,15 +285,16 @@ export const PLAN_FEATURE_DETAILS: Record<string, PlanFeatureDetail> = {
     billingHighlights: "Requires WhatsApp Business Messaging. Per-recipient usage deducted only for eligible opted-in numbers.",
   },
   "tally.sync": {
-    tagline: "Connect Tally Prime automatically to track bills, receipts, and overdue customer balances.",
-    whoItsFor: "Businesses using Tally Prime that want live receivables aging and instant bill visibility.",
+    tagline: "All-in-One Tally Prime Suite: Live Paid-in-Tally Sync, Client & Supplier Ledgers, Running Balance Statements & Inventory.",
+    whoItsFor: "Wholesalers, manufacturers, retailers, and CAs wanting complete BizAnalyst / Livekeeping-grade Tally visibility on web & mobile.",
     includedFeatures: [
-      "Ready-to-load Tally Prime .tdl add-on and personal Tally Webhook URL",
-      "Windows PC background connector plus manual Tally XML & CSV bill import",
-      "Live unpaid & overdue bill aging buckets (1–15, 16–30, 31–60, 60+ days)",
-      "Automatic matching of customer mobile numbers with Tally party ledgers",
+      "Personalized '<Your Business> & RSL Sync' Tally Prime .tdl add-on + 1-click Windows PC connector",
+      "Automatic 'Paid in Tally' bill-wise settlement engine (Receipts, Payments, Credit/Debit Notes & Cash Counter bills)",
+      "Full Client & Supplier Ledgers (Sundry Debtors & Creditors) with T-account running balance statements & PDF download",
+      "5-bucket receivables & payables ageing (0–15, 16–30, 31–60, 61–90, 90+ days) + Credit Limit breach alerts",
+      "Live Stock Items, Godown balances, Reorder alerts, Dead Stock, and Batch Expiry tracking",
     ],
-    billingHighlights: "Flat monthly fee per Tally company with unlimited bill and receipt syncs.",
+    billingHighlights: "Accessible Indian SMB pricing per Tally workspace with unlimited voucher, ledger, and stock syncs.",
   },
   "tally.invoicing": {
     tagline: "Automatically send WhatsApp bills & polite overdue reminders the moment a voucher is saved in Tally.",
@@ -300,8 +302,8 @@ export const PLAN_FEATURE_DETAILS: Record<string, PlanFeatureDetail> = {
     includedFeatures: [
       "Event-driven Tally-to-WhatsApp automation rules for Sales Bills, Receipts, Credit Notes, and Delivery Challans",
       "Automatic mapping of Party Name, Voucher No., Bill Amount, Due Date, and Balance into WhatsApp templates",
-      "Scheduled overdue payment reminder rules (e.g., 3 days or 7 days past due date)",
-      "1-click manual 'Send Bill on WhatsApp' and 'Send Polite Reminder' actions on any voucher",
+      "Scheduled overdue payment reminder rules that auto-cancel the moment a bill is marked Paid in Tally",
+      "1-click manual 'Send Bill on WhatsApp', 'Share Party Ledger Statement', and 'Send Polite Reminder' actions",
     ],
     billingHighlights: "Requires Tally Prime Live Sync + WhatsApp Business Messaging. Per-bill message fee applies.",
   },
@@ -371,7 +373,7 @@ export const PLAN_FEATURE_DETAILS: Record<string, PlanFeatureDetail> = {
     includedFeatures: [
       "On-demand password-protected full workspace backup archives",
       "Safe point-in-time restore that preserves your wallet passbook, GST invoices, and opt-outs",
-      "CSV exports for contacts, Tally bills, and analytics reports",
+      "CSV exports for contacts, Tally bills, client ledgers, and analytics reports",
     ],
     billingHighlights: "Flat monthly plan with unlimited manual and scheduled backup runs.",
   },
@@ -422,17 +424,32 @@ export interface DefaultBundleCatalogItem {
 
 export const DEFAULT_BUNDLE_CATALOG: readonly DefaultBundleCatalogItem[] = [
   {
-    key: "tally_whatsapp_pack",
-    name: "Tally Prime + WhatsApp Billing Pack",
-    tagline: "Everything needed to sync Tally Prime bills and send automatic WhatsApp invoices & collection reminders.",
+    key: "tally_business_suite",
+    name: "All-in-One Tally Prime Suite",
+    tagline:
+      "Live Tally Prime Sync, Paid-in-Tally Settlements, Client & Supplier Ledgers, Stock & Godown Inventory + Google Drive Backups (~₹275/mo billed yearly).",
     description:
-      "Pairs Tally Prime Live Sync and Automatic WhatsApp Invoicing together with their required WhatsApp Messaging & Shared Team Inbox base plans.",
-    includedKeys: ["inbox", "whatsapp.messaging", "tally.sync", "tally.invoicing"],
-    monthlyAmountPaise: 349900,
-    quarterlyAmountPaise: 949900,
-    yearlyAmountPaise: 3359900,
-    badgeLabel: "Most Popular Dependency Bundle",
+      "Complete Tally Prime desktop & mobile companion inspired by Indian SMB workflows: sync Sales, Receipts, Payments, Credit/Debit Notes, Party Ledgers, Running Balance Statements, Inventory, and Encrypted Cloud Backups.",
+    includedKeys: ["tally.sync", "backup.export", "storage.managed"],
+    monthlyAmountPaise: 34900,
+    quarterlyAmountPaise: 99900,
+    yearlyAmountPaise: 330000,
+    badgeLabel: "All-in-One Tally Suite",
     sortOrder: 1,
+  },
+  {
+    key: "tally_whatsapp_pack",
+    name: "Tally Prime + WhatsApp Pro Suite",
+    tagline:
+      "Everything in Tally Sync, Ledgers & Inventory plus Official WhatsApp Auto-Invoicing, Payment Reminders & Shared Team Inbox (~₹375/mo billed yearly).",
+    description:
+      "Pairs All-in-One Tally Prime Sync & Party Ledgers with Automatic WhatsApp GST Invoice PDFs, Smart Overdue Reminders (auto-cancelled when paid in Tally), and Shared Team Inbox.",
+    includedKeys: ["inbox", "whatsapp.messaging", "tally.sync", "tally.invoicing"],
+    monthlyAmountPaise: 49900,
+    quarterlyAmountPaise: 129900,
+    yearlyAmountPaise: 449900,
+    badgeLabel: "Most Popular Tally + WhatsApp Suite",
+    sortOrder: 2,
   },
   {
     key: "whatsapp_growth_pack",
@@ -441,11 +458,11 @@ export const DEFAULT_BUNDLE_CATALOG: readonly DefaultBundleCatalogItem[] = [
     description:
       "Combines WhatsApp Bulk Broadcasts with its required WhatsApp Business Messaging base plan plus Shared Customer Inbox.",
     includedKeys: ["inbox", "whatsapp.messaging", "whatsapp.broadcast"],
-    monthlyAmountPaise: 229900,
-    quarterlyAmountPaise: 619900,
-    yearlyAmountPaise: 2199900,
-    badgeLabel: "Messaging Dependency Pack",
-    sortOrder: 2,
+    monthlyAmountPaise: 39900,
+    quarterlyAmountPaise: 109900,
+    yearlyAmountPaise: 399900,
+    badgeLabel: "Messaging & Broadcast Pack",
+    sortOrder: 3,
   },
   {
     key: "social_growth_pack",
@@ -454,11 +471,11 @@ export const DEFAULT_BUNDLE_CATALOG: readonly DefaultBundleCatalogItem[] = [
     description:
       "Unlocks Facebook Pages, Instagram Feed & Reels, Website Order Pixel deduplication, Meta Ad Campaigns, and Google Business Reviews.",
     includedKeys: ["meta.pages", "meta.instagram", "meta.pixel", "meta.ads", "google.reviews"],
-    monthlyAmountPaise: 399900,
-    quarterlyAmountPaise: 1079900,
-    yearlyAmountPaise: 3839900,
+    monthlyAmountPaise: 59900,
+    quarterlyAmountPaise: 159900,
+    yearlyAmountPaise: 549900,
     badgeLabel: "Digital Marketing Suite",
-    sortOrder: 3,
+    sortOrder: 4,
   },
   {
     key: "google_reputation_pack",
@@ -467,11 +484,11 @@ export const DEFAULT_BUNDLE_CATALOG: readonly DefaultBundleCatalogItem[] = [
     description:
       "Pairs Google Business Reviews & Replies together with its companion Suggested Review Replies add-on.",
     includedKeys: ["google.reviews", "google.autoreply"],
-    monthlyAmountPaise: 129900,
-    quarterlyAmountPaise: 349900,
-    yearlyAmountPaise: 1249900,
+    monthlyAmountPaise: 24900,
+    quarterlyAmountPaise: 67900,
+    yearlyAmountPaise: 239900,
     badgeLabel: "Store Reputation Pack",
-    sortOrder: 4,
+    sortOrder: 5,
   },
   {
     key: "cloud_backup_api_pack",
@@ -480,26 +497,54 @@ export const DEFAULT_BUNDLE_CATALOG: readonly DefaultBundleCatalogItem[] = [
     description:
       "Built for businesses connecting custom ERPs or maintaining strict off-site archival and automated storage.",
     includedKeys: ["storage.managed", "backup.export", "api.access"],
-    monthlyAmountPaise: 199900,
-    quarterlyAmountPaise: 539900,
-    yearlyAmountPaise: 1919900,
+    monthlyAmountPaise: 34900,
+    quarterlyAmountPaise: 94900,
+    yearlyAmountPaise: 329900,
     badgeLabel: "IT, Backup & API Pack",
-    sortOrder: 5,
+    sortOrder: 6,
   },
   {
     key: "all_features",
     name: "Complete RSL All-in-One Software Package (All 15 Tools)",
-    tagline: "Every feature across Tally Prime, WhatsApp, Inbox, Meta Ads, Google Reviews, Cloud Backups & API.",
+    tagline:
+      "Every feature across Tally Prime Suite, WhatsApp Auto-Billing, Inbox, Meta Ads, Google Reviews, Cloud Backups & API (~₹750/mo billed yearly).",
     description:
-      "Full-platform access unlocking all 15 RSL Marketing tools with zero locked modules — customizable per client.",
+      "Full-platform access unlocking all 15 RSL Marketing & Tally Prime Suite tools with zero locked modules — customizable per client.",
     includedKeys: SERVICE_CATALOG.map((s) => s.key),
-    monthlyAmountPaise: 799900,
-    quarterlyAmountPaise: 2159900,
-    yearlyAmountPaise: 7679900,
-    badgeLabel: "Entire Software Package",
-    sortOrder: 6,
+    monthlyAmountPaise: 99900,
+    quarterlyAmountPaise: 269900,
+    yearlyAmountPaise: 899900,
+    badgeLabel: "Entire 15-Tool Business Suite",
+    sortOrder: 7,
   },
 ];
+
+const LEGACY_SERVICE_MONTHLY_PAISE: Record<string, number> = {
+  inbox: 99900,
+  "whatsapp.messaging": 149900,
+  "whatsapp.broadcast": 49900,
+  "tally.sync": 129900,
+  "tally.invoicing": 79900,
+  "meta.pages": 69900,
+  "meta.instagram": 89900,
+  "meta.pixel": 99900,
+  "meta.ads": 199900,
+  "google.reviews": 79900,
+  "google.autoreply": 39900,
+  "backup.export": 59900,
+  "storage.managed": 39900,
+  "backup.custom": 249900,
+  "api.access": 149900,
+};
+
+const LEGACY_BUNDLE_MONTHLY_PAISE: Record<string, number> = {
+  tally_whatsapp_pack: 349900,
+  whatsapp_growth_pack: 229900,
+  social_growth_pack: 399900,
+  google_reputation_pack: 129900,
+  cloud_backup_api_pack: 199900,
+  all_features: 799900,
+};
 
 export function ensureServiceCatalogSeeded(): void {
   const db = controlDb();
@@ -512,8 +557,17 @@ export function ensureServiceCatalogSeeded(): void {
     .from(controlSchema.planBundles)
     .where(isNull(controlSchema.planBundles.workspaceId))
     .get();
+  const tallySuiteRow = db
+    .select({ key: controlSchema.planBundles.key })
+    .from(controlSchema.planBundles)
+    .where(eq(controlSchema.planBundles.key, "tally_business_suite"))
+    .get();
 
-  if ((svcCount?.c ?? 0) >= SERVICE_CATALOG.length && (bundleCount?.c ?? 0) >= DEFAULT_BUNDLE_CATALOG.length) {
+  if (
+    (svcCount?.c ?? 0) >= SERVICE_CATALOG.length &&
+    (bundleCount?.c ?? 0) >= DEFAULT_BUNDLE_CATALOG.length &&
+    Boolean(tallySuiteRow)
+  ) {
     return;
   }
 
@@ -532,7 +586,18 @@ export function ensureServiceCatalogSeeded(): void {
         active: true,
         sortOrder: svc.sortOrder,
       })
-      .onConflictDoNothing()
+      .onConflictDoUpdate({
+        target: controlSchema.services.key,
+        set: {
+          name: svc.name,
+          plainSummary: svc.plainSummary,
+          category: svc.category,
+          dependsOnJson: JSON.stringify(svc.dependsOn),
+          pricingModel: svc.pricingModel,
+          meteredUnit: svc.meteredUnit,
+          sortOrder: svc.sortOrder,
+        },
+      })
       .run();
 
     const existingPrice = db
@@ -541,8 +606,8 @@ export function ensureServiceCatalogSeeded(): void {
       .where(and(eq(controlSchema.servicePrices.serviceKey, svc.key), eq(controlSchema.servicePrices.active, true)))
       .get();
 
+    const defaults = computeDefaultCycleAmountsPaise(svc.defaultMonthlyPaise);
     if (!existingPrice) {
-      const defaults = computeDefaultCycleAmountsPaise(svc.defaultMonthlyPaise);
       db.insert(controlSchema.servicePrices)
         .values({
           id: newId(),
@@ -557,29 +622,66 @@ export function ensureServiceCatalogSeeded(): void {
           active: true,
         })
         .run();
+    } else if (!tallySuiteRow && existingPrice.monthlyAmountPaise === LEGACY_SERVICE_MONTHLY_PAISE[svc.key]) {
+      db.update(controlSchema.servicePrices)
+        .set({
+          monthlyAmountPaise: svc.defaultMonthlyPaise,
+          quarterlyAmountPaise: defaults.quarterlyPaise,
+          yearlyAmountPaise: defaults.yearlyPaise,
+          unitAmountPaise: svc.defaultUnitPaise,
+        })
+        .where(eq(controlSchema.servicePrices.id, existingPrice.id))
+        .run();
     }
   }
 
   for (const b of DEFAULT_BUNDLE_CATALOG) {
-    db.insert(controlSchema.planBundles)
-      .values({
-        key: b.key,
-        workspaceId: null,
-        name: b.name,
-        tagline: b.tagline,
-        description: b.description,
-        includedKeysJson: JSON.stringify(b.includedKeys),
-        monthlyAmountPaise: b.monthlyAmountPaise,
-        quarterlyAmountPaise: b.quarterlyAmountPaise,
-        yearlyAmountPaise: b.yearlyAmountPaise,
-        badgeLabel: b.badgeLabel,
-        active: true,
-        sortOrder: b.sortOrder,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoNothing()
-      .run();
+    const existingBundle = db
+      .select()
+      .from(controlSchema.planBundles)
+      .where(eq(controlSchema.planBundles.key, b.key))
+      .get();
+
+    if (!existingBundle) {
+      db.insert(controlSchema.planBundles)
+        .values({
+          key: b.key,
+          workspaceId: null,
+          name: b.name,
+          tagline: b.tagline,
+          description: b.description,
+          includedKeysJson: JSON.stringify(b.includedKeys),
+          monthlyAmountPaise: b.monthlyAmountPaise,
+          quarterlyAmountPaise: b.quarterlyAmountPaise,
+          yearlyAmountPaise: b.yearlyAmountPaise,
+          badgeLabel: b.badgeLabel,
+          active: true,
+          sortOrder: b.sortOrder,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+    } else if (
+      !tallySuiteRow &&
+      existingBundle.workspaceId === null &&
+      existingBundle.monthlyAmountPaise === LEGACY_BUNDLE_MONTHLY_PAISE[b.key]
+    ) {
+      db.update(controlSchema.planBundles)
+        .set({
+          name: b.name,
+          tagline: b.tagline,
+          description: b.description,
+          includedKeysJson: JSON.stringify(b.includedKeys),
+          monthlyAmountPaise: b.monthlyAmountPaise,
+          quarterlyAmountPaise: b.quarterlyAmountPaise,
+          yearlyAmountPaise: b.yearlyAmountPaise,
+          badgeLabel: b.badgeLabel,
+          sortOrder: b.sortOrder,
+          updatedAt: now,
+        })
+        .where(eq(controlSchema.planBundles.key, b.key))
+        .run();
+    }
   }
 }
 

@@ -11,6 +11,11 @@ import {
 import { controlSchema, tenantDataSchema } from "@rsl/database";
 import { appendActionLog, defineAction } from "@rsl/logging";
 import { controlDb, tenantDataDb } from "@rsl/tenancy";
+import {
+  normalizeBillRefKey,
+  reconcileCompanyBillSettlementsAndPartyBalances,
+  type ParsedTallyBillMasterClearance,
+} from "./ledgers";
 
 export interface ParsedTallyVoucherLineItem {
   itemName: string;
@@ -76,7 +81,10 @@ export interface ParsedTallyPartyLedgerMaster {
   phone?: string;
   email?: string;
   gstin?: string;
+  pan?: string;
+  contactPerson?: string;
   stateName?: string;
+  pincode?: string;
   address?: string;
   creditLimitRupees: number;
   creditDays: number;
@@ -384,6 +392,7 @@ export function parseTallyMastersXmlEnvelope(
   stockItems: ParsedTallyStockItemMaster[];
   godowns: ParsedTallyGodownMaster[];
   partyLedgers: ParsedTallyPartyLedgerMaster[];
+  billClearances: ParsedTallyBillMasterClearance[];
 } {
   const envelopeCompany =
     extractXmlTagLocal(rawXml, "SVCURRENTCOMPANY") ||
@@ -579,10 +588,19 @@ export function parseTallyMastersXmlEnvelope(
       extractXmlTagLocal(lb, "PARTYGSTIN") ||
       extractXmlTagLocal(lb, "GSTIN") ||
       undefined;
+    const pan =
+      extractXmlTagLocal(lb, "INCOMETAXNUMBER") ||
+      extractXmlTagLocal(lb, "PAN") ||
+      undefined;
+    const contactPerson =
+      extractXmlTagLocal(lb, "LEDGERCONTACT") ||
+      extractXmlTagLocal(lb, "CONTACTPERSON") ||
+      undefined;
     const stateName =
       extractXmlTagLocal(lb, "LEDSTATENAME") ||
       extractXmlTagLocal(lb, "STATENAME") ||
       undefined;
+    const pincode = extractXmlTagLocal(lb, "PINCODE") || undefined;
     const addrMatches = lb.match(/<ADDRESS(?:\s[^>]*)?>([\s\S]*?)<\/ADDRESS>/gi) ?? [];
     const address = addrMatches
       .map((a) => extractXmlTagLocal(a, "ADDRESS"))
@@ -609,7 +627,10 @@ export function parseTallyMastersXmlEnvelope(
       phone,
       email,
       gstin,
+      pan,
+      contactPerson,
       stateName,
+      pincode,
       address: address || undefined,
       creditLimitRupees,
       creditDays,
@@ -618,11 +639,34 @@ export function parseTallyMastersXmlEnvelope(
     });
   }
 
+  const billClearances: ParsedTallyBillMasterClearance[] = [];
+  const billBlocks = rawXml.match(/<BILL(?:\s[^>]*)?>[\s\S]*?<\/BILL>/gi) ?? [];
+  for (const bb of billBlocks) {
+    const attrNameMatch = bb.match(/<BILL[^>]*\bNAME="([^"]+)"/i);
+    const billName = unescapeXmlLocal(attrNameMatch?.[1] ?? extractXmlTagLocal(bb, "NAME"));
+    const partyName = extractXmlTagLocal(bb, "PARENT").replace(/^\x04\s*/, "").trim();
+    if (!billName) continue;
+    const openingBalanceRupees = Math.abs(
+      parseTallySignedRupees(extractXmlTagLocal(bb, "OPENINGBALANCE"))
+    );
+    const closingBalanceRupees = Math.abs(
+      parseTallySignedRupees(extractXmlTagLocal(bb, "CLOSINGBALANCE"))
+    );
+    billClearances.push({
+      billName,
+      partyName,
+      companyName: extractXmlTagLocal(bb, "SVCURRENTCOMPANY") || effectiveDefaultComp || undefined,
+      openingBalanceRupees,
+      closingBalanceRupees,
+    });
+  }
+
   return {
     detectedCompanyName: envelopeCompany,
     stockItems,
     godowns,
     partyLedgers,
+    billClearances,
   };
 }
 
@@ -1180,6 +1224,7 @@ export function ingestTallyMastersXmlForWorkspace(params: {
   stockItemsUpserted: number;
   godownsUpserted: number;
   partiesUpserted: number;
+  billClearancesApplied: number;
   detectedCompanyName: string | null;
 } {
   const db = tenantDataDb({ workspaceId: params.workspaceId });
@@ -1189,21 +1234,34 @@ export function ingestTallyMastersXmlForWorkspace(params: {
     .from(controlSchema.workspaces)
     .where(eq(controlSchema.workspaces.id, params.workspaceId))
     .get();
+  const existingCompanies = db
+    .select({ name: tenantDataSchema.tallyCompanies.name })
+    .from(tenantDataSchema.tallyCompanies)
+    .all();
+  const explicitFallback =
+    params.fallbackCompanyName?.trim() &&
+    params.fallbackCompanyName.trim() !== "Primary Tally Company"
+      ? params.fallbackCompanyName.trim()
+      : "";
   const defaultCompany =
-    params.fallbackCompanyName?.trim() ||
+    explicitFallback ||
     ws?.defaultTallyCompany?.trim() ||
-    "Primary Tally Company";
+    (existingCompanies.length === 1
+      ? existingCompanies[0]!.name
+      : params.fallbackCompanyName?.trim() || "Primary Tally Company");
 
   const parsed = parseTallyMastersXmlEnvelope(params.rawXml, defaultCompany);
   if (
     parsed.stockItems.length === 0 &&
     parsed.godowns.length === 0 &&
-    parsed.partyLedgers.length === 0
+    parsed.partyLedgers.length === 0 &&
+    parsed.billClearances.length === 0
   ) {
     return {
       stockItemsUpserted: 0,
       godownsUpserted: 0,
       partiesUpserted: 0,
+      billClearancesApplied: 0,
       detectedCompanyName: parsed.detectedCompanyName,
     };
   }
@@ -1212,7 +1270,9 @@ export function ingestTallyMastersXmlForWorkspace(params: {
   let stockItemsUpserted = 0;
   let godownsUpserted = 0;
   let partiesUpserted = 0;
+  let billClearancesApplied = 0;
   const touchedCompanyItems = new Map<string, Set<string>>();
+  const touchedSettlementCompanyIds = new Set<string>();
 
   const tx = db.$client.transaction(() => {
     for (const g of parsed.godowns) {
@@ -1249,12 +1309,16 @@ export function ingestTallyMastersXmlForWorkspace(params: {
           phoneE164,
           email: p.email?.trim() || null,
           gstin: p.gstin?.trim().toUpperCase() || null,
+          pan: p.pan?.trim().toUpperCase() || null,
+          contactPerson: p.contactPerson?.trim() || null,
           stateName: p.stateName?.trim() || null,
+          pincode: p.pincode?.trim() || null,
           address: p.address?.trim() || null,
           creditLimitPaise: rupeesToPaise(p.creditLimitRupees),
           creditDays: Math.max(0, Math.trunc(p.creditDays)),
           openingBalancePaise: Math.round(p.openingBalanceRupees * 100),
           closingBalancePaise: Math.round(p.closingBalanceRupees * 100),
+          syncedFromTallyMaster: true,
           updatedAt: now,
         })
         .onConflictDoUpdate({
@@ -1265,7 +1329,10 @@ export function ingestTallyMastersXmlForWorkspace(params: {
             ...(phoneE164 ? { phoneE164 } : {}),
             ...(p.email ? { email: p.email.trim() } : {}),
             ...(p.gstin ? { gstin: p.gstin.trim().toUpperCase() } : {}),
+            ...(p.pan ? { pan: p.pan.trim().toUpperCase() } : {}),
+            ...(p.contactPerson ? { contactPerson: p.contactPerson.trim() } : {}),
             ...(p.stateName ? { stateName: p.stateName.trim() } : {}),
+            ...(p.pincode ? { pincode: p.pincode.trim() } : {}),
             ...(p.address ? { address: p.address.trim() } : {}),
             creditLimitPaise: rupeesToPaise(p.creditLimitRupees),
             creditDays: Math.max(0, Math.trunc(p.creditDays)),
@@ -1273,6 +1340,7 @@ export function ingestTallyMastersXmlForWorkspace(params: {
             ...(p.closingBalanceRupees !== 0
               ? { closingBalancePaise: Math.round(p.closingBalanceRupees * 100) }
               : {}),
+            syncedFromTallyMaster: true,
             updatedAt: now,
           },
         })
@@ -1293,7 +1361,48 @@ export function ingestTallyMastersXmlForWorkspace(params: {
           .onConflictDoNothing()
           .run();
       }
+      touchedSettlementCompanyIds.add(comp.id);
       partiesUpserted++;
+    }
+
+    for (const bc of parsed.billClearances) {
+      const cName = (bc.companyName || parsed.detectedCompanyName || defaultCompany).trim();
+      if (params.isCompanyAllowed && !params.isCompanyAllowed(cName)) continue;
+      const comp = ensureTallyCompanyRow(db, params.workspaceId, cName, now);
+      const wantedBillKey = normalizeBillRefKey(bc.billName);
+      if (!wantedBillKey) continue;
+
+      const candidateBills = db
+        .select()
+        .from(tenantDataSchema.tallyVouchers)
+        .where(eq(tenantDataSchema.tallyVouchers.companyId, comp.id))
+        .all()
+        .filter(
+          (v) =>
+            v.paymentStatus !== "cancelled" &&
+            (v.voucherType === "Sales" || v.voucherType === "Purchase") &&
+            normalizeBillRefKey(v.voucherNumber) === wantedBillKey
+        );
+
+      const matchedBill =
+        (bc.partyName
+          ? candidateBills.find(
+              (v) => v.partyName.trim().toLowerCase() === bc.partyName.trim().toLowerCase()
+            )
+          : undefined) ?? candidateBills[0];
+
+      if (matchedBill) {
+        const remainingInTallyPaise = rupeesToPaise(Math.max(0, bc.closingBalanceRupees));
+        const clearedPaise = Math.max(0, matchedBill.amountPaise - remainingInTallyPaise);
+        if (clearedPaise !== matchedBill.directPaidPaise) {
+          db.update(tenantDataSchema.tallyVouchers)
+            .set({ directPaidPaise: clearedPaise, updatedAt: now })
+            .where(eq(tenantDataSchema.tallyVouchers.id, matchedBill.id))
+            .run();
+          touchedSettlementCompanyIds.add(comp.id);
+          billClearancesApplied++;
+        }
+      }
     }
 
     for (const si of parsed.stockItems) {
@@ -1459,6 +1568,15 @@ export function ingestTallyMastersXmlForWorkspace(params: {
         preserveMasterClosingWhenNoVouchers: true,
       });
     }
+
+    for (const compId of touchedSettlementCompanyIds) {
+      reconcileCompanyBillSettlementsAndPartyBalances({
+        db,
+        workspaceId: params.workspaceId,
+        companyId: compId,
+        now,
+      });
+    }
   });
 
   tx.immediate();
@@ -1467,12 +1585,13 @@ export function ingestTallyMastersXmlForWorkspace(params: {
     stockItemsUpserted,
     godownsUpserted,
     partiesUpserted,
+    billClearancesApplied,
     detectedCompanyName: parsed.detectedCompanyName,
   };
 }
 
 /**
- * Builds Tally Prime XML request to export Stock Items, Godowns, and Party Ledgers on Port 9000.
+ * Builds Tally Prime XML request to export Stock Items, Godowns, Party Ledgers, and Bill Clearances on Port 9000.
  */
 export function buildLocalTallyMastersXml(companyName?: string): string {
   const companyStatic = companyName?.trim()
@@ -1499,7 +1618,7 @@ export function buildLocalTallyMastersXml(companyName?: string): string {
             <FORMS>RSLInventoryMastersForm</FORMS>
           </REPORT>
           <FORM NAME="RSLInventoryMastersForm" ISMODIFY="No">
-            <PARTS>RSLStockItemsPart, RSLGodownsPart, RSLPartiesPart</PARTS>
+            <PARTS>RSLStockItemsPart, RSLGodownsPart, RSLPartiesPart, RSLBillsPart</PARTS>
           </FORM>
           <PART NAME="RSLStockItemsPart" ISMODIFY="No">
             <LINES>RSLStockItemLine</LINES>
@@ -1528,6 +1647,15 @@ export function buildLocalTallyMastersXml(companyName?: string): string {
             <FIELDS>RSLBlankField</FIELDS>
             <XMLTAG>LEDGER</XMLTAG>
           </LINE>
+          <PART NAME="RSLBillsPart" ISMODIFY="No">
+            <LINES>RSLBillLine</LINES>
+            <REPEAT>RSLBillLine : RSLBillsColl</REPEAT>
+            <SCROLLED>Vertical</SCROLLED>
+          </PART>
+          <LINE NAME="RSLBillLine" ISMODIFY="No">
+            <FIELDS>RSLBlankField</FIELDS>
+            <XMLTAG>BILL</XMLTAG>
+          </LINE>
           <FIELD NAME="RSLBlankField" ISMODIFY="No">
             <SET>""</SET>
           </FIELD>
@@ -1543,7 +1671,11 @@ export function buildLocalTallyMastersXml(companyName?: string): string {
           </COLLECTION>
           <COLLECTION NAME="RSLPartiesColl" ISMODIFY="No">
             <TYPE>Ledger</TYPE>
-            <NATIVEMETHOD>GUID, Name, Parent, LedgerMobile, LedgerPhone, Email, PartyGSTIN, LedStateName, CreditLimit, BillCreditPeriod, OpeningBalance, ClosingBalance, Address</NATIVEMETHOD>
+            <NATIVEMETHOD>GUID, Name, Parent, LedgerMobile, LedgerPhone, LedgerContact, Email, PartyGSTIN, IncomeTaxNumber, LedStateName, PinCode, CreditLimit, BillCreditPeriod, OpeningBalance, ClosingBalance, Address</NATIVEMETHOD>
+          </COLLECTION>
+          <COLLECTION NAME="RSLBillsColl" ISMODIFY="No">
+            <TYPE>Bill</TYPE>
+            <NATIVEMETHOD>Name, Parent, OpeningBalance, ClosingBalance</NATIVEMETHOD>
           </COLLECTION>
         </TDLMESSAGE>
       </TDL>

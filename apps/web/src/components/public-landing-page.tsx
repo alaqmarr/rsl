@@ -57,12 +57,12 @@ export function PublicLandingPage({
   services: PublicServiceCardItem[];
   docsBaseUrl: string;
 }) {
-  const [cycle, setCycle] = useState<CycleKey>("monthly");
+  const [cycle, setCycle] = useState<CycleKey>("yearly");
 
   const featuredBundles = useMemo(() => {
     const priorityOrder = [
+      "tally_business_suite",
       "tally_whatsapp_pack",
-      "whatsapp_growth_pack",
       "all_features",
     ];
     const picked = priorityOrder
@@ -71,6 +71,11 @@ export function PublicLandingPage({
     if (picked.length >= 3) return picked;
     return bundles.slice(0, 3);
   }, [bundles]);
+
+  const secondaryBundles = useMemo(() => {
+    const featuredKeys = new Set(featuredBundles.map((b) => b.key));
+    return bundles.filter((b) => !featuredKeys.has(b.key));
+  }, [bundles, featuredBundles]);
 
   const cycleSuffix =
     cycle === "yearly" ? "/ year" : cycle === "quarterly" ? "/ quarter" : "/ month";
@@ -260,25 +265,25 @@ export function PublicLandingPage({
                 <FileSpreadsheet className="h-5 w-5" />
               </div>
               <h3 className="mt-4 text-lg font-bold text-slate-900">
-                Live Tally Prime Sync, Inventory &amp; Receivables Aging
+                All-in-One Tally Prime Suite: Paid-in-Tally Sync, Client Ledgers &amp; Inventory
               </h3>
               <p className="mt-1.5 text-[13.5px] leading-relaxed text-zinc-600">
-                Sync Sales, Receipts, Credit Notes, Purchase bills, Stock Items, Godowns, Batch Expiry
-                dates, and Party Credit Limits across multiple Tally companies — updating live stock
-                automatically without ever overwriting saved bills.
+                Sync Sales, Receipts, Payments, Credit/Debit Notes, Client &amp; Supplier Ledgers,
+                Stock Items, Godowns, and Batch Expiry across multiple Tally companies — automatically
+                marking bills Paid when settled in Tally and cancelling pending overdue WhatsApp reminders.
               </p>
               <div className="mt-4 flex flex-wrap gap-2 text-xs font-medium text-slate-700">
                 <span className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1">
-                  1-Click Windows .bat Pairing
+                  Personalized &ldquo;Your Business &amp; RSL Sync&rdquo; in Tally
                 </span>
                 <span className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1">
-                  Native Tally PDF Attachment
+                  Auto Paid-in-Tally Settlement Engine
                 </span>
                 <span className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1">
-                  Godowns, Reorder &amp; Dead Stock
+                  Client Ledgers &amp; Running Balance PDF
                 </span>
                 <span className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1">
-                  30 / 60 / 90+ Day Aging Stack
+                  Godowns, Reorder &amp; 90+ Day Ageing
                 </span>
               </div>
             </div>
@@ -458,12 +463,19 @@ export function PublicLandingPage({
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
             {featuredBundles.map((bundle) => {
               const isRecommended = bundle.key === "tally_whatsapp_pack";
+              const isTallySuite = bundle.key === "tally_business_suite";
               const isAllInOne = bundle.key === "all_features";
               const pricePaise =
                 cycle === "yearly"
                   ? bundle.yearlyAmountPaise
                   : cycle === "quarterly"
                     ? bundle.quarterlyAmountPaise
+                    : bundle.monthlyAmountPaise;
+              const effectiveMonthlyPaise =
+                cycle === "yearly"
+                  ? Math.round(bundle.yearlyAmountPaise / 12)
+                  : cycle === "quarterly"
+                    ? Math.round(bundle.quarterlyAmountPaise / 3)
                     : bundle.monthlyAmountPaise;
 
               return (
@@ -488,7 +500,11 @@ export function PublicLandingPage({
                               : "bg-zinc-100 text-slate-800"
                         }`}
                       >
-                        {isRecommended ? "Recommended for Tally Users" : bundle.badgeLabel || "Value Bundle"}
+                        {isRecommended
+                          ? "Recommended Tally + WhatsApp Suite"
+                          : isTallySuite
+                            ? "All-in-One Tally Prime Suite"
+                            : bundle.badgeLabel || "Value Bundle"}
                       </span>
                       {bundle.savingsMonthlyPaise > 0 && (
                         <span
@@ -535,6 +551,16 @@ export function PublicLandingPage({
                           {cycleSuffix} + 18% GST
                         </span>
                       </div>
+                      {cycle !== "monthly" && (
+                        <div
+                          className={`mt-1 text-[11px] font-semibold ${
+                            isAllInOne ? "text-emerald-300" : "text-emerald-700"
+                          }`}
+                        >
+                          Effective {formatInrPlain(effectiveMonthlyPaise)}/month when billed{" "}
+                          {cycle === "yearly" ? "annually" : "quarterly"}
+                        </div>
+                      )}
                     </div>
 
                     <div>
@@ -587,6 +613,50 @@ export function PublicLandingPage({
               );
             })}
           </div>
+
+          {/* Specialized Channel & IT Packs */}
+          {secondaryBundles.length > 0 && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {secondaryBundles.map((bundle) => {
+                const pricePaise =
+                  cycle === "yearly"
+                    ? bundle.yearlyAmountPaise
+                    : cycle === "quarterly"
+                      ? bundle.quarterlyAmountPaise
+                      : bundle.monthlyAmountPaise;
+                return (
+                  <div
+                    key={bundle.key}
+                    className="flex flex-col justify-between rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-2xs"
+                  >
+                    <div className="space-y-2">
+                      <span className="inline-block rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-bold tracking-wide text-slate-700 uppercase">
+                        {bundle.badgeLabel || "Channel Suite"}
+                      </span>
+                      <div className="text-sm font-bold text-slate-900">{bundle.name}</div>
+                      <p className="text-[11.5px] leading-relaxed text-zinc-600">
+                        {bundle.tagline}
+                      </p>
+                    </div>
+                    <div className="mt-3 flex items-center justify-between border-t border-zinc-100 pt-3">
+                      <div className="tabular-nums">
+                        <span className="text-base font-extrabold text-slate-900">
+                          {formatInrPlain(pricePaise)}
+                        </span>
+                        <span className="ml-1 text-[11px] text-zinc-500">{cycleSuffix}</span>
+                      </div>
+                      <Link
+                        href="/register"
+                        className="text-xs font-bold text-emerald-700 hover:underline"
+                      >
+                        Try Free →
+                      </Link>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* Compact Modular Tools Strip */}
           <div className="rounded-2xl border border-zinc-200/90 bg-white p-5">

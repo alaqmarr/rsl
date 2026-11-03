@@ -144,14 +144,46 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
     ],
   },
   {
-    routePrefix: "/tally",
-    title: "Connecting Tally Prime (.tdl v2.6 + Port 9000) & Sending Exact Tally PDFs",
+    routePrefix: "/tally/parties",
+    title: "Managing Client & Supplier Ledgers, Running Balances & Ageing",
     summary:
-      "Sync Tally Prime live without overwriting past bills, preserve your 100% untouched Tally-printed PDF invoice byte-for-byte, update stock automatically, and automate WhatsApp bills & reminders.",
+      "Track every Sundry Debtor (Customer) and Sundry Creditor (Supplier) synced from Tally Prime with chronological T-account running balances, bill-wise settlements, credit limit monitoring, and PDF statements.",
+    estimatedTime: "4 min walkthrough",
+    guideSlug: "tally-sync-and-import",
+    prerequisites: [
+      "Unlock 'All-in-One Tally Prime Sync' in Plans & Wallet.",
+      "Sync vouchers & party masters via your personalized <business>-rsl-sync.tdl v2.7 add-on, Windows Connector v2.5, or Tally XML/CSV import.",
+    ],
+    steps: [
+      {
+        title: "Filter Debtors, Creditors & 5-Bucket Receivables Ageing",
+        detail:
+          "Switch between Sundry Debtors (Clients), Sundry Creditors (Suppliers), and 0–15, 16–30, 31–60, 61–90, or 90+ day ageing buckets to spot overdue accounts and credit-limit breaches immediately.",
+      },
+      {
+        title: "Open Any Client for T-Account Running Balance & Bill-Wise Trail",
+        detail:
+          "Click any party to view their complete chronological Debit/Credit running balance statement, open vs. paid bills, item-wise purchase history, and exact Receipt/Credit Note settlement allocations.",
+      },
+      {
+        title: "Record Receipt / Mark Paid & Download Official Statement PDF",
+        detail:
+          "Record a payment receipt directly against an open bill or download a clean A4 Party Ledger Statement PDF to share with your customer on WhatsApp.",
+      },
+    ],
+    commonMistakes: [
+      "Expecting an invoice paid in Tally to stay unpaid — ensure Receipts/Payments in Tally use 'Agst Ref' against the bill number (or same party ledger for automatic FIFO settlement).",
+    ],
+  },
+  {
+    routePrefix: "/tally",
+    title: "Connecting Tally Prime (.tdl v2.7 + Port 9000) & Auto Paid-in-Tally Sync",
+    summary:
+      "Sync Tally Prime live without overwriting past bills, automatically mark invoices Paid when settled in Tally, preserve your 100% untouched Tally-printed PDF invoice, and automate WhatsApp bills & reminders.",
     estimatedTime: "8 min setup",
     guideSlug: "tally-sync-and-import",
     prerequisites: [
-      "Unlock 'Tally Prime Sync & Payment Reminders' (and 'WhatsApp Business Messaging' for automated WhatsApp delivery) in Plans & Wallet.",
+      "Unlock 'All-in-One Tally Prime Sync' (and 'WhatsApp Business Messaging' for automated WhatsApp delivery) in Plans & Wallet.",
       "Save each customer's 10-digit Mobile No. inside their Tally Prime Party Ledger (Gateway of Tally -> Alter -> Ledger -> press F12 -> Provide Contact Details: Yes -> Mobile no. -> Ctrl + A).",
     ],
     steps: [
@@ -164,32 +196,32 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
         title: "Step 2 — Enable Local XML Server Port 9000 Inside Tally Prime",
         detail:
           "In Tally Prime on your Windows PC, press F1 (Help) -> Settings -> Connectivity -> Client/Server Configuration. Set 'TallyPrime acts as' = Both, 'Enable ODBC' = Yes, and 'Port' = 9000, then press Ctrl + A (restart Tally if prompted). Test http://127.0.0.1:9000 in Chrome.",
-        tip: "Port 9000 lets RapidShift export Tally Prime's exact native printed Voucher PDF (%PDF-1.x) AND sync your Stock Items, Godowns, and Batch balances automatically!",
+        tip: "Port 9000 lets RapidShift export Tally Prime's exact native printed Voucher PDF (%PDF-1.x) AND sync your Client/Supplier Ledgers, Stock Items, Godowns, and Batch balances automatically!",
       },
       {
-        title: "Step 3 — Download .tdl v2.6 Without Windows Renaming It to (1) or .txt",
+        title: "Step 3 — Download Your Personalized '<business>-rsl-sync.tdl' (v2.7)",
         detail:
-          "In Windows File Explorer, enable View -> Show -> File name extensions. Click 'Download Pre-Configured .tdl v2.6' and save/overwrite C:\\TallyPrime\\rsl-tally-whatsapp.tdl (never let Chrome rename it to 'rsl-tally-whatsapp (1).tdl').",
+          "In Windows File Explorer, enable View -> Show -> File name extensions. Click 'Download Personalized .tdl v2.7' and save it inside C:\\TallyPrime\\<your-business>-rsl-sync.tdl (overwriting any older copy without letting Chrome add ' (1)').",
       },
       {
-        title: "Step 4 — Load .tdl v2.6 in Tally Prime (F1 -> TDLs & Add-Ons -> F4)",
+        title: "Step 4 — Load .tdl v2.7 in Tally Prime (F1 -> TDLs & Add-Ons -> F4)",
         detail:
-          "In Tally Prime, press F1 -> TDLs & Add-Ons -> F4 (Manage Local TDLs). Set 'Load selected TDL files on startup' = Yes, enter C:\\TallyPrime\\rsl-tally-whatsapp.tdl, set 'Load TDL' = Yes, and press Ctrl + A. Confirm status says 'Loaded'.",
+          "In Tally Prime, press F1 -> TDLs & Add-Ons -> F4 (Manage Local TDLs). Set 'Load selected TDL files on startup' = Yes, enter C:\\TallyPrime\\<your-business>-rsl-sync.tdl, set 'Load TDL' = Yes, and press Ctrl + A. Confirm status says 'Loaded'.",
       },
       {
-        title: "Step 5 — Click 'RSL Cloud Connection Test' & 'RSL Sync All Bills Now'",
+        title: "Step 5 — Click '<Your Business> & RSL Sync - Connection Test' & 'Sync All Now'",
         detail:
-          "On Gateway of Tally, click 'RSL Cloud Connection Test' (confirm Connected popup), then click 'RSL Sync All Bills Now' once. Optionally also pair the Windows Connector (rsl-tally-connector.mjs v2.4) for background native PDF + Stock Item sync and OTA .tdl auto-updates.",
+          "On Gateway of Tally, you will see your business name right in the menu ('<Your Business> & RSL Sync - Connection Test' and '<Your Business> & RSL Sync - Sync All Now'). Click Connection Test first, then click Sync All Now once! Optionally run your personalized 1-Click Windows Setup (.bat) for background native PDF + Ledger + Stock sync.",
       },
       {
         title: "Step 6 — Create Your 'tally_tax_invoice_pdf' Instant WhatsApp Rule",
         detail:
-          "Load & sync starter templates in WhatsApp & Templates first, then on this page create an Instant Rule: Trigger = 'Sales', Template = 'tally_tax_invoice_pdf' (DOCUMENT PDF header), and click Create Rule. Add Overdue Reminder rules (e.g. 3 days before / 7 days overdue) below!",
+          "Load & sync starter templates in WhatsApp & Templates first, then on this page create an Instant Rule: Trigger = 'Sales', Template = 'tally_tax_invoice_pdf' (DOCUMENT PDF header), and click Create Rule. Scheduled Overdue Reminder rules automatically cancel as soon as a bill is marked Paid in Tally!",
       },
     ],
     commonMistakes: [
       "Leaving 'Mobile no.' blank inside the customer's Party Ledger in Tally Prime — without a mobile number on the party ledger, Tally syncs the bill to your dashboard but WhatsApp has no phone number to message.",
-      "Letting Windows save a second download as 'rsl-tally-whatsapp (1).tdl' while Tally Prime F4 still points to the old file.",
+      "Letting Windows save a second download with ' (1).tdl' while Tally Prime F4 still points to the old file.",
       "Selecting a text-only template instead of 'tally_tax_invoice_pdf' when you want Tally's printed PDF attached.",
     ],
   },

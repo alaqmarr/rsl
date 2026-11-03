@@ -1316,6 +1316,44 @@ export const TENANT_DATA_MIGRATIONS: SqlMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_voucher_items_item ON tally_voucher_items(stock_item_id, voucher_date);
     `,
   },
+  {
+    version: 5,
+    name: "0005_tally_client_ledgers_payments_and_settlements",
+    sql: `
+      ALTER TABLE tally_parties ADD COLUMN pan TEXT;
+      ALTER TABLE tally_parties ADD COLUMN contact_person TEXT;
+      ALTER TABLE tally_parties ADD COLUMN pincode TEXT;
+      ALTER TABLE tally_parties ADD COLUMN synced_from_tally_master INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE tally_parties ADD COLUMN total_invoiced_paise INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE tally_parties ADD COLUMN total_received_paise INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE tally_parties ADD COLUMN unpaid_bills_count INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE tally_parties ADD COLUMN overdue_bills_count INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE tally_parties ADD COLUMN last_voucher_at INTEGER;
+      ALTER TABLE tally_parties ADD COLUMN last_payment_at INTEGER;
+
+      ALTER TABLE tally_vouchers ADD COLUMN direct_paid_paise INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE tally_vouchers ADD COLUMN narration TEXT;
+      ALTER TABLE tally_vouchers ADD COLUMN ledger_account_name TEXT;
+      ALTER TABLE tally_vouchers ADD COLUMN bill_allocations_json TEXT NOT NULL DEFAULT '[]';
+      UPDATE tally_vouchers SET direct_paid_paise = paid_amount_paise WHERE direct_paid_paise = 0 AND paid_amount_paise > 0;
+
+      CREATE TABLE IF NOT EXISTS tally_bill_settlements (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL REFERENCES tally_companies(id) ON DELETE CASCADE,
+        bill_voucher_id TEXT NOT NULL REFERENCES tally_vouchers(id) ON DELETE CASCADE,
+        settlement_voucher_id TEXT REFERENCES tally_vouchers(id) ON DELETE CASCADE,
+        bill_number TEXT NOT NULL,
+        settlement_voucher_number TEXT,
+        settlement_voucher_type TEXT NOT NULL,
+        party_name TEXT NOT NULL,
+        allocation_type TEXT NOT NULL DEFAULT 'agst_ref',
+        amount_paise INTEGER NOT NULL,
+        settled_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_bill_settlements_bill ON tally_bill_settlements(bill_voucher_id);
+      CREATE INDEX IF NOT EXISTS idx_bill_settlements_src ON tally_bill_settlements(settlement_voucher_id);
+    `,
+  },
 ];
 
 export const TENANT_LOGS_MIGRATIONS: SqlMigration[] = [
@@ -1483,6 +1521,7 @@ export const EXPECTED_TENANT_DATA_TABLES = new Set([
   "tally_vouchers",
   "tally_voucher_items",
   "tally_voucher_pdfs",
+  "tally_bill_settlements",
   "sync_runs",
   "outbox",
   "settings",

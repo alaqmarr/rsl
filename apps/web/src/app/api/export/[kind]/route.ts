@@ -6,10 +6,12 @@ import {
   exportPortableWorkspaceJson,
   readLocalBackupBundleBytes,
 } from "@rsl/backup";
-import { resolveEndpointsFromHeaders, RslError } from "@rsl/core";
+import { escapeCsvCellSafe, resolveEndpointsFromHeaders, RslError } from "@rsl/core";
 import { exportActionLogsAsCsv } from "@rsl/logging";
 import { authorizeAny, type Permission } from "@rsl/rbac";
 import {
+  buildWindowsInstallerFilename,
+  buildWorkspaceTdlFilename,
   exportTallyInventoryAsCsv,
   exportTallyInventoryAsXml,
   exportTallyVouchersAsCsv,
@@ -19,6 +21,7 @@ import {
   generateWindowsTallyInstallerBat,
   getOrCreateTallyWebhookEndpoint,
   getTallyCompanyRoutingConfig,
+  getWorkspacePartiesLedgerSummary,
 } from "@rsl/tally";
 import { getOptionalWebSession } from "@/lib/session";
 
@@ -28,6 +31,7 @@ const EXPORT_PERMISSION_MAP: Record<string, Permission[]> = {
   "tally-installer": ["tally:sync.manage"],
   "tally-xml": ["tally:view"],
   "tally-csv": ["tally:view"],
+  "party-ledgers-csv": ["tally:view"],
   "inventory-csv": ["tally:view"],
   "inventory-xml": ["tally:view"],
   "contacts-csv": ["inbox:view", "backup:manage"],
@@ -81,9 +85,9 @@ export async function GET(
       allowedCompanyNames: routing.mode === "selected" ? routing.allowedCompanyNames : undefined,
       namespaceTag: isolated ? session.workspace.slug : undefined,
     });
-    const fileLabel = isolated
-      ? `rsl-tally-${session.workspace.slug}.tdl`
-      : "rsl-tally-whatsapp.tdl";
+    const fileLabel = buildWorkspaceTdlFilename(session.workspace.name, {
+      isolatedSlug: isolated ? session.workspace.slug : undefined,
+    });
     return new NextResponse(tdl, {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
@@ -122,10 +126,70 @@ export async function GET(
       webhookToken: ep.webhookToken,
       pairingCode,
     });
+    const installerFilename = buildWindowsInstallerFilename(session.workspace.name);
     return new NextResponse(bat, {
       headers: {
         "Content-Type": "application/x-bat; charset=utf-8",
-        "Content-Disposition": `attachment; filename="Install-RSL-Tally-Sync.bat"`,
+        "Content-Disposition": `attachment; filename="${installerFilename}"`,
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
+  if (kind === "party-ledgers-csv") {
+    const summary = getWorkspacePartiesLedgerSummary(wsId);
+    const header = [
+      "Party / Ledger Name",
+      "Group",
+      "Company",
+      "GSTIN",
+      "PAN",
+      "Phone",
+      "Email",
+      "State",
+      "Credit Days",
+      "Credit Limit (INR)",
+      "Opening Balance (INR)",
+      "Total Invoiced (INR)",
+      "Total Paid/Received (INR)",
+      "Closing Balance (INR)",
+      "Dr/Cr",
+      "Unpaid Bills",
+      "Overdue Bills",
+      "Max Days Overdue",
+    ];
+    const lines = [header.join(",")];
+    for (const p of summary.parties) {
+      const closingRupees = (Math.abs(p.closingBalancePaise) / 100).toFixed(2);
+      const drCr =
+        p.closingBalancePaise > 0 ? "Dr" : p.closingBalancePaise < 0 ? "Cr" : "Nil";
+      lines.push(
+        [
+          escapeCsvCellSafe(p.name),
+          escapeCsvCellSafe(p.parentGroup),
+          escapeCsvCellSafe(p.companyName),
+          escapeCsvCellSafe(p.gstin ?? ""),
+          escapeCsvCellSafe(p.pan ?? ""),
+          escapeCsvCellSafe(p.phoneE164 ?? ""),
+          escapeCsvCellSafe(p.email ?? ""),
+          escapeCsvCellSafe(p.stateName ?? ""),
+          String(p.creditDays),
+          (p.creditLimitPaise / 100).toFixed(2),
+          (Math.abs(p.openingBalancePaise) / 100).toFixed(2),
+          (p.totalInvoicedPaise / 100).toFixed(2),
+          (p.totalReceivedPaise / 100).toFixed(2),
+          closingRupees,
+          drCr,
+          String(p.unpaidBillsCount),
+          String(p.overdueBillsCount),
+          String(p.maxOpenBillAgeDays),
+        ].join(",")
+      );
+    }
+    return new NextResponse(`\uFEFF${lines.join("\n")}`, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${session.workspace.slug}-client-supplier-ledgers.csv"`,
         "Cache-Control": "no-store",
       },
     });

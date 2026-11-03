@@ -55,6 +55,7 @@ export type EntityTypePrefix =
   | "titem" // Tally Stock Item (SKU)
   | "tsb"   // Tally Stock Batch / Godown Balance
   | "tvli"  // Tally Voucher Line Item
+  | "tset"  // Tally Bill-Wise Settlement Allocation
   | "sync"  // Tally Sync Run
   | "obx"   // Queue Outbox Item
   | "act"   // Action Log Row

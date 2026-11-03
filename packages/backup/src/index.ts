@@ -497,6 +497,7 @@ export function exportPortableWorkspaceJson(workspaceId: string): string {
     tallyStockBalances: db.select().from(tenantDataSchema.tallyStockBalances).all(),
     tallyVouchers: db.select().from(tenantDataSchema.tallyVouchers).all(),
     tallyVoucherItems: db.select().from(tenantDataSchema.tallyVoucherItems).all(),
+    tallyBillSettlements: db.select().from(tenantDataSchema.tallyBillSettlements).all(),
     campaigns: db.select().from(tenantDataSchema.campaigns).all(),
     insightSnapshots: db.select().from(tenantDataSchema.insightSnapshots).all(),
     scheduledPosts: db.select().from(tenantDataSchema.scheduledPosts).all(),

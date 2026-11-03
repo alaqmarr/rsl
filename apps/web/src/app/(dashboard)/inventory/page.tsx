@@ -14,6 +14,7 @@ import {
   Sparkles,
   Trash2,
   TrendingUp,
+  Users,
   Warehouse,
 } from "lucide-react";
 import { getWorkspacePlansByKeys, hasActiveEntitlement } from "@rsl/billing";
@@ -31,6 +32,7 @@ import {
 import { FeaturePlanGate } from "@/components/feature-plan-gate";
 import { FlashBanner } from "@/components/flash-banner";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
+import { TallySuiteNav } from "@/components/tally-suite-nav";
 import {
   deleteStockItemAction,
   importTallyInventoryFileAction,
@@ -175,8 +177,14 @@ export default async function InventoryStockPage({
 
   return (
     <div className="w-full space-y-6">
+      <TallySuiteNav
+        activeSection="inventory"
+        partiesCount={inv.parties.length}
+        stockItemsCount={inv.items.length}
+      />
+
       <PageHeader
-        eyebrow="Tally Prime Inventory & Stock Intelligence"
+        eyebrow="All-in-One Tally Prime Suite"
         badge={
           <StatusPill
             label={`${inv.kpis.totalSkusCount} SKUs • ${inv.kpis.godownCount} Godown(s)`}
@@ -189,6 +197,10 @@ export default async function InventoryStockPage({
           <div className="flex flex-wrap items-center gap-2">
             <ActionLink href="/tally" spinnerSize="xs" className="rsl-btn-secondary">
               Bills &amp; Receipts
+            </ActionLink>
+            <ActionLink href="/tally/parties" spinnerSize="xs" className="rsl-btn-secondary">
+              <Users className="mr-1.5 inline h-3.5 w-3.5" />
+              Client Ledgers ({inv.parties.length})
             </ActionLink>
             {localPortProbe?.reachable && canManageTally && (
               <form action={syncLocalTallyInventoryAction}>
@@ -819,7 +831,13 @@ export default async function InventoryStockPage({
                     {inv.parties.slice(0, 40).map((p) => (
                       <tr key={p.id} className="hover:bg-zinc-50/60">
                         <td className="px-6 py-3">
-                          <div className="font-semibold text-slate-900">{p.name}</div>
+                          <ActionLink
+                            href={`/tally/parties/${encodeURIComponent(p.id)}`}
+                            spinnerSize="xs"
+                            className="font-semibold text-slate-900 hover:text-emerald-700 hover:underline"
+                          >
+                            {p.name}
+                          </ActionLink>
                           {p.creditDays > 0 && (
                             <div className="text-[11px] text-zinc-500">
                               Credit Period: {p.creditDays} days
@@ -933,9 +951,13 @@ export default async function InventoryStockPage({
                       return (
                         <tr key={m.id} className="hover:bg-zinc-50/60">
                           <td className="px-6 py-3.5">
-                            <div className="font-mono font-bold text-slate-900">
+                            <ActionLink
+                              href={`/tally/vouchers/${encodeURIComponent(m.voucherId)}`}
+                              spinnerSize="xs"
+                              className="font-mono font-bold text-slate-900 hover:text-emerald-700 hover:underline"
+                            >
                               #{m.voucherNumber}
-                            </div>
+                            </ActionLink>
                             <div className="text-[11px] text-zinc-500">
                               {new Date(m.voucherDate).toLocaleDateString("en-IN", {
                                 day: "2-digit",

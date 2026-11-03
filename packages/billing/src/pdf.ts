@@ -1498,6 +1498,551 @@ export async function generateAnalyticsReportPdfBytes(
   return doc.save();
 }
 
+export interface PartyLedgerStatementPdfInput {
+  workspaceName: string;
+  companyName: string;
+  partyName: string;
+  parentGroup: string;
+  gstin?: string | null;
+  pan?: string | null;
+  phoneE164?: string | null;
+  email?: string | null;
+  stateName?: string | null;
+  address?: string | null;
+  creditLimitPaise: number;
+  creditDays: number;
+  openingBalancePaise: number;
+  closingBalancePaise: number;
+  totalDebitsPaise: number;
+  totalCreditsPaise: number;
+  statementEntries: Array<{
+    voucherNumber: string;
+    voucherType: string;
+    voucherDate: number;
+    particulars: string;
+    debitPaise: number;
+    creditPaise: number;
+    runningBalancePaise: number;
+    runningBalanceDrCr: "Dr" | "Cr" | "Nil";
+  }>;
+  openBills: Array<{
+    voucherNumber: string;
+    voucherType: string;
+    voucherDate: number;
+    dueDate: number | null;
+    amountPaise: number;
+    paidAmountPaise: number;
+    balancePaise: number;
+    daysOverdue: number;
+  }>;
+}
+
+export interface TallyVoucherDetailPdfInput {
+  workspaceName: string;
+  workspaceGstin?: string | null;
+  companyName: string;
+  voucherNumber: string;
+  voucherType: string;
+  voucherDate: number;
+  dueDate: number | null;
+  partyName: string;
+  partyGstin?: string | null;
+  partyPhone?: string | null;
+  partyState?: string | null;
+  partyAddress?: string | null;
+  amountPaise: number;
+  paidAmountPaise: number;
+  balancePaise: number;
+  paymentStatus: string;
+  narration?: string | null;
+  ledgerAccountName?: string | null;
+  lineItems: Array<{
+    itemName: string;
+    hsnCode?: string | null;
+    billedQty: number;
+    uom: string;
+    ratePaise: number;
+    discountPct: number;
+    gstRatePct: number;
+    amountPaise: number;
+  }>;
+  settlements: Array<{
+    settlementVoucherNumber: string;
+    settlementVoucherType: string;
+    settlementMethod: string;
+    settledAt: number;
+    amountPaise: number;
+  }>;
+}
+
+export async function generatePartyLedgerStatementPdfBytes(
+  data: PartyLedgerStatementPdfInput
+): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  doc.setTitle(`Ledger Statement - ${safePdfText(data.partyName)}`);
+  doc.setCreator("RapidShift Labs — RSL All-in-One Tally Suite");
+
+  const ctx = await createStationeryContext(doc);
+  const { fontRegular, fontBold } = ctx;
+
+  let page = doc.addPage([595.28, 841.89]);
+  const { width } = page.getSize();
+  const refMeta = `${data.companyName}  |  Party: ${data.partyName}`;
+  const closingAbs = Math.abs(data.closingBalancePaise);
+  const closingSuffix =
+    data.closingBalancePaise > 0 ? " Dr" : data.closingBalancePaise < 0 ? " Cr" : "";
+
+  let y = drawStationeryHeader(page, ctx, {
+    docTitle: "PARTY LEDGER STATEMENT",
+    primaryMeta: refMeta,
+    secondaryMeta: `${data.parentGroup}  |  As of ${pdfDate(Date.now())}`,
+    badgeLabel:
+      closingAbs > 0 ? `Closing: ${pdfInr(closingAbs, false)}${closingSuffix}` : "Account Settled",
+    badgeTone: data.closingBalancePaise > 0 ? "amber" : "emerald",
+  });
+
+  // Party Statutory & Credit Card
+  page.drawRectangle({
+    x: 40,
+    y: y - 58,
+    width: width - 80,
+    height: 58,
+    color: ZINC_50,
+    borderColor: ZINC_200,
+    borderWidth: 1,
+  });
+  page.drawText(fitPdfTextToWidth(data.partyName, fontBold, 10.5, 290), {
+    x: 52,
+    y: y - 18,
+    size: 10.5,
+    font: fontBold,
+    color: SLATE_900,
+  });
+  const statParts = [
+    data.gstin ? `GSTIN: ${data.gstin}` : null,
+    data.pan ? `PAN: ${data.pan}` : null,
+    data.phoneE164 ? `Ph: ${data.phoneE164}` : null,
+    data.stateName ? `State: ${data.stateName}` : null,
+  ].filter(Boolean);
+  page.drawText(fitPdfTextToWidth(statParts.join("  |  ") || data.parentGroup, fontRegular, 8, 320), {
+    x: 52,
+    y: y - 33,
+    size: 8,
+    font: fontRegular,
+    color: SLATE_600,
+  });
+  page.drawText(
+    fitPdfTextToWidth(
+      data.address || `Credit Terms: ${data.creditDays} Days${data.creditLimitPaise > 0 ? ` | Limit: ${pdfInr(data.creditLimitPaise, false)}` : ""}`,
+      fontRegular,
+      7.5,
+      320
+    ),
+    { x: 52, y: y - 47, size: 7.5, font: fontRegular, color: SLATE_600 }
+  );
+
+  drawRightText(
+    page,
+    `Opening: ${pdfInr(Math.abs(data.openingBalancePaise), true)}${data.openingBalancePaise > 0 ? " Dr" : data.openingBalancePaise < 0 ? " Cr" : ""}`,
+    width - 52,
+    y - 18,
+    8,
+    fontBold,
+    SLATE_700
+  );
+  drawRightText(
+    page,
+    `Total Debit: ${pdfInr(data.totalDebitsPaise, false)}  |  Credit: ${pdfInr(data.totalCreditsPaise, false)}`,
+    width - 52,
+    y - 33,
+    7.5,
+    fontRegular,
+    SLATE_600
+  );
+  drawRightText(
+    page,
+    `Closing Balance: ${pdfInr(closingAbs, true)}${closingSuffix}`,
+    width - 52,
+    y - 47,
+    8.5,
+    fontBold,
+    data.closingBalancePaise > 0 ? AMBER_700 : EMERALD_700
+  );
+  y -= 72;
+
+  // Running Balance Table Header
+  page.drawText(`CHRONOLOGICAL LEDGER TRANSACTIONS (${data.statementEntries.length})`, {
+    x: 40,
+    y: y - 8,
+    size: 9,
+    font: fontBold,
+    color: SLATE_900,
+  });
+  y -= 18;
+
+  page.drawRectangle({ x: 40, y: y - 20, width: width - 80, height: 20, color: SLATE_900 });
+  page.drawText("DATE", { x: 46, y: y - 13, size: 7.5, font: fontBold, color: WHITE });
+  page.drawText("VCH # / TYPE", { x: 112, y: y - 13, size: 7.5, font: fontBold, color: WHITE });
+  page.drawText("PARTICULARS", { x: 205, y: y - 13, size: 7.5, font: fontBold, color: WHITE });
+  drawRightText(page, "DEBIT (Dr)", 412, y - 13, 7.5, fontBold, WHITE);
+  drawRightText(page, "CREDIT (Cr)", 482, y - 13, 7.5, fontBold, WHITE);
+  drawRightText(page, "BALANCE", width - 46, y - 13, 7.5, fontBold, WHITE);
+  y -= 20;
+
+  if (data.statementEntries.length === 0) {
+    page.drawText("No ledger vouchers recorded for this party yet.", {
+      x: 48,
+      y: y - 16,
+      size: 8.5,
+      font: fontRegular,
+      color: SLATE_600,
+    });
+    y -= 24;
+  } else {
+    for (let i = 0; i < data.statementEntries.length; i++) {
+      const e = data.statementEntries[i]!;
+      if (y < 76) {
+        const next = addContinuationPage(doc, ctx, "PARTY LEDGER STATEMENT", refMeta);
+        page = next.page;
+        y = next.y;
+      }
+      if (i % 2 === 1) {
+        page.drawRectangle({ x: 40, y: y - 19, width: width - 80, height: 19, color: ZINC_50 });
+      }
+      page.drawLine({
+        start: { x: 40, y: y - 19 },
+        end: { x: width - 40, y: y - 19 },
+        thickness: 0.5,
+        color: ZINC_200,
+      });
+      page.drawText(pdfDate(e.voucherDate), {
+        x: 46,
+        y: y - 13,
+        size: 7.5,
+        font: fontRegular,
+        color: SLATE_700,
+      });
+      page.drawText(
+        fitPdfTextToWidth(`${e.voucherNumber} (${e.voucherType})`, fontBold, 7.5, 88),
+        { x: 112, y: y - 13, size: 7.5, font: fontBold, color: SLATE_900 }
+      );
+      page.drawText(fitPdfTextToWidth(e.particulars, fontRegular, 7.5, 132), {
+        x: 205,
+        y: y - 13,
+        size: 7.5,
+        font: fontRegular,
+        color: SLATE_600,
+      });
+      drawRightText(
+        page,
+        e.debitPaise > 0 ? pdfInr(e.debitPaise, false) : "-",
+        412,
+        y - 13,
+        7.5,
+        fontRegular,
+        SLATE_900
+      );
+      drawRightText(
+        page,
+        e.creditPaise > 0 ? pdfInr(e.creditPaise, false) : "-",
+        482,
+        y - 13,
+        7.5,
+        fontBold,
+        e.creditPaise > 0 ? EMERALD_700 : SLATE_600
+      );
+      const runAbs = Math.abs(e.runningBalancePaise);
+      drawRightText(
+        page,
+        runAbs > 0 ? `${pdfInr(runAbs, false)} ${e.runningBalanceDrCr}` : "Nil",
+        width - 46,
+        y - 13,
+        7.5,
+        fontBold,
+        SLATE_900
+      );
+      y -= 19;
+    }
+  }
+
+  if (data.openBills.length > 0) {
+    y -= 14;
+    if (y < 120) {
+      const next = addContinuationPage(doc, ctx, "PARTY LEDGER STATEMENT", refMeta);
+      page = next.page;
+      y = next.y;
+    }
+    page.drawText(`OUTSTANDING BILL-WISE BREAKDOWN (${data.openBills.length})`, {
+      x: 40,
+      y: y - 8,
+      size: 9,
+      font: fontBold,
+      color: SLATE_900,
+    });
+    y -= 18;
+    page.drawRectangle({ x: 40, y: y - 18, width: width - 80, height: 18, color: ZINC_100 });
+    page.drawText("BILL #", { x: 48, y: y - 12, size: 7.5, font: fontBold, color: SLATE_900 });
+    page.drawText("BILL DATE", { x: 155, y: y - 12, size: 7.5, font: fontBold, color: SLATE_900 });
+    page.drawText("DUE DATE", { x: 245, y: y - 12, size: 7.5, font: fontBold, color: SLATE_900 });
+    drawRightText(page, "BILLED", 390, y - 12, 7.5, fontBold, SLATE_900);
+    drawRightText(page, "PAID", 465, y - 12, 7.5, fontBold, SLATE_900);
+    drawRightText(page, "PENDING", width - 48, y - 12, 7.5, fontBold, SLATE_900);
+    y -= 18;
+
+    for (const ob of data.openBills.slice(0, 30)) {
+      if (y < 76) {
+        const next = addContinuationPage(doc, ctx, "PARTY LEDGER STATEMENT", refMeta);
+        page = next.page;
+        y = next.y;
+      }
+      page.drawLine({
+        start: { x: 40, y: y - 18 },
+        end: { x: width - 40, y: y - 18 },
+        thickness: 0.5,
+        color: ZINC_200,
+      });
+      page.drawText(fitPdfTextToWidth(ob.voucherNumber, fontBold, 7.5, 100), {
+        x: 48,
+        y: y - 13,
+        size: 7.5,
+        font: fontBold,
+        color: SLATE_900,
+      });
+      page.drawText(pdfDate(ob.voucherDate), { x: 155, y: y - 13, size: 7.5, font: fontRegular, color: SLATE_700 });
+      page.drawText(
+        ob.dueDate ? `${pdfDate(ob.dueDate)}${ob.daysOverdue > 0 ? ` (${ob.daysOverdue}d OD)` : ""}` : "-",
+        {
+          x: 245,
+          y: y - 13,
+          size: 7.5,
+          font: ob.daysOverdue > 0 ? fontBold : fontRegular,
+          color: ob.daysOverdue > 0 ? RUBY_700 : SLATE_700,
+        }
+      );
+      drawRightText(page, pdfInr(ob.amountPaise, false), 390, y - 13, 7.5, fontRegular, SLATE_900);
+      drawRightText(page, pdfInr(ob.paidAmountPaise, false), 465, y - 13, 7.5, fontRegular, EMERALD_700);
+      drawRightText(page, pdfInr(ob.balancePaise, false), width - 48, y - 13, 7.5, fontBold, AMBER_700);
+      y -= 18;
+    }
+  }
+
+  stampStationeryFooters(
+    doc,
+    ctx,
+    `Official Tally Prime Party Statement for ${data.partyName} (${data.companyName}).`
+  );
+
+  return doc.save();
+}
+
+export async function generateTallyVoucherDetailPdfBytes(
+  data: TallyVoucherDetailPdfInput
+): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  doc.setTitle(`${safePdfText(data.voucherType)} #${safePdfText(data.voucherNumber)}`);
+  doc.setCreator("RapidShift Labs — RSL All-in-One Tally Suite");
+
+  const ctx = await createStationeryContext(doc);
+  const { fontRegular, fontBold } = ctx;
+
+  let page = doc.addPage([595.28, 841.89]);
+  const { width } = page.getSize();
+  const docTitleMap: Record<string, string> = {
+    Sales: "TAX INVOICE / SALES BILL",
+    Receipt: "PAYMENT RECEIPT VOUCHER",
+    Payment: "SUPPLIER PAYMENT VOUCHER",
+    CreditNote: "CREDIT NOTE",
+    DebitNote: "DEBIT NOTE",
+    Purchase: "PURCHASE BILL RECORD",
+  };
+  const docTitle = docTitleMap[data.voucherType] ?? `${data.voucherType.toUpperCase()} VOUCHER`;
+  const refMeta = `${data.companyName}  |  #${data.voucherNumber}`;
+
+  let y = drawStationeryHeader(page, ctx, {
+    docTitle,
+    primaryMeta: refMeta,
+    secondaryMeta: `Voucher Date: ${pdfDate(data.voucherDate)}${data.dueDate ? `  |  Due: ${pdfDate(data.dueDate)}` : ""}`,
+    badgeLabel: data.paymentStatus.toUpperCase(),
+    badgeTone: data.paymentStatus === "paid" ? "emerald" : data.paymentStatus === "cancelled" ? "slate" : "amber",
+  });
+
+  // Party & Company Summary Card
+  page.drawRectangle({
+    x: 40,
+    y: y - 62,
+    width: width - 80,
+    height: 62,
+    color: ZINC_50,
+    borderColor: ZINC_200,
+    borderWidth: 1,
+  });
+  page.drawText("PARTY / ACCOUNT", { x: 52, y: y - 15, size: 7, font: fontBold, color: SLATE_600 });
+  page.drawText(fitPdfTextToWidth(data.partyName, fontBold, 10.5, 280), {
+    x: 52,
+    y: y - 30,
+    size: 10.5,
+    font: fontBold,
+    color: SLATE_900,
+  });
+  const partyMeta = [
+    data.partyGstin ? `GSTIN: ${data.partyGstin}` : null,
+    data.partyPhone ? `Ph: ${data.partyPhone}` : null,
+    data.partyState ? data.partyState : null,
+  ].filter(Boolean);
+  page.drawText(
+    fitPdfTextToWidth(partyMeta.join("  |  ") || data.partyAddress || data.companyName, fontRegular, 8, 290),
+    { x: 52, y: y - 46, size: 8, font: fontRegular, color: SLATE_600 }
+  );
+
+  drawRightText(page, `Total Amount: ${pdfInr(data.amountPaise, true)}`, width - 52, y - 18, 9.5, fontBold, SLATE_900);
+  drawRightText(page, `Settled / Paid: ${pdfInr(data.paidAmountPaise, true)}`, width - 52, y - 34, 8, fontBold, EMERALD_700);
+  drawRightText(
+    page,
+    `Balance Pending: ${pdfInr(data.balancePaise, true)}`,
+    width - 52,
+    y - 49,
+    8.5,
+    fontBold,
+    data.balancePaise > 0 ? AMBER_700 : EMERALD_700
+  );
+  y -= 76;
+
+  if (data.lineItems.length > 0) {
+    page.drawText(`ITEMIZED PARTICULARS (${data.lineItems.length})`, {
+      x: 40,
+      y: y - 8,
+      size: 9,
+      font: fontBold,
+      color: SLATE_900,
+    });
+    y -= 18;
+    page.drawRectangle({ x: 40, y: y - 20, width: width - 80, height: 20, color: SLATE_900 });
+    page.drawText("ITEM DESCRIPTION", { x: 48, y: y - 13, size: 7.5, font: fontBold, color: WHITE });
+    page.drawText("HSN", { x: 255, y: y - 13, size: 7.5, font: fontBold, color: WHITE });
+    drawRightText(page, "QTY", 345, y - 13, 7.5, fontBold, WHITE);
+    drawRightText(page, "RATE", 425, y - 13, 7.5, fontBold, WHITE);
+    drawRightText(page, "GST", 470, y - 13, 7.5, fontBold, WHITE);
+    drawRightText(page, "AMOUNT", width - 48, y - 13, 7.5, fontBold, WHITE);
+    y -= 20;
+
+    for (let i = 0; i < data.lineItems.length; i++) {
+      const li = data.lineItems[i]!;
+      if (y < 80) {
+        const next = addContinuationPage(doc, ctx, docTitle, refMeta);
+        page = next.page;
+        y = next.y;
+      }
+      if (i % 2 === 1) {
+        page.drawRectangle({ x: 40, y: y - 19, width: width - 80, height: 19, color: ZINC_50 });
+      }
+      page.drawLine({
+        start: { x: 40, y: y - 19 },
+        end: { x: width - 40, y: y - 19 },
+        thickness: 0.5,
+        color: ZINC_200,
+      });
+      page.drawText(fitPdfTextToWidth(li.itemName, fontBold, 8, 198), {
+        x: 48,
+        y: y - 13,
+        size: 8,
+        font: fontBold,
+        color: SLATE_900,
+      });
+      page.drawText(safePdfText(li.hsnCode || "-", 12), {
+        x: 255,
+        y: y - 13,
+        size: 7.5,
+        font: fontRegular,
+        color: SLATE_600,
+      });
+      drawRightText(page, `${li.billedQty} ${li.uom}`, 345, y - 13, 7.5, fontRegular, SLATE_900);
+      drawRightText(page, pdfInr(li.ratePaise, true), 425, y - 13, 7.5, fontRegular, SLATE_900);
+      drawRightText(page, li.gstRatePct > 0 ? `${li.gstRatePct}%` : "-", 470, y - 13, 7.5, fontRegular, SLATE_600);
+      drawRightText(page, pdfInr(li.amountPaise, true), width - 48, y - 13, 8, fontBold, SLATE_900);
+      y -= 19;
+    }
+    y -= 12;
+  }
+
+  // Amount in words + Narration
+  page.drawRectangle({
+    x: 40,
+    y: y - 42,
+    width: width - 80,
+    height: 42,
+    color: ZINC_50,
+    borderColor: ZINC_200,
+    borderWidth: 1,
+  });
+  page.drawText(
+    fitPdfTextToWidth(`Amount in Words: ${indianRupeesInWords(data.amountPaise)}`, fontBold, 8, width - 104),
+    { x: 52, y: y - 16, size: 8, font: fontBold, color: SLATE_900 }
+  );
+  page.drawText(
+    fitPdfTextToWidth(
+      `Narration / Bank Ref: ${data.narration || data.ledgerAccountName || "Synced with Tally Prime"}`,
+      fontRegular,
+      7.5,
+      width - 104
+    ),
+    { x: 52, y: y - 32, size: 7.5, font: fontRegular, color: SLATE_600 }
+  );
+  y -= 56;
+
+  if (data.settlements.length > 0) {
+    if (y < 110) {
+      const next = addContinuationPage(doc, ctx, docTitle, refMeta);
+      page = next.page;
+      y = next.y;
+    }
+    page.drawText(`BILL-WISE PAYMENT & SETTLEMENT TRAIL (${data.settlements.length})`, {
+      x: 40,
+      y: y - 8,
+      size: 9,
+      font: fontBold,
+      color: SLATE_900,
+    });
+    y -= 18;
+    page.drawRectangle({ x: 40, y: y - 18, width: width - 80, height: 18, color: EMERALD_50 });
+    page.drawText("SETTLEMENT REF", { x: 48, y: y - 12, size: 7.5, font: fontBold, color: EMERALD_700 });
+    page.drawText("METHOD", { x: 225, y: y - 12, size: 7.5, font: fontBold, color: EMERALD_700 });
+    page.drawText("DATE", { x: 365, y: y - 12, size: 7.5, font: fontBold, color: EMERALD_700 });
+    drawRightText(page, "AMOUNT SETTLED", width - 48, y - 12, 7.5, fontBold, EMERALD_700);
+    y -= 18;
+
+    for (const st of data.settlements) {
+      page.drawLine({
+        start: { x: 40, y: y - 18 },
+        end: { x: width - 40, y: y - 18 },
+        thickness: 0.5,
+        color: ZINC_200,
+      });
+      page.drawText(
+        fitPdfTextToWidth(`${st.settlementVoucherNumber} (${st.settlementVoucherType})`, fontBold, 7.5, 170),
+        { x: 48, y: y - 13, size: 7.5, font: fontBold, color: SLATE_900 }
+      );
+      page.drawText(safePdfText(st.settlementMethod.replace(/_/g, " ").toUpperCase(), 24), {
+        x: 225,
+        y: y - 13,
+        size: 7.5,
+        font: fontRegular,
+        color: SLATE_600,
+      });
+      page.drawText(pdfDate(st.settledAt), { x: 365, y: y - 13, size: 7.5, font: fontRegular, color: SLATE_700 });
+      drawRightText(page, pdfInr(st.amountPaise, true), width - 48, y - 13, 8, fontBold, EMERALD_700);
+      y -= 18;
+    }
+  }
+
+  stampStationeryFooters(
+    doc,
+    ctx,
+    `Official Tally Prime Voucher Summary (#${data.voucherNumber}) generated for ${data.workspaceName}.`
+  );
+
+  return doc.save();
+}
+
 export async function getPdfPageCount(bytes: Uint8Array): Promise<number> {
   const loaded = await PDFDocument.load(bytes);
   return loaded.getPageCount();

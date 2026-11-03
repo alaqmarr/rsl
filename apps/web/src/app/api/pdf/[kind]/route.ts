@@ -4,7 +4,9 @@ import { getWorkspaceAnalytics, type AnalyticsDateRange } from "@rsl/analytics";
 import {
   generateAnalyticsReportPdfBytes,
   generateGstInvoicePdfBytes,
+  generatePartyLedgerStatementPdfBytes,
   generateTallyReceivablesPdfBytes,
+  generateTallyVoucherDetailPdfBytes,
   generateWalletStatementPdfBytes,
   getInvoiceDetailById,
   getWorkspaceFreeAccessStatus,
@@ -14,7 +16,12 @@ import {
 import { RslError } from "@rsl/core";
 import { controlSchema, tenantDataSchema } from "@rsl/database";
 import { authorizeAny, type Permission } from "@rsl/rbac";
-import { getNativeTallyVoucherPdf, getTallyWorkspaceSummary } from "@rsl/tally";
+import {
+  getNativeTallyVoucherPdf,
+  getTallyWorkspaceSummary,
+  getWorkspacePartyLedgerDetail,
+  getWorkspaceVoucherDetail,
+} from "@rsl/tally";
 import { controlDb, tenantDataDb } from "@rsl/tenancy";
 import { getOptionalWebSession } from "@/lib/session";
 
@@ -22,6 +29,8 @@ const PDF_PERMISSION_MAP: Record<string, Permission[]> = {
   invoice: ["billing:view", "billing:manage"],
   "wallet-statement": ["billing:view", "billing:manage"],
   "tally-receivables": ["tally:view"],
+  "party-ledger": ["tally:view"],
+  "tally-voucher": ["tally:view"],
   "tally-voucher-native": ["tally:view"],
   "analytics-report": ["tally:view", "ads:view", "pixel:view", "billing:view"],
 };
@@ -75,6 +84,136 @@ export async function GET(
     }
     const inline = url.searchParams.get("download") !== "1";
     return pdfResponse(nativePdf.pdfBuffer, nativePdf.filename, inline);
+  }
+
+  if (kind === "party-ledger") {
+    const partyId = url.searchParams.get("partyId")?.trim() || "";
+    if (!partyId) {
+      return NextResponse.json({ error: "Missing partyId parameter" }, { status: 400 });
+    }
+    let detail;
+    try {
+      detail = getWorkspacePartyLedgerDetail(wsId, partyId);
+    } catch {
+      return NextResponse.json({ error: "Party ledger not found" }, { status: 404 });
+    }
+
+    const nowMs = Date.now();
+    const pdfBytes = await generatePartyLedgerStatementPdfBytes({
+      workspaceName: session.workspace.name,
+      companyName: detail.companyName,
+      partyName: detail.party.name,
+      parentGroup: detail.party.parentGroup,
+      gstin: detail.party.gstin,
+      pan: detail.party.pan,
+      phoneE164: detail.party.phoneE164,
+      email: detail.party.email,
+      stateName: detail.party.stateName,
+      address: detail.party.address,
+      creditLimitPaise: detail.party.creditLimitPaise,
+      creditDays: detail.party.creditDays,
+      openingBalancePaise: detail.party.openingBalancePaise,
+      closingBalancePaise: detail.party.closingBalancePaise,
+      totalDebitsPaise: detail.totals.totalDebitsPaise,
+      totalCreditsPaise: detail.totals.totalCreditsPaise,
+      statementEntries: detail.statementRows.map((r) => ({
+        voucherNumber: r.voucherNumber,
+        voucherType: r.voucherType,
+        voucherDate: r.date,
+        particulars: r.particulars,
+        debitPaise: r.debitPaise,
+        creditPaise: r.creditPaise,
+        runningBalancePaise: r.runningBalancePaise,
+        runningBalanceDrCr: r.runningDrCr,
+      })),
+      openBills: detail.openBills.map((b) => ({
+        voucherNumber: b.voucherNumber,
+        voucherType: b.voucherType,
+        voucherDate: b.voucherDate,
+        dueDate: b.dueDate,
+        amountPaise: b.amountPaise,
+        paidAmountPaise: b.paidAmountPaise,
+        balancePaise: b.pendingPaise,
+        daysOverdue:
+          b.dueDate !== null && b.dueDate < nowMs
+            ? Math.max(1, Math.floor((nowMs - b.dueDate) / 86_400_000))
+            : 0,
+      })),
+    });
+
+    const inline = url.searchParams.get("inline") === "1";
+    return pdfResponse(
+      pdfBytes,
+      `Party-Ledger-${detail.party.name.slice(0, 40)}-${session.workspace.slug}.pdf`,
+      inline
+    );
+  }
+
+  if (kind === "tally-voucher") {
+    const voucherId = url.searchParams.get("voucherId")?.trim() || "";
+    if (!voucherId) {
+      return NextResponse.json({ error: "Missing voucherId parameter" }, { status: 400 });
+    }
+    const forceGenerated = url.searchParams.get("format") === "generated";
+    const inline = url.searchParams.get("download") !== "1";
+
+    if (!forceGenerated) {
+      const nativePdf = getNativeTallyVoucherPdf(wsId, voucherId);
+      if (nativePdf) {
+        return pdfResponse(nativePdf.pdfBuffer, nativePdf.filename, inline);
+      }
+    }
+
+    let detail;
+    try {
+      detail = getWorkspaceVoucherDetail(wsId, voucherId);
+    } catch {
+      return NextResponse.json({ error: "Tally voucher not found" }, { status: 404 });
+    }
+
+    const pdfBytes = await generateTallyVoucherDetailPdfBytes({
+      workspaceName: session.workspace.name,
+      workspaceGstin: session.workspace.gstin,
+      companyName: detail.companyName,
+      voucherNumber: detail.voucher.voucherNumber,
+      voucherType: detail.voucher.voucherType,
+      voucherDate: detail.voucher.voucherDate,
+      dueDate: detail.voucher.dueDate,
+      partyName: detail.voucher.partyName,
+      partyGstin: detail.party?.gstin ?? null,
+      partyPhone: detail.voucher.partyPhoneE164 ?? detail.party?.phoneE164 ?? null,
+      partyState: detail.party?.stateName ?? null,
+      partyAddress: detail.party?.address ?? null,
+      amountPaise: detail.voucher.amountPaise,
+      paidAmountPaise: detail.voucher.paidAmountPaise,
+      balancePaise: detail.pendingPaise,
+      paymentStatus: detail.voucher.paymentStatus,
+      narration: detail.voucher.narration ?? null,
+      ledgerAccountName: detail.voucher.ledgerAccountName ?? null,
+      lineItems: detail.lineItems.map((li) => ({
+        itemName: li.itemName,
+        hsnCode: li.hsnCode,
+        billedQty: li.billedQty,
+        uom: li.uom,
+        ratePaise: li.ratePaise,
+        discountPct: li.discountBps / 100,
+        gstRatePct: li.gstRateBps / 100,
+        amountPaise: li.amountPaise,
+      })),
+      settlements: detail.settlementsAgainstBill.map((s) => ({
+        settlementVoucherNumber: s.settlementVoucherNumber || "Direct / Counter",
+        settlementVoucherType: s.settlementVoucherType || "Receipt",
+        settlementMethod: s.allocationType,
+        settledAt: s.settledAt,
+        amountPaise: s.amountPaise,
+      })),
+    });
+
+    return pdfResponse(
+      pdfBytes,
+      `${detail.voucher.voucherType}-${detail.voucher.voucherNumber.replace(/[^a-zA-Z0-9._-]+/g, "-")}.pdf`,
+      inline
+    );
   }
 
   if (kind === "invoice") {
