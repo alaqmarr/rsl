@@ -30,9 +30,15 @@ export async function POST(req: NextRequest) {
   const metaSecret = getPlatformMetaAppConfig().appSecret;
   const sigHeader = req.headers.get("x-hub-signature-256") || "";
   const sigHex = sigHeader.replace(/^sha256=/i, "");
-  const signatureValid = metaSecret
-    ? verifyHmac(rawBody, sigHex, metaSecret)
-    : false;
+  const signatureValid =
+    Boolean(metaSecret) && /^[0-9a-f]{64}$/i.test(sigHex)
+      ? verifyHmac(rawBody, sigHex, metaSecret)
+      : false;
+
+  // Reject unauthenticated payloads in memory BEFORE touching ingress.db (P2-08 / SEC-09)
+  if (!signatureValid) {
+    return NextResponse.json({ ok: false, error: "Invalid webhook signature" }, { status: 401 });
+  }
 
   const eventId = `wa_${crypto.createHash("sha256").update(rawBody).digest("hex").slice(0, 24)}`;
   ingressDb()
@@ -43,17 +49,13 @@ export async function POST(req: NextRequest) {
       eventId,
       rawBody: rawBody.slice(0, 65536),
       headersJson: JSON.stringify({ sigHeader }),
-      signatureValid,
-      status: signatureValid ? "processed" : "ignored",
+      signatureValid: true,
+      status: "processed",
       receivedAt: Date.now(),
       processedAt: Date.now(),
     })
     .onConflictDoNothing()
     .run();
-
-  if (!signatureValid) {
-    return NextResponse.json({ ok: false, error: "Invalid webhook signature" }, { status: 401 });
-  }
 
   try {
     const parsed = JSON.parse(rawBody) as {

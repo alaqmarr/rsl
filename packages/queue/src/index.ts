@@ -114,6 +114,20 @@ export function reserveSendGuard(params: {
       if (existing.state === "sent" || existing.state === "confirmed") {
         return { allowed: false, existingState: existing.state };
       }
+      // Reclaim failed locks after retry cooldown (>= 1s) so BullMQ/Outbox retries are never permanently deadlocked (P1-09)
+      if (existing.state === "failed" && now - existing.updatedAt >= 1_000) {
+        logsDb
+          .update(tenantLogsSchema.sendGuards)
+          .set({
+            state: "reserved",
+            recipientHash,
+            reservedAt: now,
+            updatedAt: now,
+          })
+          .where(eq(tenantLogsSchema.sendGuards.idempotencyKey, params.idempotencyKey))
+          .run();
+        return { allowed: true };
+      }
       // Uncertain if reserved > 2 minutes ago (do not auto-resend per Section 14.5)
       if (existing.state === "reserved" && now - existing.reservedAt > 120_000) {
         logsDb
@@ -248,19 +262,52 @@ export function registerJobProcessor(jobType: string, handler: JobProcessor): vo
 export async function processDueSqliteOutboxForTenant(tenantId: string): Promise<number> {
   const dataDb = tenantDataDb({ workspaceId: tenantId });
   const logsDb = tenantLogsDb({ workspaceId: tenantId });
+  const raw = dataDb.$client;
   const now = Date.now();
+  const workerLockId = `wrk_${process.pid}_${newId().slice(-8)}`;
+  const staleProcessingCutoff = now - 5 * 60_000;
 
-  const dueRows = dataDb
-    .select()
-    .from(tenantDataSchema.outbox)
-    .where(
-      and(
-        inArray(tenantDataSchema.outbox.status, ["pending"]),
-        lte(tenantDataSchema.outbox.nextRunAt, now)
+  // Atomically claim pending (or stale orphaned processing) rows inside BEGIN IMMEDIATE (P0-04)
+  const claimTx = raw.transaction(() => {
+    raw
+      .prepare(
+        `UPDATE outbox
+         SET status = 'pending', locked_at = NULL, locked_by = NULL, updated_at = ?
+         WHERE status = 'processing' AND (locked_at IS NULL OR locked_at < ?)`
       )
-    )
-    .limit(25)
-    .all();
+      .run(now, staleProcessingCutoff);
+
+    const candidateRows = dataDb
+      .select()
+      .from(tenantDataSchema.outbox)
+      .where(
+        and(
+          inArray(tenantDataSchema.outbox.status, ["pending"]),
+          lte(tenantDataSchema.outbox.nextRunAt, now)
+        )
+      )
+      .limit(25)
+      .all();
+
+    if (candidateRows.length === 0) return [];
+
+    const claimedIds: string[] = [];
+    const claimStmt = raw.prepare(
+      `UPDATE outbox
+       SET status = 'processing', locked_at = ?, locked_by = ?, updated_at = ?
+       WHERE id = ? AND status = 'pending'`
+    );
+    for (const candidate of candidateRows) {
+      const res = claimStmt.run(now, workerLockId, now, candidate.id);
+      if (res.changes === 1) {
+        claimedIds.push(candidate.id);
+      }
+    }
+
+    return candidateRows.filter((r) => claimedIds.includes(r.id));
+  });
+
+  const dueRows = claimTx.immediate();
 
   let processed = 0;
 
@@ -277,7 +324,13 @@ export async function processDueSqliteOutboxForTenant(tenantId: string): Promise
 
       dataDb
         .update(tenantDataSchema.outbox)
-        .set({ status: "completed", attempts: attempt, updatedAt: Date.now() })
+        .set({
+          status: "completed",
+          attempts: attempt,
+          lockedAt: null,
+          lockedBy: null,
+          updatedAt: Date.now(),
+        })
         .where(eq(tenantDataSchema.outbox.id, row.id))
         .run();
 
@@ -309,6 +362,8 @@ export async function processDueSqliteOutboxForTenant(tenantId: string): Promise
           status: isDead ? "failed" : "pending",
           attempts: attempt,
           nextRunAt: Date.now() + attempt * 5000,
+          lockedAt: null,
+          lockedBy: null,
           lastError: errMsg,
           updatedAt: Date.now(),
         })

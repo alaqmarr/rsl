@@ -47,3 +47,15 @@ export const tenantDeletionTombstones = sqliteTable("tenant_deletion_tombstones"
   cryptoShreddedAt: integer("crypto_shredded_at").notNull(),
   reason: text("reason").notNull(),
 });
+
+export const docsSearchLogs = sqliteTable(
+  "docs_search_logs",
+  {
+    id: text("id").primaryKey(),
+    query: text("query").notNull(),
+    resultCount: integer("result_count").notNull(),
+    surface: text("surface").notNull(), // public | help | admin
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [index("idx_platform_docs_search_ts").on(t.createdAt)]
+);

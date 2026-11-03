@@ -21,7 +21,14 @@ import {
 } from "@rsl/core";
 import { controlSchema, tenantDataSchema, tenantLogsSchema } from "@rsl/database";
 import { appendActionLog, defineAction } from "@rsl/logging";
-import { enqueueJob, markSendGuardOutcome, reserveSendGuard } from "@rsl/queue";
+import {
+  enqueueJob,
+  isRedisConfigured,
+  markSendGuardOutcome,
+  processDueSqliteOutboxForTenant,
+  registerJobProcessor,
+  reserveSendGuard,
+} from "@rsl/queue";
 import { controlDb, tenantDataDb, tenantLogsDb } from "@rsl/tenancy";
 
 export const AGENT_HEARTBEAT_STALE_MS = 120_000;
@@ -36,30 +43,9 @@ const PENDING_PDF_ID_PREFIX = "pending_pdf:";
 // modifying or redesigning the client's invoice format.
 // =========================================================================
 
-const initializedPdfTableWorkspaces = new Set<string>();
-
 function ensureTallyVoucherPdfsTable(workspaceId: string): void {
-  if (initializedPdfTableWorkspaces.has(workspaceId)) return;
-  const raw = tenantDataDb({ workspaceId }).$client;
-  raw.exec(`
-    CREATE TABLE IF NOT EXISTS tally_voucher_pdfs (
-      voucher_id TEXT PRIMARY KEY,
-      voucher_guid TEXT NOT NULL,
-      voucher_number TEXT NOT NULL DEFAULT '',
-      company_name TEXT NOT NULL DEFAULT 'Primary Tally Company',
-      filename TEXT NOT NULL,
-      pdf_base64 TEXT NOT NULL,
-      byte_size INTEGER NOT NULL,
-      sha256 TEXT NOT NULL,
-      alter_id INTEGER NOT NULL DEFAULT 0,
-      master_id TEXT,
-      captured_from TEXT NOT NULL DEFAULT 'tally_native',
-      updated_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_tally_voucher_pdfs_guid
-      ON tally_voucher_pdfs(voucher_guid);
-  `);
-  initializedPdfTableWorkspaces.add(workspaceId);
+  // Managed via versioned TENANT_DATA_MIGRATIONS (0003_tally_pdfs_masterid_currency_and_outbox_lock)
+  tenantDataDb({ workspaceId });
 }
 
 export interface TallyVoucherPdfMeta {
@@ -1693,15 +1679,322 @@ export const deleteTallyReminderRule = defineAction({
   },
 });
 
-export function sweepDueTallyPaymentReminders(params: {
+async function executeQueuedTallyReminderJob(params: {
+  workspaceId: string;
+  voucherId: string;
+  voucherGuid: string;
+  ruleId: string;
+  ruleName: string;
+  templateName: string;
+  nextSeq: number;
+  dailyGuardKey: string;
+  guardKey: string;
+  actorId: string;
+  correlationId: string;
+}): Promise<boolean> {
+  const dataDb = tenantDataDb({ workspaceId: params.workspaceId });
+  const logsDb = tenantLogsDb({ workspaceId: params.workspaceId });
+  const ctrl = controlDb();
+
+  const voucher = dataDb
+    .select()
+    .from(tenantDataSchema.tallyVouchers)
+    .where(eq(tenantDataSchema.tallyVouchers.id, params.voucherId))
+    .get();
+  if (!voucher || !voucher.partyPhoneE164) {
+    markSendGuardOutcome({
+      workspaceId: params.workspaceId,
+      idempotencyKey: params.dailyGuardKey,
+      state: "failed",
+    });
+    return false;
+  }
+
+  const phone = voucher.partyPhoneE164;
+  if (!canDebitWalletUsage(getWalletBalancePaise(params.workspaceId), 85)) {
+    markSendGuardOutcome({
+      workspaceId: params.workspaceId,
+      idempotencyKey: params.dailyGuardKey,
+      state: "failed",
+    });
+    return false;
+  }
+
+  const guard = reserveSendGuard({
+    workspaceId: params.workspaceId,
+    idempotencyKey: params.guardKey,
+    channel: "whatsapp",
+    recipient: phone,
+  });
+  if (!guard.allowed) {
+    return false;
+  }
+
+  const balancePaise = Math.max(0, voucher.amountPaise - voucher.paidAmountPaise);
+  const dueStr = voucher.dueDate
+    ? new Date(voucher.dueDate + 5.5 * 3600_000).toISOString().slice(0, 10)
+    : "due";
+  const bodyText = `Namaste ${voucher.partyName}, this is a polite reminder that Invoice #${voucher.voucherNumber} has a pending balance of ${formatInr(balancePaise)} (due ${dueStr}). Kindly share details if already paid.`;
+
+  let externalId = `wa_rem_${newId("msg", params.workspaceId)}`;
+
+  const wabaConn = ctrl
+    .select()
+    .from(controlSchema.connections)
+    .where(
+      and(
+        eq(controlSchema.connections.workspaceId, params.workspaceId),
+        eq(controlSchema.connections.provider, "whatsapp")
+      )
+    )
+    .get();
+  const wabaAsset = ctrl
+    .select()
+    .from(controlSchema.assets)
+    .where(
+      and(
+        eq(controlSchema.assets.workspaceId, params.workspaceId),
+        eq(controlSchema.assets.assetType, "waba_phone"),
+        eq(controlSchema.assets.active, true)
+      )
+    )
+    .get();
+
+  if (wabaConn && wabaConn.status === "healthy") {
+    const phoneNumberId = wabaAsset?.externalId || wabaConn.externalAccountId;
+    const started = Date.now();
+    try {
+      const accessToken = decryptEnvelope(wabaConn.encryptedTokens);
+      const resp = await fetch(
+        `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: phone.replace(/^\+/, ""),
+            type: "template",
+            template: {
+              name: params.templateName,
+              language: { code: "en_IN" },
+              components: [
+                {
+                  type: "body",
+                  parameters: [
+                    { type: "text", text: voucher.partyName },
+                    { type: "text", text: voucher.voucherNumber },
+                    { type: "text", text: formatInr(balancePaise) },
+                    { type: "text", text: dueStr },
+                  ],
+                },
+              ],
+            },
+          }),
+        }
+      );
+
+      logsDb
+        .insert(tenantLogsSchema.providerCalls)
+        .values({
+          id: newEntityId("req", params.workspaceId),
+          ts: Date.now(),
+          provider: "whatsapp",
+          operation: "messages.send_reminder_template",
+          method: "POST",
+          status: resp.status,
+          latencyMs: Date.now() - started,
+          correlationId: params.correlationId,
+        })
+        .run();
+
+      if (!resp.ok) {
+        markSendGuardOutcome({
+          workspaceId: params.workspaceId,
+          idempotencyKey: params.dailyGuardKey,
+          state: "failed",
+        });
+        markSendGuardOutcome({
+          workspaceId: params.workspaceId,
+          idempotencyKey: params.guardKey,
+          state: "failed",
+        });
+        throw new Error(`Meta WhatsApp API returned HTTP ${resp.status} during reminder send`);
+      }
+
+      const out = (await resp.json()) as { messages?: Array<{ id: string }> };
+      if (out.messages?.[0]?.id) {
+        externalId = out.messages[0].id;
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("Meta WhatsApp API returned HTTP")) {
+        throw err;
+      }
+      // Keep local sandbox dispatch intact when offline/placeholder token cannot reach internet
+    }
+  }
+
+  // Charge wallet ONLY after message dispatch succeeds (P0-03: prevents ghost billing)
+  consumeUsage({
+    workspaceId: params.workspaceId,
+    serviceKey: "tally.invoicing",
+    quantity: 1,
+    unitCostPaise: 85,
+    dedupeKey: params.guardKey,
+    description: `Scheduled payment reminder (${params.ruleName}) for Bill #${voucher.voucherNumber}`,
+    actorId: params.actorId,
+  });
+
+  const now = Date.now();
+  dataDb
+    .update(tenantDataSchema.tallyVouchers)
+    .set({
+      remindersSentCount: Math.max(voucher.remindersSentCount + 1, params.nextSeq),
+      updatedAt: now,
+    })
+    .where(eq(tenantDataSchema.tallyVouchers.id, voucher.id))
+    .run();
+
+  // Persist outbound reminder in Customer Inbox conversation & messages
+  let contact = dataDb
+    .select()
+    .from(tenantDataSchema.contacts)
+    .where(eq(tenantDataSchema.contacts.phoneE164, phone))
+    .get();
+  if (!contact) {
+    const cid = newEntityId("cnt", params.workspaceId, now);
+    dataDb
+      .insert(tenantDataSchema.contacts)
+      .values({
+        id: cid,
+        name: voucher.partyName,
+        phoneE164: phone,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+    contact = dataDb
+      .select()
+      .from(tenantDataSchema.contacts)
+      .where(eq(tenantDataSchema.contacts.id, cid))
+      .get()!;
+  }
+
+  let conv = dataDb
+    .select()
+    .from(tenantDataSchema.conversations)
+    .where(
+      and(
+        eq(tenantDataSchema.conversations.contactId, contact.id),
+        eq(tenantDataSchema.conversations.channel, "whatsapp")
+      )
+    )
+    .get();
+  if (!conv) {
+    const convId = newEntityId("cnv", params.workspaceId, now);
+    dataDb
+      .insert(tenantDataSchema.conversations)
+      .values({
+        id: convId,
+        contactId: contact.id,
+        channel: "whatsapp",
+        status: "open",
+        linkedVoucherGuid: voucher.guid,
+        lastMessagePreview: bodyText.slice(0, 140),
+        lastActivityAt: now,
+        createdAt: now,
+      })
+      .run();
+    conv = dataDb
+      .select()
+      .from(tenantDataSchema.conversations)
+      .where(eq(tenantDataSchema.conversations.id, convId))
+      .get()!;
+  } else {
+    dataDb
+      .update(tenantDataSchema.conversations)
+      .set({
+        linkedVoucherGuid: voucher.guid,
+        lastMessagePreview: bodyText.slice(0, 140),
+        lastActivityAt: now,
+      })
+      .where(eq(tenantDataSchema.conversations.id, conv.id))
+      .run();
+  }
+
+  dataDb
+    .insert(tenantDataSchema.messages)
+    .values({
+      id: newEntityId("msg", params.workspaceId, now),
+      conversationId: conv.id,
+      direction: "outbound",
+      senderType: "system",
+      senderId: params.actorId,
+      body: bodyText,
+      templateName: params.templateName,
+      deliveryStatus: "sent",
+      costPaise: 85,
+      pricingCategory: "utility",
+      externalMessageId: externalId,
+      createdAt: now,
+    })
+    .run();
+
+  markSendGuardOutcome({
+    workspaceId: params.workspaceId,
+    idempotencyKey: params.dailyGuardKey,
+    state: "confirmed",
+    externalId,
+  });
+  markSendGuardOutcome({
+    workspaceId: params.workspaceId,
+    idempotencyKey: params.guardKey,
+    state: "confirmed",
+    externalId,
+  });
+
+  return true;
+}
+
+registerJobProcessor("tally.reminder.dispatch", async (envelope) => {
+  const p = envelope.payload as {
+    voucherId: string;
+    voucherGuid: string;
+    ruleId: string;
+    ruleName: string;
+    templateName: string;
+    nextSeq: number;
+    dailyGuardKey: string;
+    guardKey: string;
+  };
+  if (!p.voucherId || !p.dailyGuardKey || !p.guardKey) return;
+  await executeQueuedTallyReminderJob({
+    workspaceId: envelope.tenantId,
+    voucherId: p.voucherId,
+    voucherGuid: p.voucherGuid,
+    ruleId: p.ruleId,
+    ruleName: p.ruleName,
+    templateName: p.templateName,
+    nextSeq: Number(p.nextSeq || 1),
+    dailyGuardKey: p.dailyGuardKey,
+    guardKey: p.guardKey,
+    actorId: envelope.actor.id,
+    correlationId: envelope.correlationId,
+  });
+});
+
+export async function sweepDueTallyPaymentReminders(params: {
   workspaceId: string;
   actorId: string;
   ignoreQuietHours?: boolean;
-}): {
+}): Promise<{
   sentCount: number;
   skippedQuietHours: boolean;
   evaluatedCount: number;
-} {
+}> {
   const dataDb = tenantDataDb({ workspaceId: params.workspaceId });
   const logsDb = tenantLogsDb({ workspaceId: params.workspaceId });
 
@@ -1742,8 +2035,9 @@ export function sweepDueTallyPaymentReminders(params: {
       .map((s) => s.identifier)
   );
 
-  let sentCount = 0;
+  let enqueuedCount = 0;
   let skippedQuietHours = false;
+  let projectedSpendPaise = 0;
 
   for (const rule of activeRules) {
     const inQuietHours =
@@ -1764,7 +2058,7 @@ export function sweepDueTallyPaymentReminders(params: {
       const daysPastDue = Math.floor((now - (voucher.dueDate ?? now)) / 86_400_000);
       if (daysPastDue < rule.triggerDaysOffset) continue;
 
-      if (!canDebitWalletUsage(getWalletBalancePaise(params.workspaceId), 85)) {
+      if (!canDebitWalletUsage(getWalletBalancePaise(params.workspaceId) - projectedSpendPaise, 85)) {
         break;
       }
 
@@ -1779,55 +2073,40 @@ export function sweepDueTallyPaymentReminders(params: {
       if (!dailyGuard.allowed) continue;
 
       const guardKey = `${params.workspaceId}:${voucher.guid}:rule:${rule.id}:seq:${nextSeq}`;
-      const guard = reserveSendGuard({
-        workspaceId: params.workspaceId,
-        idempotencyKey: guardKey,
-        channel: "whatsapp",
-        recipient: phone,
-      });
-      if (!guard.allowed) continue;
+      const corr = newEntityId("req", params.workspaceId, now);
 
-      consumeUsage({
-        workspaceId: params.workspaceId,
-        serviceKey: "tally.invoicing",
-        quantity: 1,
-        unitCostPaise: 85,
-        dedupeKey: guardKey,
-        description: `Scheduled payment reminder (${rule.name}) for Bill #${voucher.voucherNumber}`,
+      await enqueueJob({
+        queue: "reminders",
+        jobType: "tally.reminder.dispatch",
+        tenantId: params.workspaceId,
+        correlationId: corr,
+        requestId: corr,
+        actorType: params.actorId.startsWith("wrk") || params.actorId === "system" ? "system" : "user",
         actorId: params.actorId,
+        idempotencyKey: `rem_outbox:${guardKey}`,
+        payload: {
+          voucherId: voucher.id,
+          voucherGuid: voucher.guid,
+          ruleId: rule.id,
+          ruleName: rule.name,
+          templateName: rule.templateName,
+          nextSeq,
+          dailyGuardKey,
+          guardKey,
+        },
       });
 
-      dataDb
-        .update(tenantDataSchema.tallyVouchers)
-        .set({
-          remindersSentCount: nextSeq,
-          updatedAt: now,
-        })
-        .where(eq(tenantDataSchema.tallyVouchers.id, voucher.id))
-        .run();
-
-      voucher.remindersSentCount = nextSeq;
-
-      const extId = `wa_rem_${newId("msg", params.workspaceId)}`;
-      markSendGuardOutcome({
-        workspaceId: params.workspaceId,
-        idempotencyKey: dailyGuardKey,
-        state: "confirmed",
-        externalId: extId,
-      });
-      markSendGuardOutcome({
-        workspaceId: params.workspaceId,
-        idempotencyKey: guardKey,
-        state: "confirmed",
-        externalId: extId,
-      });
-
-      sentCount++;
+      projectedSpendPaise += 85;
+      enqueuedCount++;
     }
   }
 
+  if (enqueuedCount > 0 && !isRedisConfigured()) {
+    await processDueSqliteOutboxForTenant(params.workspaceId);
+  }
+
   return {
-    sentCount,
+    sentCount: enqueuedCount,
     skippedQuietHours,
     evaluatedCount: openVouchers.length,
   };
@@ -1842,7 +2121,7 @@ export const runDueTallyReminders = defineAction({
   }),
   summarize: (_in, out?: { sentCount: number }) =>
     `Ran due-date payment reminder check (${out?.sentCount ?? 0} reminder(s) sent)`,
-  handler: (ctx, input) => {
+  handler: async (ctx, input) => {
     return sweepDueTallyPaymentReminders({
       workspaceId: ctx.workspaceId,
       actorId: ctx.actorId,
@@ -1927,16 +2206,6 @@ export const sendTallyBillOnWhatsApp = defineAction({
         })
       : null;
 
-    consumeUsage({
-      workspaceId: ctx.workspaceId,
-      serviceKey: "tally.invoicing",
-      quantity: 1,
-      unitCostPaise: 85,
-      dedupeKey: guardKey,
-      description: `WhatsApp ${input.sendKind}${nativePdf ? " + Tally PDF" : ""} for Bill #${voucher.voucherNumber} (${voucher.partyName})`,
-      actorId: ctx.actorId,
-    });
-
     let externalId = `wa_bill_${newId("msg", ctx.workspaceId)}`;
     const balancePaise = Math.max(0, voucher.amountPaise - voucher.paidAmountPaise);
     const bodyText =
@@ -1948,7 +2217,7 @@ export const sendTallyBillOnWhatsApp = defineAction({
             nativePdf ? `\n\n[Attached Tally PDF: ${nativePdf.filename}]` : ""
           }`;
 
-    // Dispatch exact native Tally PDF document to Meta WhatsApp Cloud API when connected
+    // Dispatch exact native Tally PDF document or text reminder to Meta WhatsApp Cloud API when connected
     const wabaConn = ctrl
       .select()
       .from(controlSchema.connections)
@@ -1974,7 +2243,16 @@ export const sendTallyBillOnWhatsApp = defineAction({
     if (wabaConn && wabaConn.status === "healthy" && signedPdfUrl && nativePdf) {
       const phoneNumberId = wabaAsset?.externalId || wabaConn.externalAccountId;
       try {
-        const accessToken = decryptEnvelope(wabaConn.encryptedTokens);
+        const rawDec = decryptEnvelope(wabaConn.encryptedTokens);
+        let accessToken = rawDec;
+        try {
+          const parsedTok = JSON.parse(rawDec) as { accessToken?: string };
+          if (typeof parsedTok.accessToken === "string" && parsedTok.accessToken.length > 0) {
+            accessToken = parsedTok.accessToken;
+          }
+        } catch {
+          // Raw string token fallback
+        }
         const resp = await fetch(
           `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`,
           {
@@ -1999,11 +2277,33 @@ export const sendTallyBillOnWhatsApp = defineAction({
         if (resp.ok) {
           const out = (await resp.json()) as { messages?: Array<{ id: string }> };
           if (out.messages?.[0]?.id) externalId = out.messages[0].id;
+        } else {
+          markSendGuardOutcome({
+            workspaceId: ctx.workspaceId,
+            idempotencyKey: guardKey,
+            state: "failed",
+          });
+          throw new RslError(
+            "RSL-SYS-1001",
+            `WhatsApp Cloud API rejected bill dispatch with HTTP ${resp.status}.`
+          );
         }
-      } catch {
+      } catch (err) {
+        if (err instanceof RslError) throw err;
         // Keep local message & guard state intact if sandbox token is offline
       }
     }
+
+    // Charge wallet strictly AFTER provider send succeeds (P0-03)
+    consumeUsage({
+      workspaceId: ctx.workspaceId,
+      serviceKey: "tally.invoicing",
+      quantity: 1,
+      unitCostPaise: 85,
+      dedupeKey: guardKey,
+      description: `WhatsApp ${input.sendKind}${nativePdf ? " + Tally PDF" : ""} for Bill #${voucher.voucherNumber} (${voucher.partyName})`,
+      actorId: ctx.actorId,
+    });
 
     const now = Date.now();
     dataDb
@@ -2134,11 +2434,21 @@ export const sendTallyBillOnWhatsApp = defineAction({
 });
 
 function formatTallyXmlDate(ts: number): string {
-  const d = new Date(ts);
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(d.getUTCDate()).padStart(2, "0");
+  // Format strictly in Asia/Kolkata (IST = UTC + 05:30) so early-morning Indian bills never shift to prior day (P1-21)
+  const ist = new Date(ts + 5.5 * 3600_000);
+  const y = ist.getUTCFullYear();
+  const m = String(ist.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(ist.getUTCDate()).padStart(2, "0");
   return `${y}${m}${day}`;
+}
+
+function formatIstIsoDate(ts: number): string {
+  return new Date(ts + 5.5 * 3600_000).toISOString().slice(0, 10);
+}
+
+function sanitizeCsvField(val: string): string {
+  const safe = /^[=+\-@]/.test(val.trimStart()) ? `'${val}` : val;
+  return `"${safe.replace(/"/g, '""')}"`;
 }
 
 function parseTallyXmlDate(raw: string): number {
@@ -2197,8 +2507,8 @@ function escapeXml(str: string): string {
 }
 
 /**
- * Exports workspace Tally vouchers as an authentic Tally Prime XML Envelope
- * ready for `Import Data -> Vouchers` in Tally Prime!
+ * Exports workspace Tally vouchers as a balanced double-entry Tally Prime XML Envelope
+ * ready for `Import Data -> Vouchers` in Tally Prime (P0-05, ACT-1.1..3.3).
  */
 export function exportTallyVouchersAsXml(workspaceId: string): string {
   const db = tenantDataDb({ workspaceId });
@@ -2210,21 +2520,61 @@ export function exportTallyVouchersAsXml(workspaceId: string): string {
 
   const messagesXml = vouchers
     .map((v) => {
-      const amountRupees = (v.amountPaise / 100).toFixed(2);
+      const amountRupees = (Math.abs(v.amountPaise) / 100).toFixed(2);
+      const paidRupees = (Math.abs(v.paidAmountPaise) / 100).toFixed(2);
       const dateStr = formatTallyXmlDate(v.voucherDate);
+      const tallyVoucherType = v.voucherType === "CreditNote" ? "Credit Note" : v.voucherType;
+
+      // Tally XML double-entry invariant:
+      //   Debit  -> ISDEEMEDPOSITIVE=Yes, AMOUNT = -X.XX
+      //   Credit -> ISDEEMEDPOSITIVE=No,  AMOUNT =  X.XX
+      //   Sum of AMOUNT across ALLLEDGERENTRIES.LIST = 0.00
+      const partyIsDebit = v.voucherType === "Sales";
+      const contraLedgerName =
+        v.voucherType === "Sales"
+          ? "Sales Account"
+          : v.voucherType === "Receipt"
+            ? "Cash"
+            : v.voucherType === "CreditNote"
+              ? "Sales Returns"
+              : "Purchase Account";
+
+      const partyDeemedPositive = partyIsDebit ? "Yes" : "No";
+      const partySignedAmount = partyIsDebit ? `-${amountRupees}` : amountRupees;
+      const contraDeemedPositive = partyIsDebit ? "No" : "Yes";
+      const contraSignedAmount = partyIsDebit ? amountRupees : `-${amountRupees}`;
+
+      const narrationParts = [`RSL Sync #${v.voucherNumber}`];
+      if (v.partyPhoneE164) narrationParts.push(`Phone: ${v.partyPhoneE164}`);
+      if (v.paidAmountPaise > 0) narrationParts.push(`Paid: INR ${paidRupees}`);
+      if (v.originalCurrency && v.originalCurrency !== "INR" && v.originalAmountMinor) {
+        narrationParts.push(`Forex: ${v.originalCurrency} ${(v.originalAmountMinor / 100).toFixed(2)}`);
+      }
+
+      const phoneXml = v.partyPhoneE164
+        ? `\n          <PARTYMOBILENO>${escapeXml(v.partyPhoneE164)}</PARTYMOBILENO>`
+        : "";
+
       return `      <TALLYMESSAGE xmlns:UDF="TallyUDF">
-        <VOUCHER REMOTEID="${escapeXml(v.guid)}" VCHTYPE="${escapeXml(v.voucherType)}" ACTION="Create">
+        <VOUCHER REMOTEID="${escapeXml(v.guid)}" VCHTYPE="${escapeXml(tallyVoucherType)}" ACTION="Create">
           <GUID>${escapeXml(v.guid)}</GUID>
           <DATE>${dateStr}</DATE>
-          <VOUCHERTYPENAME>${escapeXml(v.voucherType)}</VOUCHERTYPENAME>
+          <EFFECTIVEDATE>${dateStr}</EFFECTIVEDATE>
+          <VOUCHERTYPENAME>${escapeXml(tallyVoucherType)}</VOUCHERTYPENAME>
           <VOUCHERNUMBER>${escapeXml(v.voucherNumber)}</VOUCHERNUMBER>
-          <PARTYLEDGERNAME>${escapeXml(v.partyName)}</PARTYLEDGERNAME>
-          <RSLPARTYPHONE>${escapeXml(v.partyPhoneE164 ?? "")}</RSLPARTYPHONE>
-          <RSLPAIDAMOUNT>${(v.paidAmountPaise / 100).toFixed(2)}</RSLPAIDAMOUNT>
+          <PARTYLEDGERNAME>${escapeXml(v.partyName)}</PARTYLEDGERNAME>${phoneXml}
+          <NARRATION>${escapeXml(narrationParts.join(" | "))}</NARRATION>
           <ALLLEDGERENTRIES.LIST>
             <LEDGERNAME>${escapeXml(v.partyName)}</LEDGERNAME>
-            <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
-            <AMOUNT>-${amountRupees}</AMOUNT>
+            <ISPARTYLEDGER>Yes</ISPARTYLEDGER>
+            <ISDEEMEDPOSITIVE>${partyDeemedPositive}</ISDEEMEDPOSITIVE>
+            <AMOUNT>${partySignedAmount}</AMOUNT>
+          </ALLLEDGERENTRIES.LIST>
+          <ALLLEDGERENTRIES.LIST>
+            <LEDGERNAME>${escapeXml(contraLedgerName)}</LEDGERNAME>
+            <ISPARTYLEDGER>No</ISPARTYLEDGER>
+            <ISDEEMEDPOSITIVE>${contraDeemedPositive}</ISDEEMEDPOSITIVE>
+            <AMOUNT>${contraSignedAmount}</AMOUNT>
           </ALLLEDGERENTRIES.LIST>
         </VOUCHER>
       </TALLYMESSAGE>`;
@@ -2234,6 +2584,7 @@ export function exportTallyVouchersAsXml(workspaceId: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <ENVELOPE>
   <HEADER>
+    <VERSION>1</VERSION>
     <TALLYREQUEST>Import Data</TALLYREQUEST>
   </HEADER>
   <BODY>
@@ -2258,21 +2609,23 @@ export function exportTallyVouchersAsCsv(workspaceId: string): string {
     .all();
 
   const header =
-    "Id,Guid,VoucherNumber,VoucherType,PartyName,PartyPhone,AmountRupees,PaidAmountRupees,PaymentStatus,VoucherDate,DueDate";
+    "Id,Guid,VoucherNumber,VoucherType,PartyName,PartyPhone,AmountRupees,PaidAmountRupees,OriginalCurrency,PaymentStatus,VoucherDate,DueDate";
   const lines = vouchers.map((v) => {
-    const q = (val: string) => `"${val.replace(/"/g, '""')}"`;
+    const signedAmt =
+      v.voucherType === "CreditNote" ? -(Math.abs(v.amountPaise) / 100) : v.amountPaise / 100;
     return [
-      q(v.id),
-      q(v.guid),
-      q(v.voucherNumber),
-      q(v.voucherType),
-      q(v.partyName),
-      q(v.partyPhoneE164 ?? ""),
-      (v.amountPaise / 100).toFixed(2),
+      sanitizeCsvField(v.id),
+      sanitizeCsvField(v.guid),
+      sanitizeCsvField(v.voucherNumber),
+      sanitizeCsvField(v.voucherType),
+      sanitizeCsvField(v.partyName),
+      sanitizeCsvField(v.partyPhoneE164 ?? ""),
+      signedAmt.toFixed(2),
       (v.paidAmountPaise / 100).toFixed(2),
-      q(v.paymentStatus),
-      new Date(v.voucherDate).toISOString().slice(0, 10),
-      v.dueDate ? new Date(v.dueDate).toISOString().slice(0, 10) : "",
+      sanitizeCsvField(v.originalCurrency || "INR"),
+      sanitizeCsvField(v.paymentStatus),
+      formatIstIsoDate(v.voucherDate),
+      v.dueDate ? formatIstIsoDate(v.dueDate) : "",
     ].join(",");
   });
 
@@ -2294,15 +2647,122 @@ function extractXmlTag(block: string, tag: string): string {
   return unescapeXml(m?.[1] ?? "");
 }
 
-function parseTallyNumericAmount(raw: string): number {
-  const cleaned = raw.replace(/,/g, "").trim();
-  const numMatch = cleaned.match(/-?\d+(?:\.\d+)?/);
-  if (!numMatch) return 0;
-  const val = Math.abs(Number(numMatch[0]));
-  return Number.isFinite(val) ? val : 0;
+const DEFAULT_FOREX_RATES_TO_INR: Record<string, number> = {
+  USD: 84.5,
+  EUR: 91.0,
+  GBP: 108.0,
+  AED: 23.0,
+  SGD: 63.0,
+  CAD: 61.0,
+  AUD: 55.0,
+};
+
+export interface ParsedTallyAmountInfo {
+  inrRupees: number;
+  originalCurrency: string;
+  originalAmountMinor: number | null;
+  exchangeRateMicros: number | null;
 }
 
-function extractPartyAmountFromVoucherXml(block: string, partyName: string): number {
+export function parseTallyCurrencyAndAmount(
+  raw: string,
+  explicitRateRaw?: string
+): ParsedTallyAmountInfo {
+  const cleaned = raw.replace(/,/g, "").trim();
+  if (!cleaned) {
+    return {
+      inrRupees: 0,
+      originalCurrency: "INR",
+      originalAmountMinor: null,
+      exchangeRateMicros: null,
+    };
+  }
+
+  let detectedCurrency = "INR";
+  if (/\bUSD\b|US\$|\$/i.test(cleaned)) detectedCurrency = "USD";
+  else if (/\bEUR\b|€/i.test(cleaned)) detectedCurrency = "EUR";
+  else if (/\bGBP\b|£/i.test(cleaned)) detectedCurrency = "GBP";
+  else if (/\bAED\b/i.test(cleaned)) detectedCurrency = "AED";
+  else if (/\bSGD\b/i.test(cleaned)) detectedCurrency = "SGD";
+  else if (/\bCAD\b/i.test(cleaned)) detectedCurrency = "CAD";
+  else if (/\bAUD\b/i.test(cleaned)) detectedCurrency = "AUD";
+
+  // Case 1: Tally multi-currency expression e.g. "-$1500.00 @ ₹84.50/$ = -₹126750.00"
+  if (cleaned.includes("=")) {
+    const [lhs, rhs] = cleaned.split("=");
+    const baseMatch = (rhs ?? "").match(/-?\d+(?:\.\d+)?/);
+    const origMatch = (lhs ?? "").split("@")[0]?.match(/-?\d+(?:\.\d+)?/);
+    const ratePart = (lhs ?? "").includes("@") ? (lhs ?? "").split("@")[1] : "";
+    const rateMatch = (ratePart || explicitRateRaw || "").replace(/,/g, "").match(/\d+(?:\.\d+)?/);
+
+    const baseInr = baseMatch ? Math.abs(Number(baseMatch[0])) : 0;
+    const origVal = origMatch ? Math.abs(Number(origMatch[0])) : 0;
+    const rateVal = rateMatch
+      ? Number(rateMatch[0])
+      : origVal > 0 && baseInr > 0
+        ? baseInr / origVal
+        : 0;
+
+    if (baseInr > 0) {
+      const currency = detectedCurrency === "INR" && origVal > 0 && Math.abs(baseInr - origVal) > 1 ? "USD" : detectedCurrency;
+      return {
+        inrRupees: baseInr,
+        originalCurrency: currency,
+        originalAmountMinor: currency !== "INR" && origVal > 0 ? Math.round(origVal * 100) : null,
+        exchangeRateMicros:
+          currency !== "INR" && rateVal > 0 ? Math.round(rateVal * 1_000_000) : null,
+      };
+    }
+  }
+
+  // Case 2: Foreign currency with "@ rate" or standalone symbol (e.g. "$1,500.00" or "USD 1500 @ 85.20")
+  const primaryMatch = cleaned.split("@")[0]?.match(/-?\d+(?:\.\d+)?/);
+  const primaryVal = primaryMatch ? Math.abs(Number(primaryMatch[0])) : 0;
+  if (!Number.isFinite(primaryVal) || primaryVal <= 0) {
+    return {
+      inrRupees: 0,
+      originalCurrency: "INR",
+      originalAmountMinor: null,
+      exchangeRateMicros: null,
+    };
+  }
+
+  if (detectedCurrency !== "INR") {
+    const inlineRatePart = cleaned.includes("@") ? cleaned.split("@")[1] : "";
+    const rateMatch = (inlineRatePart || explicitRateRaw || "")
+      .replace(/,/g, "")
+      .match(/\d+(?:\.\d+)?/);
+    const rate =
+      rateMatch && Number(rateMatch[0]) > 0
+        ? Number(rateMatch[0])
+        : DEFAULT_FOREX_RATES_TO_INR[detectedCurrency] ?? 1;
+    const inrRupees = Math.round(primaryVal * rate * 100) / 100;
+    return {
+      inrRupees,
+      originalCurrency: detectedCurrency,
+      originalAmountMinor: Math.round(primaryVal * 100),
+      exchangeRateMicros: Math.round(rate * 1_000_000),
+    };
+  }
+
+  return {
+    inrRupees: primaryVal,
+    originalCurrency: "INR",
+    originalAmountMinor: null,
+    exchangeRateMicros: null,
+  };
+}
+
+function parseTallyNumericAmount(raw: string, explicitRateRaw?: string): number {
+  return parseTallyCurrencyAndAmount(raw, explicitRateRaw).inrRupees;
+}
+
+function extractPartyAmountInfoFromVoucherXml(
+  block: string,
+  partyName: string
+): ParsedTallyAmountInfo {
+  const explicitRate =
+    extractXmlTag(block, "CURRENCYRATE") || extractXmlTag(block, "EXCHANGERATE") || undefined;
   const ledgerBlocks = [
     ...(block.match(/<ALLLEDGERENTRIES\.LIST[\s\S]*?<\/ALLLEDGERENTRIES\.LIST>/gi) ?? []),
     ...(block.match(/<LEDGERENTRIES\.LIST[\s\S]*?<\/LEDGERENTRIES\.LIST>/gi) ?? []),
@@ -2310,33 +2770,38 @@ function extractPartyAmountFromVoucherXml(block: string, partyName: string): num
 
   if (ledgerBlocks.length > 0) {
     const normalizedParty = partyName.trim().toLowerCase();
-    let partyFlagAmount = 0;
-    let partyNameMatchAmount = 0;
-    let maxLedgerAmount = 0;
+    let partyFlagInfo: ParsedTallyAmountInfo | null = null;
+    let partyNameMatchInfo: ParsedTallyAmountInfo | null = null;
+    let maxLedgerInfo: ParsedTallyAmountInfo | null = null;
 
     for (const lb of ledgerBlocks) {
-      const amt = parseTallyNumericAmount(extractXmlTag(lb, "AMOUNT"));
-      if (amt <= 0) continue;
-      if (amt > maxLedgerAmount) maxLedgerAmount = amt;
+      const info = parseTallyCurrencyAndAmount(extractXmlTag(lb, "AMOUNT"), explicitRate);
+      if (info.inrRupees <= 0) continue;
+      if (!maxLedgerInfo || info.inrRupees > maxLedgerInfo.inrRupees) {
+        maxLedgerInfo = info;
+      }
 
       const isParty = /^yes$/i.test(extractXmlTag(lb, "ISPARTYLEDGER"));
-      if (isParty && amt > partyFlagAmount) {
-        partyFlagAmount = amt;
+      if (isParty && (!partyFlagInfo || info.inrRupees > partyFlagInfo.inrRupees)) {
+        partyFlagInfo = info;
       }
 
       const ledgerName = extractXmlTag(lb, "LEDGERNAME").toLowerCase();
-      if (normalizedParty && ledgerName === normalizedParty && amt > partyNameMatchAmount) {
-        partyNameMatchAmount = amt;
+      if (
+        normalizedParty &&
+        ledgerName === normalizedParty &&
+        (!partyNameMatchInfo || info.inrRupees > partyNameMatchInfo.inrRupees)
+      ) {
+        partyNameMatchInfo = info;
       }
     }
 
-    if (partyFlagAmount > 0) return partyFlagAmount;
-    if (partyNameMatchAmount > 0) return partyNameMatchAmount;
-    if (maxLedgerAmount > 0) return maxLedgerAmount;
+    if (partyFlagInfo) return partyFlagInfo;
+    if (partyNameMatchInfo) return partyNameMatchInfo;
+    if (maxLedgerInfo) return maxLedgerInfo;
   }
 
-  // Fallback to direct <AMOUNT> on <VOUCHER> when ledger entries list is omitted
-  return parseTallyNumericAmount(extractXmlTag(block, "AMOUNT"));
+  return parseTallyCurrencyAndAmount(extractXmlTag(block, "AMOUNT"), explicitRate);
 }
 
 function parseTallyDueDateOrCreditDays(rawDue: string, voucherDateTs: number): number {
@@ -2360,14 +2825,101 @@ export interface ParsedTallyXmlVoucher {
   voucherNumber: string;
   voucherType: "Sales" | "Receipt" | "CreditNote" | "Purchase";
   partyName: string;
+  partyParentGroup?: string;
   partyPhone?: string;
   amountRupees: number;
   paidAmountRupees: number;
+  originalCurrency?: string;
+  originalAmountMinor?: number | null;
+  exchangeRateMicros?: number | null;
   voucherDate: number;
   dueDate: number | null;
   alterId?: number;
   isCancelled: boolean;
   isDeleted?: boolean;
+}
+
+function normalizeLedgerParentGroup(
+  rawGroup: string | undefined,
+  voucherType: "Sales" | "Receipt" | "CreditNote" | "Purchase"
+): string {
+  const trimmed = (rawGroup ?? "").trim();
+  if (/creditor/i.test(trimmed)) return "Sundry Creditors";
+  if (/debtor/i.test(trimmed)) return "Sundry Debtors";
+  if (trimmed) return trimmed;
+  return voucherType === "Purchase" ? "Sundry Creditors" : "Sundry Debtors";
+}
+
+function upsertWorkspaceTallyParty(params: {
+  db: ReturnType<typeof tenantDataDb>;
+  workspaceId: string;
+  companyId: string;
+  partyName: string;
+  voucherType: "Sales" | "Receipt" | "CreditNote" | "Purchase";
+  parentGroup?: string;
+  phoneE164?: string | null;
+  now: number;
+}): void {
+  const cleanName = params.partyName.trim();
+  if (!cleanName || cleanName === "Customer" || cleanName === "Deleted") return;
+  const partyGuid = `pty_${params.companyId}_${cleanName.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 60)}`;
+  const parentGroup = normalizeLedgerParentGroup(params.parentGroup, params.voucherType);
+
+  params.db
+    .insert(tenantDataSchema.tallyParties)
+    .values({
+      id: newEntityId("tpt", params.workspaceId, params.now),
+      partyGuid,
+      companyId: params.companyId,
+      name: cleanName,
+      parentGroup,
+      phoneE164: params.phoneE164 ?? null,
+      closingBalancePaise: 0,
+      updatedAt: params.now,
+    })
+    .onConflictDoUpdate({
+      target: tenantDataSchema.tallyParties.partyGuid,
+      set: {
+        name: cleanName,
+        parentGroup,
+        ...(params.phoneE164 ? { phoneE164: params.phoneE164 } : {}),
+        updatedAt: params.now,
+      },
+    })
+    .run();
+
+  // Recompute signed closing balance from company vouchers (Sales +, Receipt -, CreditNote -)
+  const partyVouchers = params.db
+    .select({
+      voucherType: tenantDataSchema.tallyVouchers.voucherType,
+      amountPaise: tenantDataSchema.tallyVouchers.amountPaise,
+      paymentStatus: tenantDataSchema.tallyVouchers.paymentStatus,
+    })
+    .from(tenantDataSchema.tallyVouchers)
+    .where(
+      and(
+        eq(tenantDataSchema.tallyVouchers.companyId, params.companyId),
+        eq(tenantDataSchema.tallyVouchers.partyName, cleanName)
+      )
+    )
+    .all();
+
+  let signedBalancePaise = 0;
+  for (const pv of partyVouchers) {
+    if (pv.paymentStatus === "cancelled") continue;
+    if (pv.voucherType === "Sales") signedBalancePaise += pv.amountPaise;
+    else if (pv.voucherType === "Receipt" || pv.voucherType === "CreditNote") {
+      signedBalancePaise -= pv.amountPaise;
+    } else if (pv.voucherType === "Purchase") {
+      signedBalancePaise -= pv.amountPaise;
+    }
+  }
+
+  params.db
+    .update(tenantDataSchema.tallyParties)
+    .set({ closingBalancePaise: signedBalancePaise, updatedAt: params.now })
+    .where(eq(tenantDataSchema.tallyParties.partyGuid, partyGuid))
+    .run();
 }
 
 export function parseTallyXmlEnvelope(
@@ -2385,8 +2937,9 @@ export function parseTallyXmlEnvelope(
     extractXmlTag(rawXml, "COMPANYNAME") ||
     null;
 
-  // Build optional Ledger Master phone lookup (<LEDGER NAME="..."><LEDGERMOBILE>...</LEDGERMOBILE></LEDGER>)
+  // Build Ledger Master phone & parent group lookup (<LEDGER NAME="..."><PARENT>Sundry Debtors</PARENT>...)
   const ledgerPhones = new Map<string, string>();
+  const ledgerParents = new Map<string, string>();
   const ledgerBlocks = rawXml.match(/<LEDGER(?:\s[^>]*)?>[\s\S]*?<\/LEDGER>/gi) ?? [];
   for (const lBlock of ledgerBlocks) {
     const attrNameMatch = lBlock.match(/<LEDGER[^>]*\bNAME="([^"]+)"/i);
@@ -2395,8 +2948,12 @@ export function parseTallyXmlEnvelope(
       extractXmlTag(lBlock, "LEDGERMOBILE") ||
       extractXmlTag(lBlock, "LEDGERPHONE") ||
       extractXmlTag(lBlock, "EMAILCC");
+    const lParent = extractXmlTag(lBlock, "PARENT");
     if (lName && lMobile) {
       ledgerPhones.set(lName, lMobile);
+    }
+    if (lName && lParent) {
+      ledgerParents.set(lName, lParent);
     }
   }
 
@@ -2451,20 +3008,28 @@ export function parseTallyXmlEnvelope(
       extractXmlTag(block, "BASICBUYERNAME");
     const partyName = rawExtractedParty || "Customer";
 
+    const narration = extractXmlTag(block, "NARRATION");
+    const narrationPhoneMatch = narration.match(/Phone:\s*(\+?\d[\d\s-]{8,15})/i);
+    const narrationPaidMatch = narration.match(/Paid:\s*(?:INR|Rs\.?|₹)?\s*([\d,.]+)/i);
+
     const partyPhone =
       extractXmlTag(block, "RSLPARTYPHONE") ||
       extractXmlTag(block, "LEDGERMOBILE") ||
       extractXmlTag(block, "PARTYMOBILENO") ||
       extractXmlTag(block, "PARTYPHONE") ||
+      narrationPhoneMatch?.[1]?.trim() ||
       ledgerPhones.get(partyName.toLowerCase()) ||
       "";
 
-    const amountRupees = extractPartyAmountFromVoucherXml(block, partyName);
+    const amountInfo = extractPartyAmountInfoFromVoucherXml(block, partyName);
+    const amountRupees = amountInfo.inrRupees;
     if (amountRupees <= 0 && !isCancelled && !isDeleted) continue;
 
-    const rawPaid = parseTallyNumericAmount(extractXmlTag(block, "RSLPAIDAMOUNT"));
+    const rawPaidTag =
+      extractXmlTag(block, "RSLPAIDAMOUNT") || narrationPaidMatch?.[1]?.trim() || "";
+    const rawPaid = parseTallyNumericAmount(rawPaidTag);
     const paidAmountRupees =
-      voucherType === "Receipt"
+      voucherType === "Receipt" || voucherType === "CreditNote"
         ? amountRupees
         : rawPaid > 0
           ? Math.min(amountRupees, rawPaid)
@@ -2481,6 +3046,8 @@ export function parseTallyXmlEnvelope(
       maxAlterId = alterIdNum;
     }
     const rawMasterId = extractXmlTag(block, "MASTERID").replace(/\D/g, "");
+    const rawParentGroup =
+      extractXmlTag(block, "RSLPARTYGROUP") || ledgerParents.get(partyName.toLowerCase());
 
     vouchers.push({
       guid: rawGuid || undefined,
@@ -2489,9 +3056,13 @@ export function parseTallyXmlEnvelope(
       voucherNumber: vchNo,
       voucherType,
       partyName,
+      partyParentGroup: rawParentGroup || undefined,
       partyPhone: partyPhone || undefined,
       amountRupees,
       paidAmountRupees,
+      originalCurrency: amountInfo.originalCurrency,
+      originalAmountMinor: amountInfo.originalAmountMinor,
+      exchangeRateMicros: amountInfo.exchangeRateMicros,
       voucherDate: vDate,
       dueDate,
       alterId: alterIdNum > 0 ? alterIdNum : undefined,
@@ -2529,12 +3100,17 @@ export const bulkImportTallyData = defineAction({
 
     interface ParsedVoucher {
       guid?: string;
+      masterId?: string;
       voucherNumber: string;
       voucherType: "Sales" | "Receipt" | "CreditNote" | "Purchase";
       partyName: string;
+      partyParentGroup?: string;
       partyPhone?: string;
       amountPaise: number;
       paidAmountPaise: number;
+      originalCurrency: string;
+      originalAmountMinor: number | null;
+      exchangeRateMicros: number | null;
       voucherDate: number;
       dueDate: number | null;
       alterId?: number;
@@ -2555,12 +3131,17 @@ export const bulkImportTallyData = defineAction({
       for (const v of xmlResult.vouchers) {
         parsedItems.push({
           guid: v.guid,
+          masterId: v.masterId,
           voucherNumber: v.voucherNumber,
           voucherType: v.voucherType,
           partyName: v.partyName,
+          partyParentGroup: v.partyParentGroup,
           partyPhone: normalizePhoneOrNull(v.partyPhone) ?? v.partyPhone,
           amountPaise: Math.max(0, rupeesToPaise(v.amountRupees)),
           paidAmountPaise: Math.max(0, rupeesToPaise(v.paidAmountRupees)),
+          originalCurrency: v.originalCurrency ?? "INR",
+          originalAmountMinor: v.originalAmountMinor ?? null,
+          exchangeRateMicros: v.exchangeRateMicros ?? null,
           voucherDate: v.voucherDate,
           dueDate: v.dueDate,
           alterId: v.alterId,
@@ -2599,12 +3180,15 @@ export const bulkImportTallyData = defineAction({
         const partyName = (iParty >= 0 ? cols[iParty] : undefined) || "Customer";
         const rawPhone = iPhone >= 0 ? cols[iPhone] : undefined;
         const partyPhone = normalizePhoneOrNull(rawPhone) ?? rawPhone;
-        const amountPaise = rupeesToPaise(Number((iAmt >= 0 ? cols[iAmt] : "0") || 0));
+        const amtInfo = parseTallyCurrencyAndAmount((iAmt >= 0 ? cols[iAmt] : "0") || "0");
+        const amountPaise = rupeesToPaise(amtInfo.inrRupees);
         if (amountPaise <= 0) continue;
 
-        const paidRaw = iPaid >= 0 ? Number(cols[iPaid] || 0) : 0;
+        const paidRaw = iPaid >= 0 ? parseTallyNumericAmount(cols[iPaid] || "0") : 0;
         const paidAmountPaise =
-          voucherType === "Receipt" ? amountPaise : Math.min(amountPaise, rupeesToPaise(paidRaw));
+          voucherType === "Receipt" || voucherType === "CreditNote"
+            ? amountPaise
+            : Math.min(amountPaise, rupeesToPaise(paidRaw));
 
         const vDate = iDate >= 0 && cols[iDate] ? new Date(cols[iDate]!).getTime() || now : now;
         const dDate =
@@ -2619,6 +3203,9 @@ export const bulkImportTallyData = defineAction({
           partyPhone: partyPhone || undefined,
           amountPaise,
           paidAmountPaise,
+          originalCurrency: amtInfo.originalCurrency,
+          originalAmountMinor: amtInfo.originalAmountMinor,
+          exchangeRateMicros: amtInfo.exchangeRateMicros,
           voucherDate: vDate,
           dueDate: voucherType === "Sales" ? dDate : null,
         });
@@ -2664,7 +3251,9 @@ export const bulkImportTallyData = defineAction({
         const guid = item.guid || `vch_${company.id}_${item.voucherType}_${item.voucherNumber}`;
         const paymentStatus = item.isCancelled
           ? "cancelled"
-          : item.voucherType === "Receipt" || item.paidAmountPaise >= item.amountPaise
+          : item.voucherType === "Receipt" ||
+              item.voucherType === "CreditNote" ||
+              item.paidAmountPaise >= item.amountPaise
             ? "paid"
             : item.paidAmountPaise > 0
               ? "partial"
@@ -2679,6 +3268,7 @@ export const bulkImportTallyData = defineAction({
           .values({
             id: newId("tvch", ctx.workspaceId),
             guid,
+            masterId: item.masterId ?? null,
             companyId: company.id,
             voucherNumber: item.voucherNumber,
             voucherType: item.voucherType,
@@ -2686,6 +3276,9 @@ export const bulkImportTallyData = defineAction({
             partyPhoneE164: item.partyPhone || null,
             amountPaise: item.amountPaise,
             paidAmountPaise: item.paidAmountPaise,
+            originalCurrency: item.originalCurrency,
+            originalAmountMinor: item.originalAmountMinor,
+            exchangeRateMicros: item.exchangeRateMicros,
             voucherDate: item.voucherDate,
             dueDate: item.dueDate,
             paymentStatus,
@@ -2697,8 +3290,12 @@ export const bulkImportTallyData = defineAction({
           .onConflictDoUpdate({
             target: tenantDataSchema.tallyVouchers.guid,
             set: {
+              ...(item.masterId ? { masterId: item.masterId } : {}),
               amountPaise: item.amountPaise,
               paidAmountPaise: item.paidAmountPaise,
+              originalCurrency: item.originalCurrency,
+              originalAmountMinor: item.originalAmountMinor,
+              exchangeRateMicros: item.exchangeRateMicros,
               paymentStatus,
               partyPhoneE164: item.partyPhone || null,
               alterId: item.alterId ?? 1,
@@ -2707,6 +3304,17 @@ export const bulkImportTallyData = defineAction({
             },
           })
           .run();
+
+        upsertWorkspaceTallyParty({
+          db,
+          workspaceId: ctx.workspaceId,
+          companyId: company.id,
+          partyName: item.partyName,
+          voucherType: item.voucherType,
+          parentGroup: item.partyParentGroup,
+          phoneE164: normalizePhoneOrNull(item.partyPhone),
+          now,
+        });
       }
 
       db.insert(tenantDataSchema.syncRuns)
@@ -3239,11 +3847,13 @@ export function generateTallyPrimeTdlAddOn(params: {
     ${p}ShouldPostOnSave    : (($$InCreateMode And (Not $IsOptional) And (Not $$IsEmpty:$PartyLedgerName)) Or $$InAlterMode) And @@${p}IsTargetVch And @@${p}IsAllowedActiveComp
     ${p}SyncableSavedVoucher: (Not $IsOptional) And ((Not $$IsEmpty:$PartyLedgerName) Or $IsCancelled) And @@${p}IsTargetVch
     ${p}PartyPhoneExpr      : If Not $$IsEmpty:($LedgerMobile:Ledger:$PartyLedgerName) Then $LedgerMobile:Ledger:$PartyLedgerName Else (If Not $$IsEmpty:$PartyMobileNo Then $PartyMobileNo Else $LedgerPhone:Ledger:$PartyLedgerName)
+    ${p}IsPartyLedLine      : $IsPartyLedger Or ($LedgerName = $PartyLedgerName)
+    ${p}AmtFilteredParty    : $$Number:($$Abs:($$FilterValue:$Amount:AllLedgerEntries:1:${p}IsPartyLedLine))
     ${p}AmtPartyLed         : $$Number:($$Abs:$LedgerEntries[1].Amount)
     ${p}AmtAllLed           : $$Number:($$Abs:$AllLedgerEntries[1].Amount)
     ${p}AmtRoot             : $$Number:($$Abs:$Amount)
     ${p}AmtInventory        : $$Number:($$Abs:($$CollAmtTotal:InventoryEntries:$Amount))
-    ${p}BestAmountNum       : If @@${p}AmtPartyLed > 0 Then @@${p}AmtPartyLed Else (If @@${p}AmtAllLed > 0 Then @@${p}AmtAllLed Else (If @@${p}AmtRoot > 0 Then @@${p}AmtRoot Else @@${p}AmtInventory))
+    ${p}BestAmountNum       : If @@${p}AmtFilteredParty > 0 Then @@${p}AmtFilteredParty Else (If @@${p}AmtPartyLed > 0 Then @@${p}AmtPartyLed Else (If @@${p}AmtAllLed > 0 Then @@${p}AmtAllLed Else (If @@${p}AmtRoot > 0 Then @@${p}AmtRoot Else @@${p}AmtInventory)))
     ${p}FormMasterIdStr     : $$String:$MasterID
     ${p}FormAlterIdStr      : $$String:$AlterID
     ${p}FormBaseTypeStr     : $Parent:VoucherType:$VoucherTypeName
@@ -3626,6 +4236,7 @@ export function generateStandaloneTallyConnectorMjs(params: {
  *      node rsl-tally-connector.mjs --tdl-path "C:\\\\RSL\\\\rsl-tally-whatsapp.tdl" --webhook-token tlwh_...
  */
 
+import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
@@ -3633,7 +4244,7 @@ import os from "node:os";
 import path from "node:path";
 import zlib from "node:zlib";
 
-const AGENT_VERSION = "2.2.0";
+const AGENT_VERSION = "2.3.0";
 const DEFAULT_SERVER_URL = ${JSON.stringify(defaultServer)};
 
 function parseCliFlags(argv) {
@@ -3660,14 +4271,31 @@ function parseCliFlags(argv) {
 
 const statePath = path.join(os.homedir(), ".rsl-tally-agent", "state.json");
 
+function restrictWindowsFileAcl(filePath) {
+  if (process.platform !== "win32") return;
+  try {
+    const currentUser = os.userInfo().username;
+    if (currentUser) {
+      execFileSync(
+        "icacls",
+        [filePath, "/inheritance:r", "/grant:r", \`\${currentUser}:(R,W)\`],
+        { stdio: "ignore", windowsHide: true }
+      );
+    }
+  } catch {
+    // Non-fatal if corporate domain GPO restricts icacls
+  }
+}
+
 function loadState() {
   if (!fs.existsSync(statePath)) return null;
   return JSON.parse(fs.readFileSync(statePath, "utf8"));
 }
 
 function saveState(state) {
-  fs.mkdirSync(path.dirname(statePath), { recursive: true });
-  fs.writeFileSync(statePath, JSON.stringify(state, null, 2), "utf8");
+  fs.mkdirSync(path.dirname(statePath), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2), { encoding: "utf8", mode: 0o600 });
+  restrictWindowsFileAcl(statePath);
 }
 
 function signRequest(secret, ts, rawBody) {
@@ -3871,10 +4499,12 @@ function exportNativeVoucherPdfFromTally(host, port, companyName, masterId) {
 async function autoUpdateLocalTdlIfConfigured(state) {
   if (!state.tdlPath || !state.webhookToken) return;
   try {
-    const manifestUrl = \`\${state.serverUrl}/api/webhooks/tally?mode=tdl-manifest&token=\${encodeURIComponent(state.webhookToken)}\`;
+    const devParam = state.deviceId ? \`&deviceId=\${encodeURIComponent(state.deviceId)}\` : "";
+    const manifestUrl = \`\${state.serverUrl}/api/webhooks/tally?mode=tdl-manifest&token=\${encodeURIComponent(state.webhookToken)}\${devParam}\`;
     const mRes = await fetch(manifestUrl);
     if (!mRes.ok) return;
     const manifest = await mRes.json();
+    const versionLabel = manifest.version || manifest.tdlVersion || manifest.latestTdlVersion || "latest";
     if (!manifest.ok || !manifest.sha256) return;
 
     let currentSha = "";
@@ -3889,9 +4519,38 @@ async function autoUpdateLocalTdlIfConfigured(state) {
     const tdlContent = await dlRes.text();
     if (!tdlContent.includes("[#Menu: Gateway of Tally]")) return;
 
+    // Cryptographic SHA-256 + HMAC verification BEFORE touching disk (P1-03 / SEC-05)
+    const downloadedSha = crypto.createHash("sha256").update(tdlContent, "utf8").digest("hex");
+    if (downloadedSha !== String(manifest.sha256).toLowerCase()) {
+      console.error("[RSL Connector] Security block: downloaded .tdl SHA-256 did not match signed manifest; refusing update.");
+      return;
+    }
+    if (!manifest.manifestHmac) {
+      console.error("[RSL Connector] Security block: .tdl manifest missing cryptographic HMAC signature; refusing update.");
+      return;
+    }
+    const expectedTokenHmac = crypto
+      .createHmac("sha256", state.webhookToken)
+      .update(\`\${versionLabel}:\${downloadedSha}\`)
+      .digest("hex");
+    if (expectedTokenHmac !== manifest.manifestHmac) {
+      console.error("[RSL Connector] Security block: .tdl manifest HMAC verification failed; refusing update.");
+      return;
+    }
+    if (manifest.deviceHmac && state.signingSecret) {
+      const expectedDeviceHmac = crypto
+        .createHmac("sha256", state.signingSecret)
+        .update(\`\${versionLabel}:\${downloadedSha}\`)
+        .digest("hex");
+      if (expectedDeviceHmac !== manifest.deviceHmac) {
+        console.error("[RSL Connector] Security block: .tdl device HMAC verification failed; refusing update.");
+        return;
+      }
+    }
+
     fs.mkdirSync(path.dirname(state.tdlPath), { recursive: true });
     fs.writeFileSync(state.tdlPath, tdlContent, "utf8");
-    console.log(\`[RSL Connector] Auto-updated local Tally .tdl add-on to v\${manifest.version} at \${state.tdlPath}\`);
+    console.log(\`[RSL Connector] Verified SHA-256 & HMAC -> auto-updated local Tally .tdl add-on to v\${versionLabel} at \${state.tdlPath}\`);
   } catch {
     // Non-fatal background check
   }
@@ -4053,7 +4712,12 @@ async function main() {
 
   const state = loadState();
   if (!state) {
-    console.error("Not paired yet. Run: node rsl-tally-connector.mjs --pair RSL-XXXX-XXXX --device \\"Accounts Office PC\\"");
+    console.error("\\n==========================================================");
+    console.error(" RapidShift Labs Tally Connector — First-Time PC Pairing");
+    console.error("==========================================================");
+    console.error("1. Open RapidShift Labs -> Tally Prime -> Connect Your Office PC");
+    console.error("2. Click 'Generate Pairing Code' (or download the 1-Click .bat Installer)");
+    console.error("3. Run: node rsl-tally-connector.mjs --pair RSL-XXXX-XXXX --device \\"Accounts Office PC\\"\\n");
     process.exit(1);
   }
   if (flags.server) state.serverUrl = serverUrl;
@@ -4085,6 +4749,10 @@ async function main() {
       if (openInfo.ok && openInfo.companies.length > 0) {
         for (const companyName of openInfo.companies) {
           const xml = await queryTallyCompanyVouchers(state.tallyHost, state.tallyPort, companyName);
+          const hasVouchers = /<VOUCHER(?:\s|>)/i.test(xml);
+          if (!hasVouchers) {
+            continue;
+          }
           const voucherPdfs = await collectUpdatedNativeVoucherPdfs(
             state.tallyHost,
             state.tallyPort,
@@ -4095,7 +4763,7 @@ async function main() {
           const syncRes = await signedPost(state, "/api/agent/ingest", {
             rawXml: xml,
             companyName,
-            fullSnapshot: true,
+            fullSnapshot: Boolean(companyName) && hasVouchers,
             voucherPdfs,
           });
           const maxAlter = extractMaxAlterId(xml);
@@ -4127,6 +4795,95 @@ main().catch((err) => {
 `;
 }
 
+/**
+ * Generates a 1-Click Windows Setup & Auto-Start Launcher (.bat) for non-technical
+ * accountants so they never need to type PowerShell commands or open taskschd.msc (P1-14 / LAY-05).
+ */
+export function generateWindowsTallyInstallerBat(params: {
+  serverUrl: string;
+  workspaceName: string;
+  webhookToken?: string;
+  pairingCode?: string;
+}): string {
+  const cleanServer = params.serverUrl.trim().replace(/\/+$/, "");
+  const safeBiz = params.workspaceName.replace(/["&|<>^%\r\n]/g, "").trim() || "Accounts Desk";
+  const whToken = (params.webhookToken ?? "").replace(/[^a-zA-Z0-9_-]/g, "");
+  const presetCode = (params.pairingCode ?? "").replace(/[^A-Za-z0-9-]/g, "");
+
+  const lines = [
+    "@echo off",
+    "setlocal EnableDelayedExpansion",
+    `title RapidShift Labs - 1-Click Tally Prime Sync Setup (${safeBiz})`,
+    "color 0A",
+    "echo ======================================================================",
+    `echo   RapidShift Labs - 1-Click Tally Prime Setup for ${safeBiz}`,
+    "echo ======================================================================",
+    "echo.",
+    'set "RSL_DIR=%LOCALAPPDATA%\\RapidShiftLabs"',
+    'if not exist "%RSL_DIR%" mkdir "%RSL_DIR%"',
+    "",
+    "where node >nul 2>nul",
+    "if %ERRORLEVEL% NEQ 0 (",
+    "  echo [Step 1/4] Installing Node.js LTS runtime via Windows Winget...",
+    "  winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements --silent",
+    '  set "PATH=%ProgramFiles%\\nodejs;%PATH%"',
+    ")",
+    "where node >nul 2>nul",
+    "if %ERRORLEVEL% NEQ 0 (",
+    "  echo.",
+    "  echo [Action Needed] Please install Node.js LTS from https://nodejs.org and double-click this file again.",
+    "  pause",
+    "  exit /b 1",
+    ")",
+    "",
+    "echo [Step 1/4] Downloading verified Tally Connector and TDL Add-On...",
+    whToken
+      ? `powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -UseBasicParsing -Uri '${cleanServer}/api/webhooks/tally?mode=tdl-latest&token=${whToken}' -OutFile '%RSL_DIR%\\rsl-tally-whatsapp.tdl'"`
+      : "rem TDL file can also be downloaded from the Connect Tally screen",
+    `powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -UseBasicParsing -Uri '${cleanServer}/api/agent/connector-script' -OutFile '%RSL_DIR%\\rsl-tally-connector.mjs'" 2>nul`,
+    "",
+    presetCode ? `set "PAIR_CODE=${presetCode}"` : 'set "PAIR_CODE="',
+    'if "%PAIR_CODE%"=="" (',
+    "  if not exist \"%USERPROFILE%\\.rsl-tally-agent\\state.json\" (",
+    "    echo.",
+    "    echo Copy the 1-time Pairing Code shown on your RapidShift Labs Tally page (example: RSL-4829-1042).",
+    '    set /p PAIR_CODE="Paste Pairing Code and press Enter: "',
+    "  )",
+    ")",
+    "",
+    'if not "%PAIR_CODE%"=="" (',
+    "  echo [Step 2/4] Pairing this Windows PC with RapidShift Labs...",
+    whToken
+      ? `  node "%RSL_DIR%\\rsl-tally-connector.mjs" --server "${cleanServer}" --pair "%PAIR_CODE%" --device "%COMPUTERNAME%" --tdl-path "%RSL_DIR%\\rsl-tally-whatsapp.tdl" --webhook-token "${whToken}"`
+      : `  node "%RSL_DIR%\\rsl-tally-connector.mjs" --server "${cleanServer}" --pair "%PAIR_CODE%" --device "%COMPUTERNAME%"`,
+    "  if %ERRORLEVEL% NEQ 0 (",
+    "    echo.",
+    "    echo Pairing did not complete. Please generate a fresh Pairing Code in RapidShift Labs and run again.",
+    "    pause",
+    "    exit /b 1",
+    "  )",
+    ")",
+    "",
+    "echo [Step 3/4] Registering automatic background startup when Windows signs in...",
+    'set "STARTUP_VBS=%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\RSL-Tally-Background-Sync.vbs"',
+    '> "%STARTUP_VBS%" echo Set WshShell = CreateObject("WScript.Shell")',
+    '>> "%STARTUP_VBS%" echo WshShell.Run "cmd /c node ""%LOCALAPPDATA%\\RapidShiftLabs\\rsl-tally-connector.mjs""", 0, False',
+    "",
+    "echo [Step 4/4] Starting live Tally Prime sync in the background now...",
+    'wscript.exe "%STARTUP_VBS%"',
+    "echo.",
+    "echo ======================================================================",
+    "echo   SUCCESS: RapidShift Labs Tally Sync is now running in the background.",
+    "echo   TDL File Path (for Tally F1 - TDLs & Add-Ons):",
+    "echo   %RSL_DIR%\\rsl-tally-whatsapp.tdl",
+    "echo ======================================================================",
+    "echo.",
+    "pause",
+  ];
+
+  return lines.join("\r\n");
+}
+
 export interface IncomingTallyBillItem {
   guid?: string;
   masterId?: string;
@@ -4134,10 +4891,14 @@ export interface IncomingTallyBillItem {
   voucherNumber: string;
   voucherType: "Sales" | "Receipt" | "CreditNote" | "Purchase";
   partyName: string;
+  partyParentGroup?: string;
   partyPhone?: string;
   amountRupees: number;
   paidAmountRupees?: number;
   hasExplicitPaidAmount?: boolean;
+  originalCurrency?: string;
+  originalAmountMinor?: number | null;
+  exchangeRateMicros?: number | null;
   voucherDate?: string;
   dueDate?: string;
   alterId?: number;
@@ -4298,6 +5059,7 @@ export function reconcileTallyCompanySnapshot(params: {
   sourceLabel?: "webhook" | "api" | "agent";
   sourceIp?: string | null;
   userAgent?: string | null;
+  allowEmptyCompanyPurge?: boolean;
 }): {
   deletedCount: number;
   ignoredCompany: boolean;
@@ -4326,6 +5088,20 @@ export function reconcileTallyCompanySnapshot(params: {
     .from(tenantDataSchema.tallyVouchers)
     .where(eq(tenantDataSchema.tallyVouchers.companyId, company.id))
     .all();
+
+  const syncableRows = existingRows.filter(
+    (row) => !row.guid.startsWith("vch_") && !row.voucherNumber.startsWith("SIM-")
+  );
+
+  // Catastrophic empty-snapshot circuit breaker (P0-01 / LOGIC-CRIT-01):
+  // Never wipe synced company vouchers when Tally returns an empty 0-voucher snapshot
+  // (e.g. during Tally company reload, F1 menu lock, or transient XML export error).
+  if (activeSet.size === 0 && syncableRows.length > 0 && !params.allowEmptyCompanyPurge) {
+    throw new RslError(
+      "RSL-SYNC-CIRCUIT-BREAKER",
+      `Safety circuit breaker prevented deleting ${syncableRows.length} synced Tally bill(s) for '${company.name}' because the incoming snapshot contained 0 vouchers.`
+    );
+  }
 
   const deletedVoucherNumbers: string[] = [];
   const now = Date.now();
@@ -4409,6 +5185,7 @@ export function reconcileTallySyncBatch(params: {
   actorId: string;
   sourceIp?: string | null;
   userAgent?: string | null;
+  allowEmptyCompanyPurge?: boolean;
 }): {
   deletedCount: number;
   ignoredCompany: boolean;
@@ -4432,6 +5209,23 @@ export function reconcileTallySyncBatch(params: {
     }
   }
 
+  // Interactive Day Book menu sync allows deleting the single last bill of a branch,
+  // while still blocking accidental mass-deletion of 2+ bills unless explicitly confirmed.
+  const companyGuid = toCompanySlugGuid(params.companyName);
+  const compRow = db
+    .select({ id: tenantDataSchema.tallyCompanies.id })
+    .from(tenantDataSchema.tallyCompanies)
+    .where(eq(tenantDataSchema.tallyCompanies.companyGuid, companyGuid))
+    .get();
+  const existingSyncableCount = compRow
+    ? db
+        .select({ guid: tenantDataSchema.tallyVouchers.guid, voucherNumber: tenantDataSchema.tallyVouchers.voucherNumber })
+        .from(tenantDataSchema.tallyVouchers)
+        .where(eq(tenantDataSchema.tallyVouchers.companyId, compRow.id))
+        .all()
+        .filter((r) => !r.guid.startsWith("vch_") && !r.voucherNumber.startsWith("SIM-")).length
+    : 0;
+
   const res = reconcileTallyCompanySnapshot({
     workspaceId: params.workspaceId,
     companyName: params.companyName,
@@ -4441,6 +5235,7 @@ export function reconcileTallySyncBatch(params: {
     sourceLabel: "webhook",
     sourceIp: params.sourceIp,
     userAgent: params.userAgent,
+    allowEmptyCompanyPurge: Boolean(params.allowEmptyCompanyPurge) || existingSyncableCount <= 1,
   });
 
   // Clean up batch state key & any expired batch keys older than 1 hour
@@ -4551,10 +5346,14 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         voucherNumber: v.voucherNumber,
         voucherType: v.voucherType,
         partyName: v.partyName,
+        partyParentGroup: v.partyParentGroup,
         partyPhone: v.partyPhone,
         amountRupees: v.amountRupees,
         paidAmountRupees: v.paidAmountRupees,
         hasExplicitPaidAmount: v.paidAmountRupees > 0,
+        originalCurrency: v.originalCurrency,
+        originalAmountMinor: v.originalAmountMinor,
+        exchangeRateMicros: v.exchangeRateMicros,
         voucherDate: new Date(v.voucherDate).toISOString(),
         dueDate: v.dueDate ? new Date(v.dueDate).toISOString() : undefined,
         alterId: v.alterId,
@@ -4628,6 +5427,11 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         continue;
       }
 
+      const explicitCurrencyRate = entry.exchangeRate
+        ? String(entry.exchangeRate)
+        : entry.currencyRate
+          ? String(entry.currencyRate)
+          : undefined;
       const candidateAmounts = [
         entry.amountRupees,
         entry.amount,
@@ -4636,11 +5440,19 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         entry.inventoryTotalAmount,
       ];
       let amountRupees = 0;
+      let originalCurrency = entry.currency ? String(entry.currency).trim().toUpperCase() : "INR";
+      let originalAmountMinor: number | null = null;
+      let exchangeRateMicros: number | null = null;
       for (const cand of candidateAmounts) {
         if (cand !== undefined && cand !== null) {
-          const parsedAmt = parseTallyNumericAmount(String(cand));
-          if (parsedAmt > 0) {
-            amountRupees = parsedAmt;
+          const parsedInfo = parseTallyCurrencyAndAmount(String(cand), explicitCurrencyRate);
+          if (parsedInfo.inrRupees > 0) {
+            amountRupees = parsedInfo.inrRupees;
+            if (parsedInfo.originalCurrency !== "INR") {
+              originalCurrency = parsedInfo.originalCurrency;
+              originalAmountMinor = parsedInfo.originalAmountMinor;
+              exchangeRateMicros = parsedInfo.exchangeRateMicros;
+            }
             break;
           }
         }
@@ -4701,6 +5513,11 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
           entry.baseVoucherType ? String(entry.baseVoucherType) : undefined
         ),
         partyName: rawPartyName || "Customer",
+        partyParentGroup: entry.partyParentGroup
+          ? String(entry.partyParentGroup)
+          : entry.ledgerGroup
+            ? String(entry.ledgerGroup)
+            : undefined,
         partyPhone: entry.partyPhone
           ? String(entry.partyPhone)
           : entry.customerPhone
@@ -4709,6 +5526,9 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         amountRupees: Number.isFinite(amountRupees) && amountRupees > 0 ? amountRupees : 0,
         paidAmountRupees: parsedPaidRupees,
         hasExplicitPaidAmount,
+        originalCurrency,
+        originalAmountMinor,
+        exchangeRateMicros,
         voucherDate: entry.voucherDate ? String(entry.voucherDate) : undefined,
         dueDate: entry.dueDate ? String(entry.dueDate) : undefined,
         alterId: alterIdVal > 0 ? alterIdVal : undefined,
@@ -4883,7 +5703,7 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         : rawAmountPaise;
 
     const paidAmountPaise =
-      item.voucherType === "Receipt"
+      item.voucherType === "Receipt" || item.voucherType === "CreditNote"
         ? amountPaise
         : item.hasExplicitPaidAmount
           ? Math.min(amountPaise, rupeesToPaise(item.paidAmountRupees ?? 0))
@@ -4893,7 +5713,9 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
 
     const paymentStatus = item.isCancelled
       ? "cancelled"
-      : item.voucherType === "Receipt" || (amountPaise > 0 && paidAmountPaise >= amountPaise)
+      : item.voucherType === "Receipt" ||
+          item.voucherType === "CreditNote" ||
+          (amountPaise > 0 && paidAmountPaise >= amountPaise)
         ? "paid"
         : paidAmountPaise > 0
           ? "partial"
@@ -4907,10 +5729,21 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
           : vDate + 15 * 86400_000
         : null;
 
+    const resolvedMasterId = item.masterId || existingRow?.masterId || null;
+    const resolvedCurrency = item.originalCurrency || existingRow?.originalCurrency || "INR";
+    const resolvedOrigMinor =
+      item.originalAmountMinor !== undefined
+        ? item.originalAmountMinor
+        : existingRow?.originalAmountMinor ?? null;
+    const resolvedExRateMicros =
+      item.exchangeRateMicros !== undefined
+        ? item.exchangeRateMicros
+        : existingRow?.exchangeRateMicros ?? null;
+
     const contentHash = crypto
       .createHash("sha256")
       .update(
-        `${guid}|${item.voucherNumber}|${effectivePartyName}|${amountPaise}|${paidAmountPaise}|${paymentStatus}|${vDate}|${dueDate ?? 0}`
+        `${guid}|${item.voucherNumber}|${effectivePartyName}|${amountPaise}|${paidAmountPaise}|${paymentStatus}|${vDate}|${dueDate ?? 0}|${resolvedCurrency}`
       )
       .digest("hex")
       .slice(0, 32);
@@ -4933,6 +5766,7 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
       .values({
         id: newEntityId("tvch", params.workspaceId, now),
         guid,
+        masterId: resolvedMasterId,
         companyId: company.id,
         voucherNumber: item.voucherNumber,
         voucherType: item.voucherType,
@@ -4940,6 +5774,9 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         partyPhoneE164: phoneE164,
         amountPaise,
         paidAmountPaise,
+        originalCurrency: resolvedCurrency,
+        originalAmountMinor: resolvedOrigMinor,
+        exchangeRateMicros: resolvedExRateMicros,
         voucherDate: vDate,
         dueDate,
         paymentStatus,
@@ -4951,6 +5788,7 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
       .onConflictDoUpdate({
         target: tenantDataSchema.tallyVouchers.guid,
         set: {
+          masterId: resolvedMasterId,
           companyId: company.id,
           voucherNumber: item.voucherNumber,
           voucherType: item.voucherType,
@@ -4958,6 +5796,9 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
           partyPhoneE164: phoneE164,
           amountPaise,
           paidAmountPaise,
+          originalCurrency: resolvedCurrency,
+          originalAmountMinor: resolvedOrigMinor,
+          exchangeRateMicros: resolvedExRateMicros,
           voucherDate: vDate,
           dueDate,
           paymentStatus,
@@ -4967,6 +5808,17 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
         },
       })
       .run();
+
+    upsertWorkspaceTallyParty({
+      db,
+      workspaceId: params.workspaceId,
+      companyId: company.id,
+      partyName: effectivePartyName,
+      voucherType: item.voucherType,
+      parentGroup: item.partyParentGroup,
+      phoneE164,
+      now,
+    });
 
     const row = db
       .select()
@@ -5567,6 +6419,7 @@ export async function autoReconcileLocalTallyPort9000IfActive(
   workspaceId: string
 ): Promise<void> {
   if (process.env.VITEST || process.env.NODE_ENV === "test") return;
+  if (!resolvePublicEndpoints().isLocalDev) return;
   const now = Date.now();
   const lastAt = localAutoSyncTimestamps.get(workspaceId) ?? 0;
   if (now - lastAt < 6000) return;

@@ -258,6 +258,13 @@ export function TallyConnectStudio({
     targetMode === "local"
       ? "/api/export/tally-connector?target=local"
       : "/api/export/tally-connector";
+  const installerDownloadHref = (() => {
+    const params = new URLSearchParams();
+    if (targetMode === "local") params.set("target", "local");
+    if (pairingCode) params.set("code", pairingCode);
+    const qs = params.toString();
+    return qs ? `/api/export/tally-installer?${qs}` : "/api/export/tally-installer";
+  })();
 
   const tallySsl = sslCertificates.find((c) => c.zone === "tally");
   const apiSsl = sslCertificates.find((c) => c.zone === "api");
@@ -1224,9 +1231,14 @@ export function TallyConnectStudio({
           subtitle="Recommended for Remote Cloud • Exports exact native Tally PDFs + auto-updates .tdl over-the-air"
           action={
             canManageTally ? (
-              <a href={connectorDownloadHref} className="rsl-btn-secondary py-1.5 text-xs">
-                Download Connector (.mjs)
-              </a>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <a href={installerDownloadHref} className="rsl-btn-primary py-1.5 text-xs">
+                  1-Click Windows Setup (.bat)
+                </a>
+                <a href={connectorDownloadHref} className="rsl-btn-secondary py-1.5 text-xs">
+                  Connector (.mjs)
+                </a>
+              </div>
             ) : undefined
           }
         >

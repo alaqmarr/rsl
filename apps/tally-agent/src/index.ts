@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -13,10 +14,12 @@ interface AgentStateFile {
   tallyPort: number;
   lastAlterId: number;
   companyAlterIds?: Record<string, number>;
+  exportedPdfAlterIds?: Record<string, number>;
   pairedAt: string;
 }
 
-const AGENT_VERSION = "2.2.0";
+const AGENT_VERSION = "2.3.0";
+const VOUCHER_CHUNK_SIZE = 20;
 const DEFAULT_CLOUD_URL = "https://app.rapidshiftlabs.in";
 const STATE_PATH =
   process.env.RSL_TALLY_AGENT_STATE ||
@@ -81,9 +84,28 @@ function loadState(): AgentStateFile | null {
   }
 }
 
+function hardenWindowsStatePermissions(filePath: string): void {
+  if (process.platform !== "win32") return;
+  try {
+    const currentUser = os.userInfo().username;
+    if (!currentUser) return;
+    execFileSync(
+      "icacls",
+      [filePath, "/inheritance:r", "/grant:r", `${currentUser}:(F)`, "SYSTEM:(F)"],
+      { stdio: "ignore", windowsHide: true }
+    );
+  } catch {
+    // Non-fatal on restricted home editions
+  }
+}
+
 function saveState(state: AgentStateFile): void {
-  fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(STATE_PATH, JSON.stringify(state, null, 2), { mode: 0o600 });
+  const dir = path.dirname(STATE_PATH);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const tmpPath = `${STATE_PATH}.tmp`;
+  fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2), { mode: 0o600 });
+  fs.renameSync(tmpPath, STATE_PATH);
+  hardenWindowsStatePermissions(STATE_PATH);
 }
 
 async function pairDevice(params: {
@@ -337,11 +359,12 @@ async function fetchTallyVouchersXml(
   }
 }
 
-async function exportNativeVoucherPdfs(
+async function exportNativeVoucherPdfsForBlocks(
   tallyHost: string,
   tallyPort: number,
-  xmlContent: string,
-  companyName: string | null
+  voucherBlocks: string[],
+  companyName: string | null,
+  exportedPdfAlterIds: Record<string, number>
 ): Promise<
   Array<{
     guid: string;
@@ -353,7 +376,6 @@ async function exportNativeVoucherPdfs(
     pdfBase64: string;
   }>
 > {
-  const blocks = xmlContent.match(/<VOUCHER(?:\s[^>]*)?>[\s\S]*?<\/VOUCHER>/gi) ?? [];
   const results: Array<{
     guid: string;
     masterId: string;
@@ -364,30 +386,35 @@ async function exportNativeVoucherPdfs(
     pdfBase64: string;
   }> = [];
 
-  for (const block of blocks.slice(0, 12)) {
-    const isCancelled = /<ISCANCELLED[^>]*>\s*Yes\s*<\/ISCANCELLED>/i.test(block);
-    const isOptional = /<ISOPTIONAL[^>]*>\s*Yes\s*<\/ISOPTIONAL>/i.test(block);
-    if (isCancelled || isOptional) continue;
-
-    const masterId = (block.match(/<MASTERID[^>]*>([\s\S]*?)<\/MASTERID>/i)?.[1] ?? "").replace(
-      /[^0-9]/g,
-      ""
-    );
-    const guid = unescapeXml(block.match(/<GUID[^>]*>([\s\S]*?)<\/GUID>/i)?.[1] ?? "");
-    const voucherNumber = unescapeXml(
-      block.match(/<VOUCHERNUMBER[^>]*>([\s\S]*?)<\/VOUCHERNUMBER>/i)?.[1] ?? ""
-    );
-    const voucherType = unescapeXml(
-      block.match(/<RSLBASEVCHTYPE[^>]*>([\s\S]*?)<\/RSLBASEVCHTYPE>/i)?.[1] ??
-        block.match(/<VOUCHERTYPENAME[^>]*>([\s\S]*?)<\/VOUCHERTYPENAME>/i)?.[1] ??
-        "Sales"
-    );
-    const alterId = Number(
-      (block.match(/<ALTERID[^>]*>\s*(\d+)\s*<\/ALTERID>/i)?.[1] ?? "0").trim()
-    );
-    if (!masterId || !guid || /purchase/i.test(voucherType)) continue;
-
+  for (const block of voucherBlocks) {
     try {
+      const isCancelled = /<ISCANCELLED[^>]*>\s*Yes\s*<\/ISCANCELLED>/i.test(block);
+      const isOptional = /<ISOPTIONAL[^>]*>\s*Yes\s*<\/ISOPTIONAL>/i.test(block);
+      if (isCancelled || isOptional) continue;
+
+      const masterId = (block.match(/<MASTERID[^>]*>([\s\S]*?)<\/MASTERID>/i)?.[1] ?? "").replace(
+        /[^0-9]/g,
+        ""
+      );
+      const guid = unescapeXml(block.match(/<GUID[^>]*>([\s\S]*?)<\/GUID>/i)?.[1] ?? "");
+      const voucherNumber = unescapeXml(
+        block.match(/<VOUCHERNUMBER[^>]*>([\s\S]*?)<\/VOUCHERNUMBER>/i)?.[1] ?? ""
+      );
+      const voucherType = unescapeXml(
+        block.match(/<RSLBASEVCHTYPE[^>]*>([\s\S]*?)<\/RSLBASEVCHTYPE>/i)?.[1] ??
+          block.match(/<VOUCHERTYPENAME[^>]*>([\s\S]*?)<\/VOUCHERTYPENAME>/i)?.[1] ??
+          "Sales"
+      );
+      const alterId = Number(
+        (block.match(/<ALTERID[^>]*>\s*(\d+)\s*<\/ALTERID>/i)?.[1] ?? "0").trim()
+      );
+      if (!masterId || !guid || /purchase/i.test(voucherType)) continue;
+
+      const cacheKey = `${companyName ?? "default"}::${guid}`;
+      if (alterId > 0 && exportedPdfAlterIds[cacheKey] === alterId) {
+        continue;
+      }
+
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 3000);
       const pdfResp = await fetch(`http://${tallyHost}:${tallyPort}`, {
@@ -409,13 +436,21 @@ async function exportNativeVoucherPdfs(
           alterId: Number.isFinite(alterId) ? alterId : 0,
           pdfBase64: buf.toString("base64"),
         });
+        if (alterId > 0) {
+          exportedPdfAlterIds[cacheKey] = alterId;
+        }
       }
     } catch {
-      // Skip non-fatal PDF export error
+      // Isolate single-voucher PDF errors so one bad voucher never halts sync (P0-02)
     }
   }
 
   return results;
+}
+
+function wrapVoucherBlocksAsEnvelope(blocks: string[], companyName: string | null): string {
+  const compXml = companyName ? `<SVCURRENTCOMPANY>${escapeXml(companyName)}</SVCURRENTCOMPANY>` : "";
+  return `<?xml version="1.0" encoding="UTF-8"?><ENVELOPE><BODY><DESC><STATICVARIABLES>${compXml}</STATICVARIABLES></DESC><DATA><TALLYMESSAGE>${blocks.join("\n")}</TALLYMESSAGE></DATA></BODY></ENVELOPE>`;
 }
 
 function extractMaxAlterId(xml: string): number {
@@ -569,15 +604,25 @@ async function main() {
   }
 
   if (!state) {
+    console.log("======================================================================");
+    console.log("  RapidShift Labs Tally Sync — First-Time Office PC Setup");
+    console.log("======================================================================");
+    console.log("  Easiest Option (No Commands Needed):");
+    console.log("    1. Sign in to RapidShift Labs -> Tally Prime -> Connect Tally");
+    console.log("    2. Click 'Download 1-Click Windows Setup (.bat)' and double-click it.");
+    console.log("");
+    console.log("  Manual Pairing Command:");
     console.log(
-      `Usage: pnpm --filter @rsl/tally-agent start -- --pair RSL-XXXXXX-XXXXXX --server ${DEFAULT_CLOUD_URL} --device "Accounts Office PC"`
+      `    node rsl-tally-connector.mjs --pair RSL-XXXX-XXXX --server ${DEFAULT_CLOUD_URL} --device "Accounts Office PC"`
     );
+    console.log("======================================================================");
     return;
   }
 
   if (flags.server) state.serverUrl = serverArg;
   if (flags["tally-host"]) state.tallyHost = tallyHost;
   if (flags["tally-port"]) state.tallyPort = tallyPort;
+  state.exportedPdfAlterIds ??= {};
 
   console.log(
     `[rsl-tally-agent] Watching Tally Prime at http://${state.tallyHost}:${state.tallyPort} -> ${state.serverUrl}`
@@ -614,32 +659,117 @@ async function main() {
       );
       if (!probe.reachable || !probe.xml) continue;
 
-      const hasVouchers = /<VOUCHER[\s>]/i.test(probe.xml);
-      if (!hasVouchers && !fullReconcilePass) continue;
+      const allBlocks = probe.xml.match(/<VOUCHER(?:\s[^>]*)?>[\s\S]*?<\/VOUCHER>/gi) ?? [];
+      const hasVouchers = allBlocks.length > 0;
+      // Circuit Breaker (P0-01): Never send a 0-voucher snapshot on company-close / Tally restart!
+      if (!hasVouchers) continue;
 
       const digest = crypto.createHash("sha256").update(probe.xml).digest("hex");
       const key = companyName || "__active__";
       if (lastDigestByCompany.get(key) === digest) continue;
-      lastDigestByCompany.set(key, digest);
 
-      const voucherPdfs = hasVouchers
-        ? await exportNativeVoucherPdfs(
+      state!.exportedPdfAlterIds ??= {};
+      let allChunksSucceeded = true;
+
+      if (allBlocks.length <= VOUCHER_CHUNK_SIZE) {
+        const voucherPdfs = await exportNativeVoucherPdfsForBlocks(
+          state!.tallyHost,
+          state!.tallyPort,
+          allBlocks,
+          probe.companyName,
+          state!.exportedPdfAlterIds
+        );
+        try {
+          await pushTallyXmlToCloud({
+            state: state!,
+            xmlContent: probe.xml,
+            companyName: probe.companyName,
+            fullSnapshot: fullReconcilePass && Boolean(probe.companyName),
+            voucherPdfs,
+          });
+        } catch (err) {
+          allChunksSucceeded = false;
+          console.error(
+            "[rsl-tally-agent] Batch failed; isolating per-voucher to bypass malformed voucher:",
+            err instanceof Error ? err.message : err
+          );
+          for (const singleBlock of allBlocks) {
+            await pushTallyXmlToCloud({
+              state: state!,
+              xmlContent: wrapVoucherBlocksAsEnvelope([singleBlock], probe.companyName),
+              companyName: probe.companyName,
+              fullSnapshot: false,
+              voucherPdfs: voucherPdfs.filter((p) => singleBlock.includes(p.guid)),
+            }).catch((vErr) =>
+              console.warn(
+                "[rsl-tally-agent] Skipped malformed voucher block:",
+                vErr instanceof Error ? vErr.message : vErr
+              )
+            );
+          }
+        }
+      } else {
+        // Process all vouchers in safe chunks of 20 without dropping vouchers 13+ (P0-02)
+        for (let offset = 0; offset < allBlocks.length; offset += VOUCHER_CHUNK_SIZE) {
+          const chunkBlocks = allBlocks.slice(offset, offset + VOUCHER_CHUNK_SIZE);
+          const chunkPdfs = await exportNativeVoucherPdfsForBlocks(
             state!.tallyHost,
             state!.tallyPort,
-            probe.xml,
-            probe.companyName
-          )
-        : [];
+            chunkBlocks,
+            probe.companyName,
+            state!.exportedPdfAlterIds
+          );
+          const chunkXml = wrapVoucherBlocksAsEnvelope(chunkBlocks, probe.companyName);
+          try {
+            await pushTallyXmlToCloud({
+              state: state!,
+              xmlContent: chunkXml,
+              companyName: probe.companyName,
+              fullSnapshot: false,
+              voucherPdfs: chunkPdfs,
+            });
+          } catch (chunkErr) {
+            allChunksSucceeded = false;
+            console.warn(
+              `[rsl-tally-agent] Chunk at offset ${offset} failed (${chunkErr instanceof Error ? chunkErr.message : chunkErr}); isolating per voucher...`
+            );
+            for (const singleBlock of chunkBlocks) {
+              await pushTallyXmlToCloud({
+                state: state!,
+                xmlContent: wrapVoucherBlocksAsEnvelope([singleBlock], probe.companyName),
+                companyName: probe.companyName,
+                fullSnapshot: false,
+                voucherPdfs: chunkPdfs.filter((p) => singleBlock.includes(p.guid)),
+              }).catch((vErr) =>
+                console.warn(
+                  "[rsl-tally-agent] Skipped malformed voucher block:",
+                  vErr instanceof Error ? vErr.message : vErr
+                )
+              );
+            }
+          }
+        }
 
-      await pushTallyXmlToCloud({
-        state: state!,
-        xmlContent: probe.xml,
-        companyName: probe.companyName,
-        fullSnapshot: fullReconcilePass && Boolean(probe.companyName),
-        voucherPdfs,
-      }).catch((err) =>
-        console.error("[rsl-tally-agent] Sync warning:", err instanceof Error ? err.message : err)
-      );
+        if (allChunksSucceeded && fullReconcilePass && probe.companyName) {
+          await pushTallyXmlToCloud({
+            state: state!,
+            xmlContent: probe.xml,
+            companyName: probe.companyName,
+            fullSnapshot: true,
+            voucherPdfs: [],
+          }).catch((err) => {
+            allChunksSucceeded = false;
+            console.error(
+              "[rsl-tally-agent] Snapshot reconcile warning:",
+              err instanceof Error ? err.message : err
+            );
+          });
+        }
+      }
+
+      if (allChunksSucceeded) {
+        lastDigestByCompany.set(key, digest);
+      }
     }
   };
 

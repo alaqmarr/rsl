@@ -1,6 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { buildGoogleOAuthAuthorizeUrl, type GoogleOAuthPurpose } from "@rsl/connections";
-import { getEnv, newId, resolveEndpointsFromHeaders, signHmac } from "@rsl/core";
+import {
+  buildGoogleOAuthAuthorizeUrl,
+  generateGoogleOAuthPkcePair,
+  type GoogleOAuthPurpose,
+} from "@rsl/connections";
+import {
+  getEnv,
+  isTrustedPlatformHost,
+  newId,
+  resolveEndpointsFromHeaders,
+  signHmac,
+} from "@rsl/core";
 import { canRolePerform } from "@rsl/rbac";
 import { getOptionalWebSession } from "@/lib/session";
 
@@ -19,6 +29,15 @@ function appendFeedbackQuery(baseUrl: string, pathWithOptionalQuery: string, kin
 }
 
 export async function GET(req: NextRequest) {
+  const rawHost =
+    (req.headers.get("x-forwarded-host")?.split(",")[0] || req.headers.get("host") || "").trim();
+  if (rawHost && !isTrustedPlatformHost(rawHost)) {
+    return NextResponse.json(
+      { ok: false, error: "Untrusted Host header rejected for OAuth redirect safety." },
+      { status: 400 }
+    );
+  }
+
   const endpoints = resolveEndpointsFromHeaders(req.headers);
   const appBaseUrl =
     endpoints.isLocalDev && endpoints.localBaseUrl
@@ -54,6 +73,7 @@ export async function GET(req: NextRequest) {
   }
 
   const redirectUri = `${appBaseUrl}/api/oauth/google/callback`;
+  const { codeVerifier, codeChallenge } = generateGoogleOAuthPkcePair();
   const stateObj = {
     nonce: newId("req", session.workspace.id),
     ws: session.workspace.id,
@@ -63,21 +83,33 @@ export async function GET(req: NextRequest) {
     exp: Date.now() + 10 * 60 * 1000,
   };
   const payloadB64 = Buffer.from(JSON.stringify(stateObj), "utf8").toString("base64url");
-  const sig = signHmac(payloadB64, getEnv().BETTER_AUTH_SECRET);
+  const secret = getEnv().BETTER_AUTH_SECRET;
+  const sig = signHmac(payloadB64, secret);
   const stateToken = `${payloadB64}.${sig}`;
+  const pkceSig = signHmac(codeVerifier, secret);
+  const pkceCookieVal = `${codeVerifier}.${pkceSig}`;
 
   try {
     const googleAuthorizeUrl = buildGoogleOAuthAuthorizeUrl({
       redirectUri,
       state: stateToken,
       purpose,
+      codeChallenge,
     });
 
+    const isSecure = appBaseUrl.startsWith("https://");
     const response = NextResponse.redirect(googleAuthorizeUrl);
     response.cookies.set("rsl_google_oauth_state", stateToken, {
       httpOnly: true,
       sameSite: "lax",
-      secure: appBaseUrl.startsWith("https://"),
+      secure: isSecure,
+      path: "/",
+      maxAge: 600,
+    });
+    response.cookies.set("rsl_google_oauth_pkce", pkceCookieVal, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: isSecure,
       path: "/",
       maxAge: 600,
     });

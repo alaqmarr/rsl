@@ -94,6 +94,7 @@ export default async function DatabaseStorageAndBackupsPage({
                   returnTo="/backups"
                   label="Connect to Google Drive"
                   size="sm"
+                  configured={googleOAuth.enableDriveOAuth}
                 />
               )}
               {activeDriveConn && (
@@ -276,7 +277,7 @@ export default async function DatabaseStorageAndBackupsPage({
                 </p>
                 {!googleOAuth.enableDriveOAuth && (
                   <p className="text-[11px] font-medium text-amber-900">
-                    Note: Platform Google OAuth credentials have not been saved yet under Staff Portal → OAuth &amp; API Credentials. Save them once in the Admin Portal to activate live Google Sign-In.
+                    1-click Google Drive sign-in is being enabled for this workspace. Meanwhile, you can download encrypted <code className="font-mono">.rslbackup</code> files directly to your computer below.
                   </p>
                 )}
               </div>
@@ -285,6 +286,7 @@ export default async function DatabaseStorageAndBackupsPage({
                 <ConnectToGoogleDriveButton
                   returnTo="/backups"
                   label="Connect to Google Drive"
+                  configured={googleOAuth.enableDriveOAuth}
                 />
               </div>
             </div>

@@ -110,17 +110,46 @@ export function platformLogsDb(): PlatformLogsDb {
   return platformLogsSingleton;
 }
 
-interface CachedHandle<T> {
+interface CachedHandle<T extends { $client: TenantDataDb["$client"] }> {
   db: T;
   close: () => void;
+}
+
+function disposeHandleSafely<T extends { $client: TenantDataDb["$client"] }>(
+  value: CachedHandle<T>,
+  reason: LRUCache.DisposeReason
+): void {
+  // Explicit deletes (restore, backup close, shutdown, crypto-shred) must release OS locks synchronously
+  if (reason === "delete" || reason === "set") {
+    value.close();
+    return;
+  }
+
+  // Evict / TTL expire: defer past current synchronous call stack and wait out active transactions
+  const attemptClose = (retriesLeft: number) => {
+    try {
+      const raw = value.db.$client;
+      if (raw.open && raw.inTransaction && retriesLeft > 0) {
+        const timer = setTimeout(() => attemptClose(retriesLeft - 1), 200);
+        timer.unref?.();
+        return;
+      }
+    } catch {
+      // Fall through to close
+    }
+    value.close();
+  };
+
+  const immediate = setImmediate(() => attemptClose(10));
+  immediate.unref?.();
 }
 
 const dataHandleCache = new LRUCache<string, CachedHandle<TenantDataDb>>({
   max: getEnv().TENANT_DB_MAX_OPEN,
   ttl: getEnv().TENANT_DB_IDLE_CLOSE_MS,
   updateAgeOnGet: true,
-  dispose: (value) => {
-    value.close();
+  dispose: (value, _key, reason) => {
+    disposeHandleSafely(value, reason);
   },
 });
 
@@ -128,8 +157,8 @@ const logsHandleCache = new LRUCache<string, CachedHandle<TenantLogsDb>>({
   max: getEnv().TENANT_DB_MAX_OPEN,
   ttl: getEnv().TENANT_DB_IDLE_CLOSE_MS,
   updateAgeOnGet: true,
-  dispose: (value) => {
-    value.close();
+  dispose: (value, _key, reason) => {
+    disposeHandleSafely(value, reason);
   },
 });
 

@@ -21,7 +21,10 @@ import {
   computeTallyWebhookLiveStatus,
   getOrCreateTallyWebhookEndpoint,
 } from "@rsl/tally";
-import { listWorkspaceSslCertificates } from "@rsl/tenancy";
+import {
+  getPublicGoogleOAuthStatus,
+  listWorkspaceSslCertificates,
+} from "@rsl/tenancy";
 import { AccessRestrictedState, PageHeader, SectionCard, StatusPill } from "@rsl/ui";
 import { ApiTokensHub } from "@/components/api-tokens-hub";
 import { CopyTextButton } from "@/components/client-utils";
@@ -55,6 +58,7 @@ export default async function UnifiedApiTokensPage({
     workspaceSlug: session.workspace.slug,
   });
   const sslCerts = listWorkspaceSslCertificates(session.workspace.id);
+  const googleOAuth = getPublicGoogleOAuthStatus();
 
   const canManageConnections = canRolePerform(
     session.roleSlug,
@@ -115,6 +119,7 @@ export default async function UnifiedApiTokensPage({
                 label="Connect to Google Drive"
                 variant="white"
                 size="sm"
+                configured={googleOAuth.enableDriveOAuth}
               />
             )}
             {canAccessConnections && (

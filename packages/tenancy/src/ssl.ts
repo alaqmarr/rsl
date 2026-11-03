@@ -36,43 +36,13 @@ export interface SslCertificateRecord {
   updatedAt: number;
 }
 
-let sslTableInitialized = false;
-
 function ensureSslCertificatesTable(): void {
-  const raw = controlDb().$client;
-  if (!sslTableInitialized) {
-    raw.exec(`
-      CREATE TABLE IF NOT EXISTS ssl_certificates (
-        id TEXT PRIMARY KEY NOT NULL,
-        workspace_id TEXT NOT NULL,
-        workspace_slug TEXT NOT NULL,
-        zone TEXT NOT NULL,
-        hostname TEXT NOT NULL UNIQUE,
-        wildcard_parent TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'queued',
-        provider TEXT NOT NULL DEFAULT 'auto',
-        coverage_mode TEXT NOT NULL DEFAULT 'wildcard_san',
-        serial_hex TEXT,
-        fingerprint_sha256 TEXT,
-        cert_path TEXT,
-        attempts INTEGER NOT NULL DEFAULT 0,
-        last_attempt_at INTEGER,
-        issued_at INTEGER,
-        expires_at INTEGER,
-        renew_after INTEGER,
-        last_error TEXT,
-        queued_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_ssl_certs_workspace ON ssl_certificates (workspace_id);
-      CREATE INDEX IF NOT EXISTS idx_ssl_certs_status_renew ON ssl_certificates (status, renew_after);
-    `);
-    sslTableInitialized = true;
-  }
+  // Managed via versioned CONTROL_MIGRATIONS (0008_ssl_sequences_accounting_and_verification_lockout)
+  controlDb();
 }
 
 export function resetSslTableCacheForTests(): void {
-  sslTableInitialized = false;
+  // Retained as no-op for test compatibility
 }
 
 interface RawSslRow {

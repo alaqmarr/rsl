@@ -156,6 +156,7 @@ export function getEnv(): AppEnv {
   if (isProd) {
     const requiredInProd: Array<keyof typeof parsed> = [
       "BETTER_AUTH_SECRET",
+      "ADMIN_AUTH_SECRET",
       "KMS_MASTER_KEY",
       "BACKUP_SIGNING_KEY",
       "API_KEY_PEPPER",

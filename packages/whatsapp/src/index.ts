@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { dispatchWorkspaceWebhookEvent } from "@rsl/api-keys";
 import {
@@ -11,8 +11,29 @@ import {
 import { decryptEnvelope, formatInr, newEntityId, newId, RslError } from "@rsl/core";
 import { controlSchema, tenantDataSchema, tenantLogsSchema } from "@rsl/database";
 import { defineAction } from "@rsl/logging";
-import { enqueueJob, markSendGuardOutcome, reserveSendGuard } from "@rsl/queue";
+import {
+  enqueueJob,
+  isRedisConfigured,
+  markSendGuardOutcome,
+  processDueSqliteOutboxForTenant,
+  registerJobProcessor,
+  reserveSendGuard,
+  type JobEnvelope,
+} from "@rsl/queue";
 import { controlDb, tenantDataDb, tenantLogsDb } from "@rsl/tenancy";
+
+function extractConnectionAccessToken(encryptedBlob: string): string {
+  const decrypted = decryptEnvelope(encryptedBlob);
+  try {
+    const parsed = JSON.parse(decrypted) as { accessToken?: unknown };
+    if (parsed && typeof parsed.accessToken === "string") {
+      return parsed.accessToken.trim();
+    }
+  } catch {
+    // Plaintext envelope fallback
+  }
+  return decrypted.trim();
+}
 
 export interface WhatsAppTemplateButton {
   type: "QUICK_REPLY" | "URL" | "PHONE_NUMBER";
@@ -325,7 +346,7 @@ export const createWhatsAppTemplate = defineAction({
 
     if (input.submitToMeta && wabaConn && wabaConn.status === "healthy") {
       try {
-        const token = decryptEnvelope(wabaConn.encryptedTokens);
+        const token = extractConnectionAccessToken(wabaConn.encryptedTokens);
         const components: Array<Record<string, unknown>> = [];
         if (input.headerType === "TEXT" && input.headerText?.trim()) {
           components.push({ type: "HEADER", format: "TEXT", text: input.headerText.trim() });
@@ -629,7 +650,7 @@ export const syncWhatsAppTemplatesWithMeta = defineAction({
       );
     }
 
-    const token = decryptEnvelope(conn.encryptedTokens);
+    const token = extractConnectionAccessToken(conn.encryptedTokens);
     const resp = await fetch(
       `https://graph.facebook.com/v21.0/${encodeURIComponent(conn.externalAccountId)}/message_templates?limit=100`,
       {
@@ -818,18 +839,7 @@ export async function executeWhatsAppTemplateSend(params: {
     return { sent: false, deduplicated: true, renderedPreview: rendered.fullPreviewText };
   }
 
-  // 5. Meter per-message usage (supports negative overdraft balances down to -₹200.00)
-  consumeUsage({
-    workspaceId: params.workspaceId,
-    serviceKey: params.serviceKey ?? "whatsapp.messaging",
-    quantity: 1,
-    unitCostPaise,
-    dedupeKey: params.idempotencyKey,
-    description: `WhatsApp template '${parsedTemplate.name}'${params.pdfDocument ? " + Tally PDF" : ""} to ${params.recipientName || phoneE164}`,
-    actorId: params.actorId,
-  });
-
-  // 5. Dispatch to Meta WhatsApp Business Cloud API if connected
+  // 5. Dispatch to Meta WhatsApp Business Cloud API BEFORE billing/confirming SendGuard (P0-03)
   let externalMessageId = `wamid.${newId("msg", params.workspaceId)}`;
   let deliveryStatus: "sent" | "queued" | "failed" = "sent";
 
@@ -860,57 +870,22 @@ export async function executeWhatsAppTemplateSend(params: {
     const phoneNumberId = wabaAsset?.externalId || wabaConn.externalAccountId;
     const started = Date.now();
     try {
-      const accessToken = decryptEnvelope(wabaConn.encryptedTokens);
-      const apiBody = {
-        messaging_product: "whatsapp",
-        recipient_type: "individual",
-        to: phoneE164.replace(/^\+/, ""),
-        type: "template",
-        template: {
-          name: parsedTemplate.name,
-          language: { code: parsedTemplate.language },
-          ...(rendered.metaComponents.length > 0 ? { components: rendered.metaComponents } : {}),
-        },
-      };
-
-      const resp = await fetch(
-        `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
+      const accessToken = extractConnectionAccessToken(wabaConn.encryptedTokens);
+      const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken);
+      if (!isSandbox && accessToken) {
+        const apiBody = {
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: phoneE164.replace(/^\+/, ""),
+          type: "template",
+          template: {
+            name: parsedTemplate.name,
+            language: { code: parsedTemplate.language },
+            ...(rendered.metaComponents.length > 0 ? { components: rendered.metaComponents } : {}),
           },
-          body: JSON.stringify(apiBody),
-        }
-      );
+        };
 
-      const latencyMs = Date.now() - started;
-      if (resp.ok) {
-        const resJson = (await resp.json()) as { messages?: Array<{ id: string }> };
-        if (resJson.messages?.[0]?.id) {
-          externalMessageId = resJson.messages[0].id;
-        }
-      }
-
-      logsDb
-        .insert(tenantLogsSchema.providerCalls)
-        .values({
-          id: newEntityId("req", params.workspaceId),
-          ts: Date.now(),
-          provider: "whatsapp",
-          operation: "messages.send_template",
-          method: "POST",
-          status: resp.status,
-          latencyMs,
-          correlationId: params.correlationId || newEntityId("req", params.workspaceId),
-        })
-        .run();
-
-      // If a Tally-format PDF document is requested and the chosen template header is not already DOCUMENT,
-      // automatically send the formatted Tally PDF document right alongside the WhatsApp notification!
-      if (params.pdfDocument?.url && parsedTemplate.headerType !== "DOCUMENT") {
-        await fetch(
+        const resp = await fetch(
           `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`,
           {
             method: "POST",
@@ -918,24 +893,85 @@ export async function executeWhatsAppTemplateSend(params: {
               Authorization: `Bearer ${accessToken}`,
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({
-              messaging_product: "whatsapp",
-              recipient_type: "individual",
-              to: phoneE164.replace(/^\+/, ""),
-              type: "document",
-              document: {
-                link: params.pdfDocument.url,
-                filename: params.pdfDocument.filename || "Tax-Invoice.pdf",
-                ...(params.pdfDocument.caption ? { caption: params.pdfDocument.caption } : {}),
-              },
-            }),
+            body: JSON.stringify(apiBody),
           }
-        ).catch(() => null);
+        );
+
+        const latencyMs = Date.now() - started;
+        logsDb
+          .insert(tenantLogsSchema.providerCalls)
+          .values({
+            id: newEntityId("req", params.workspaceId),
+            ts: Date.now(),
+            provider: "whatsapp",
+            operation: "messages.send_template",
+            method: "POST",
+            status: resp.status,
+            latencyMs,
+            correlationId: params.correlationId || newEntityId("req", params.workspaceId),
+          })
+          .run();
+
+        if (!resp.ok) {
+          markSendGuardOutcome({
+            workspaceId: params.workspaceId,
+            idempotencyKey: params.idempotencyKey,
+            state: "failed",
+          });
+          return {
+            sent: false,
+            skippedReason: `WhatsApp Cloud API returned HTTP ${resp.status}`,
+          };
+        }
+
+        const resJson = (await resp.json().catch(() => ({}))) as {
+          messages?: Array<{ id: string }>;
+        };
+        if (resJson.messages?.[0]?.id) {
+          externalMessageId = resJson.messages[0].id;
+        }
+
+        // If a Tally-format PDF document is requested and the chosen template header is not already DOCUMENT,
+        // automatically send the formatted Tally PDF document right alongside the WhatsApp notification!
+        if (params.pdfDocument?.url && parsedTemplate.headerType !== "DOCUMENT") {
+          await fetch(
+            `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                messaging_product: "whatsapp",
+                recipient_type: "individual",
+                to: phoneE164.replace(/^\+/, ""),
+                type: "document",
+                document: {
+                  link: params.pdfDocument.url,
+                  filename: params.pdfDocument.filename || "Tax-Invoice.pdf",
+                  ...(params.pdfDocument.caption ? { caption: params.pdfDocument.caption } : {}),
+                },
+              }),
+            }
+          ).catch(() => null);
+        }
       }
     } catch {
-      // Keep local thread updated even if external sandbox token is placeholder
+      // Keep local thread updated when running in offline/local sandbox environment
     }
   }
+
+  // 6. Meter per-message usage ONLY after provider send succeeded (supports overdraft down to -₹200.00)
+  consumeUsage({
+    workspaceId: params.workspaceId,
+    serviceKey: params.serviceKey ?? "whatsapp.messaging",
+    quantity: 1,
+    unitCostPaise,
+    dedupeKey: params.idempotencyKey,
+    description: `WhatsApp template '${parsedTemplate.name}'${params.pdfDocument ? " + Tally PDF" : ""} to ${params.recipientName || phoneE164}`,
+    actorId: params.actorId,
+  });
 
   markSendGuardOutcome({
     workspaceId: params.workspaceId,
@@ -1109,6 +1145,108 @@ export const removeWhatsAppUnsubscribedNumber = defineAction({
   },
 });
 
+const BROADCAST_CHUNK_SIZE = 50;
+let broadcastProcessorRegistered = false;
+
+export async function executeWhatsAppBroadcastChunkJob(envelope: JobEnvelope): Promise<void> {
+  const payload = envelope.payload as {
+    broadcastId?: string;
+    templateId?: string;
+    templateName?: string;
+    broadcastName?: string;
+    unitCostPaise?: number;
+    recipients?: Array<{ phoneE164: string; name?: string }>;
+  };
+
+  if (!payload.broadcastId || !payload.templateId || !Array.isArray(payload.recipients)) {
+    return;
+  }
+
+  const dataDb = tenantDataDb({ workspaceId: envelope.tenantId });
+  const bcast = dataDb
+    .select()
+    .from(tenantDataSchema.broadcasts)
+    .where(eq(tenantDataSchema.broadcasts.id, payload.broadcastId))
+    .get();
+  if (!bcast) return;
+
+  const unitCostPaise = payload.unitCostPaise ?? 85;
+  let chunkSent = 0;
+  let chunkFailed = 0;
+
+  for (const recipient of payload.recipients) {
+    const res = await executeWhatsAppTemplateSend({
+      workspaceId: envelope.tenantId,
+      templateIdOrName: payload.templateId,
+      recipientPhone: recipient.phoneE164,
+      recipientName: recipient.name,
+      variables: {
+        partyName: recipient.name || recipient.phoneE164,
+      },
+      idempotencyKey: `bcast:${payload.broadcastId}:${recipient.phoneE164}`,
+      actorId: envelope.actor.id,
+      serviceKey: "whatsapp.messaging",
+      correlationId: envelope.correlationId,
+    });
+
+    if (res.sent || res.deduplicated) {
+      if (res.sent) chunkSent++;
+    } else {
+      chunkFailed++;
+    }
+  }
+
+  const now = Date.now();
+  dataDb
+    .update(tenantDataSchema.broadcasts)
+    .set({
+      sentCount: sql`${tenantDataSchema.broadcasts.sentCount} + ${chunkSent}`,
+      deliveredCount: sql`${tenantDataSchema.broadcasts.deliveredCount} + ${chunkSent}`,
+      failedCount: sql`${tenantDataSchema.broadcasts.failedCount} + ${chunkFailed}`,
+      actualCostPaise: sql`${tenantDataSchema.broadcasts.actualCostPaise} + ${chunkSent * unitCostPaise}`,
+    })
+    .where(eq(tenantDataSchema.broadcasts.id, payload.broadcastId))
+    .run();
+
+  const updated = dataDb
+    .select()
+    .from(tenantDataSchema.broadcasts)
+    .where(eq(tenantDataSchema.broadcasts.id, payload.broadcastId))
+    .get();
+
+  if (
+    updated &&
+    updated.status !== "completed" &&
+    updated.sentCount + updated.failedCount >= updated.totalRecipients
+  ) {
+    dataDb
+      .update(tenantDataSchema.broadcasts)
+      .set({
+        status: "completed",
+        completedAt: now,
+      })
+      .where(eq(tenantDataSchema.broadcasts.id, payload.broadcastId))
+      .run();
+
+    void dispatchWorkspaceWebhookEvent(envelope.tenantId, "whatsapp.broadcast.completed", {
+      broadcastId: updated.id,
+      name: updated.name,
+      templateName: payload.templateName ?? payload.templateId,
+      recipientCount: updated.sentCount,
+      failedCount: updated.failedCount,
+      costPaise: updated.actualCostPaise,
+    }).catch(() => 0);
+  }
+}
+
+export function ensureWhatsAppBroadcastProcessorRegistered(): void {
+  if (broadcastProcessorRegistered) return;
+  registerJobProcessor("whatsapp.broadcast.chunk", executeWhatsAppBroadcastChunkJob);
+  broadcastProcessorRegistered = true;
+}
+
+ensureWhatsAppBroadcastProcessorRegistered();
+
 export const launchWhatsAppBroadcast = defineAction({
   key: "whatsapp.broadcast.launched",
   permission: "whatsapp:broadcast",
@@ -1119,6 +1257,7 @@ export const launchWhatsAppBroadcast = defineAction({
   summarize: (input, out?: { recipientCount: number }) =>
     `Launched WhatsApp broadcast '${input.name}' to ${out?.recipientCount ?? 0} opted-in contacts`,
   handler: async (ctx, input) => {
+    ensureWhatsAppBroadcastProcessorRegistered();
     const dataDb = tenantDataDb(ctx);
     const logsDb = tenantLogsDb(ctx);
 
@@ -1133,6 +1272,10 @@ export const launchWhatsAppBroadcast = defineAction({
     }
 
     const optIns = dataDb.select().from(tenantDataSchema.optIns).all();
+    const contacts = dataDb.select().from(tenantDataSchema.contacts).all();
+    const contactNameByPhone = new Map(
+      contacts.filter((c) => c.phoneE164).map((c) => [c.phoneE164!, c.name])
+    );
     const suppressions = logsDb
       .select()
       .from(tenantLogsSchema.suppressions)
@@ -1140,7 +1283,12 @@ export const launchWhatsAppBroadcast = defineAction({
       .all();
 
     const suppressedSet = new Set(suppressions.map((s) => s.identifier));
-    const eligibleRecipients = optIns.filter((o) => !suppressedSet.has(o.phoneE164));
+    const seenPhones = new Set<string>();
+    const eligibleRecipients = optIns.filter((o) => {
+      if (suppressedSet.has(o.phoneE164) || seenPhones.has(o.phoneE164)) return false;
+      seenPhones.add(o.phoneE164);
+      return true;
+    });
 
     if (eligibleRecipients.length === 0) {
       throw new RslError(
@@ -1164,78 +1312,68 @@ export const launchWhatsAppBroadcast = defineAction({
     const broadcastId = newEntityId("bcst", ctx.workspaceId);
     const now = Date.now();
 
-    consumeUsage({
-      workspaceId: ctx.workspaceId,
-      serviceKey: "whatsapp.broadcast",
-      quantity: eligibleRecipients.length,
-      unitCostPaise,
-      dedupeKey: `broadcast:${broadcastId}`,
-      description: `WhatsApp Broadcast '${input.name.trim()}' (${eligibleRecipients.length} contacts)`,
-      actorId: ctx.actorId,
-    });
-
-    let sentCount = 0;
-    for (const recipient of eligibleRecipients) {
-      const guardKey = `bcast:${broadcastId}:${recipient.phoneE164}`;
-      const guard = reserveSendGuard({
-        workspaceId: ctx.workspaceId,
-        idempotencyKey: guardKey,
-        channel: "whatsapp",
-        recipient: recipient.phoneE164,
-      });
-      if (guard.allowed) {
-        sentCount++;
-        markSendGuardOutcome({
-          workspaceId: ctx.workspaceId,
-          idempotencyKey: guardKey,
-          state: "confirmed",
-          externalId: `wa_${newId()}`,
-        });
-      }
-    }
-
     dataDb
       .insert(tenantDataSchema.broadcasts)
       .values({
         id: broadcastId,
         name: input.name.trim(),
         templateId: template.id,
-        status: "completed",
+        status: "sending",
         totalRecipients: eligibleRecipients.length,
-        sentCount,
-        deliveredCount: sentCount,
+        sentCount: 0,
+        deliveredCount: 0,
         readCount: 0,
         repliedCount: 0,
         failedCount: 0,
         estimatedCostPaise: totalCostPaise,
-        actualCostPaise: sentCount * unitCostPaise,
+        actualCostPaise: 0,
         scheduledAt: now,
-        completedAt: now,
+        completedAt: null,
         createdAt: now,
       })
       .run();
 
-    await enqueueJob({
-      queue: "broadcast.fanout",
-      jobType: "whatsapp.broadcast.chunk",
-      tenantId: ctx.workspaceId,
-      correlationId: ctx.correlationId,
-      requestId: ctx.requestId,
-      actorType: ctx.actorType,
-      actorId: ctx.actorId,
-      idempotencyKey: `bcast_job:${broadcastId}`,
-      payload: { broadcastId, recipientCount: sentCount },
-    });
+    for (let offset = 0; offset < eligibleRecipients.length; offset += BROADCAST_CHUNK_SIZE) {
+      const chunkIndex = Math.floor(offset / BROADCAST_CHUNK_SIZE);
+      const slice = eligibleRecipients.slice(offset, offset + BROADCAST_CHUNK_SIZE);
+      await enqueueJob({
+        queue: "broadcast.fanout",
+        jobType: "whatsapp.broadcast.chunk",
+        tenantId: ctx.workspaceId,
+        correlationId: ctx.correlationId,
+        requestId: ctx.requestId,
+        actorType: ctx.actorType,
+        actorId: ctx.actorId,
+        idempotencyKey: `bcast_chunk:${broadcastId}:${chunkIndex}`,
+        payload: {
+          broadcastId,
+          broadcastName: input.name.trim(),
+          templateId: template.id,
+          templateName: template.name,
+          unitCostPaise,
+          recipients: slice.map((r) => ({
+            phoneE164: r.phoneE164,
+            name: contactNameByPhone.get(r.phoneE164) ?? undefined,
+          })),
+        },
+      });
+    }
 
-    void dispatchWorkspaceWebhookEvent(ctx.workspaceId, "whatsapp.broadcast.completed", {
+    if (!isRedisConfigured()) {
+      await processDueSqliteOutboxForTenant(ctx.workspaceId);
+    }
+
+    const finalRow = dataDb
+      .select()
+      .from(tenantDataSchema.broadcasts)
+      .where(eq(tenantDataSchema.broadcasts.id, broadcastId))
+      .get();
+
+    return {
       broadcastId,
-      name: input.name.trim(),
-      templateName: template.name,
-      recipientCount: sentCount,
-      costPaise: sentCount * unitCostPaise,
-    }).catch(() => 0);
-
-    return { broadcastId, recipientCount: sentCount, costPaise: sentCount * unitCostPaise };
+      recipientCount: finalRow?.sentCount ?? eligibleRecipients.length,
+      costPaise: finalRow?.actualCostPaise ?? totalCostPaise,
+    };
   },
 });
 

@@ -169,6 +169,45 @@ export function parseClientSubdomainFromHost(
   return { hostname, workspaceSlug: null, zone: "custom" };
 }
 
+function extractConfiguredHostnames(env: ReturnType<typeof getEnv>): Set<string> {
+  const allowed = new Set<string>();
+  for (const rawUrl of [env.APP_URL, env.ADMIN_URL, env.DOCS_URL, env.SETUP_URL, env.BETTER_AUTH_URL]) {
+    if (!rawUrl) continue;
+    try {
+      const host = new URL(rawUrl).hostname.toLowerCase();
+      if (host) allowed.add(host);
+    } catch {
+      // Ignore malformed optional override
+    }
+  }
+  return allowed;
+}
+
+export function isTrustedPlatformHost(
+  rawHost: string | null | undefined,
+  explicitPrimaryDomain?: string
+): boolean {
+  if (!rawHost || !rawHost.trim()) return true;
+  const firstHost = firstHeaderToken(rawHost);
+  if (!firstHost) return true;
+  if (isLoopbackUrlOrHost(firstHost)) return true;
+
+  const env = getEnv();
+  const parsed = parseClientSubdomainFromHost(firstHost, explicitPrimaryDomain ?? env.PRIMARY_DOMAIN);
+  if (!parsed.hostname) return false;
+  if (
+    parsed.zone === "platform" ||
+    parsed.zone === "workspace" ||
+    parsed.zone === "tally" ||
+    parsed.zone === "api" ||
+    parsed.zone === "local"
+  ) {
+    return true;
+  }
+
+  return extractConfiguredHostnames(env).has(parsed.hostname);
+}
+
 export function resolvePublicEndpoints(opts: ResolveEndpointsOptions = {}): ResolvedPublicEndpoints {
   const env = getEnv();
   const primaryDomain = cleanDomain(env.PRIMARY_DOMAIN, "rapidshiftlabs.in");
@@ -188,8 +227,10 @@ export function resolvePublicEndpoints(opts: ResolveEndpointsOptions = {}): Reso
   const rawIncomingHost =
     firstHeaderToken(opts.forwardedHostHeader) || firstHeaderToken(opts.hostHeader);
   const rawProto = firstHeaderToken(opts.forwardedProtoHeader);
-  const incomingIsLocal = rawIncomingHost ? isLoopbackUrlOrHost(rawIncomingHost) : false;
-  const parsedHost = parseClientSubdomainFromHost(rawIncomingHost, primaryDomain);
+  const trustedHost = isTrustedPlatformHost(rawIncomingHost, primaryDomain);
+  const safeIncomingHost = trustedHost ? rawIncomingHost : "";
+  const incomingIsLocal = safeIncomingHost ? isLoopbackUrlOrHost(safeIncomingHost) : false;
+  const parsedHost = parseClientSubdomainFromHost(safeIncomingHost, primaryDomain);
 
   const effectiveSlug = cleanSubdomain(
     opts.workspaceSlug || parsedHost.workspaceSlug || "",
@@ -197,12 +238,12 @@ export function resolvePublicEndpoints(opts: ResolveEndpointsOptions = {}): Reso
   );
 
   let cloudBaseUrl = canonicalAppUrl;
-  if (rawIncomingHost && !incomingIsLocal) {
+  if (safeIncomingHost && !incomingIsLocal) {
     const proto = rawProto === "http" || rawProto === "https" ? rawProto : "https";
     if (parsedHost.zone === "tally" || parsedHost.zone === "api") {
       cloudBaseUrl = canonicalAppUrl;
     } else {
-      cloudBaseUrl = `${proto}://${rawIncomingHost}`;
+      cloudBaseUrl = `${proto}://${safeIncomingHost}`;
     }
   } else if (env.APP_URL && !isLoopbackUrlOrHost(env.APP_URL)) {
     cloudBaseUrl = stripTrailingSlash(env.APP_URL);
@@ -222,14 +263,14 @@ export function resolvePublicEndpoints(opts: ResolveEndpointsOptions = {}): Reso
     ? `https://${explicitTallySub}.${primaryDomain}`
     : effectiveSlug
       ? `https://${effectiveSlug}.${tallyZone}.${primaryDomain}`
-      : parsedHost.zone === "tally" && rawIncomingHost
-        ? `https://${rawIncomingHost}`
+      : parsedHost.zone === "tally" && safeIncomingHost
+        ? `https://${safeIncomingHost}`
         : `https://${tallyZone}.${primaryDomain}`;
 
   const apiCloudBaseUrl = effectiveSlug
     ? `https://${effectiveSlug}.${apiZone}.${primaryDomain}`
-    : parsedHost.zone === "api" && rawIncomingHost
-      ? `https://${rawIncomingHost}`
+    : parsedHost.zone === "api" && safeIncomingHost
+      ? `https://${safeIncomingHost}`
       : `https://${apiZone}.${primaryDomain}`;
 
   const workspaceSubdomainUrl = effectiveSlug
@@ -252,15 +293,15 @@ export function resolvePublicEndpoints(opts: ResolveEndpointsOptions = {}): Reso
       : canonicalSetupUrl;
 
   let localBaseUrl: string | null = null;
-  if (rawIncomingHost && incomingIsLocal) {
+  if (safeIncomingHost && incomingIsLocal) {
     const proto = rawProto === "https" ? "https" : "http";
-    localBaseUrl = `${proto}://${rawIncomingHost}`;
+    localBaseUrl = `${proto}://${safeIncomingHost}`;
   } else if (env.APP_URL && isLoopbackUrlOrHost(env.APP_URL)) {
     localBaseUrl = stripTrailingSlash(env.APP_URL);
   }
 
   const isLocalDev = Boolean(
-    (rawIncomingHost && incomingIsLocal) || (!rawIncomingHost && isLoopbackUrlOrHost(env.APP_URL))
+    (safeIncomingHost && incomingIsLocal) || (!safeIncomingHost && isLoopbackUrlOrHost(env.APP_URL))
   );
 
   const effectiveAppBaseUrl =

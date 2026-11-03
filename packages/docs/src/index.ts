@@ -5,10 +5,10 @@ import matter from "gray-matter";
 import { z } from "zod";
 import { SERVICE_CATALOG } from "@rsl/billing";
 import { ERROR_CATALOG, getEnv, newEntityId } from "@rsl/core";
-import { controlSchema } from "@rsl/database";
+import { controlSchema, platformLogsSchema } from "@rsl/database";
 import { ACTION_CATALOG, REGISTERED_API_ROUTES, type RegisteredApiRoute } from "@rsl/logging";
 import { PERMISSION_CATALOG, SYSTEM_ROLES } from "@rsl/rbac";
-import { controlDb } from "@rsl/tenancy";
+import { controlDb, platformLogsDb } from "@rsl/tenancy";
 
 export const DocFrontmatterSchema = z.object({
   title: z.string().min(3),
@@ -419,7 +419,7 @@ export function buildDocsSearchIndex(): { indexedItems: number; dbPath: string }
     for (const errItem of errors) {
       insertStmt.run(
         "error",
-        `/errors#${errItem.code}`,
+        `/errors/${errItem.code}`,
         `${errItem.code} — ${errItem.userMessage}`,
         errItem.remediation,
         `${errItem.code} ${errItem.title} ${errItem.userMessage} ${errItem.remediation}`
@@ -477,6 +477,9 @@ function isDocsSearchIndexStale(dbPath: string): boolean {
   }
 }
 
+let searchLogWindowStartMs = 0;
+let searchLogWindowCount = 0;
+
 export function searchDocs(query: string, surface: "public" | "help" | "admin" = "public"): DocsSearchHit[] {
   const cleaned = query.trim();
   if (!cleaned) return [];
@@ -512,17 +515,26 @@ export function searchDocs(query: string, surface: "public" | "help" | "admin" =
     }
   }
 
+  // Decoupled from control.db: log into dedicated platform_logs.db with public burst cap (P1-05)
   try {
-    controlDb()
-      .insert(controlSchema.docsSearchLogs)
-      .values({
-        id: newEntityId("req", "docs"),
-        query: cleaned.slice(0, 160),
-        resultCount: results.length,
-        surface,
-        createdAt: Date.now(),
-      })
-      .run();
+    const now = Date.now();
+    if (now - searchLogWindowStartMs > 1_000) {
+      searchLogWindowStartMs = now;
+      searchLogWindowCount = 0;
+    }
+    searchLogWindowCount += 1;
+    if (surface !== "public" || searchLogWindowCount <= 25) {
+      platformLogsDb()
+        .insert(platformLogsSchema.docsSearchLogs)
+        .values({
+          id: newEntityId("req", "docs"),
+          query: cleaned.slice(0, 160),
+          resultCount: results.length,
+          surface,
+          createdAt: now,
+        })
+        .run();
+    }
   } catch {
     // Non-blocking search analytics
   }

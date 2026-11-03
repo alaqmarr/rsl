@@ -33,7 +33,10 @@ import {
   getNativeTallyVoucherPdf,
   sweepDueTallyPaymentReminders,
 } from "@rsl/tally";
-import { executeWhatsAppTemplateSend } from "@rsl/whatsapp";
+import {
+  ensureWhatsAppBroadcastProcessorRegistered,
+  executeWhatsAppTemplateSend,
+} from "@rsl/whatsapp";
 
 const env = getEnv();
 
@@ -65,6 +68,7 @@ function resolveWorkerHealthPort(): number {
 
 function registerStandardJobHandlers() {
   ensureSslProvisionProcessorRegistered();
+  ensureWhatsAppBroadcastProcessorRegistered();
 
   // 1. Automatic Tally-to-WhatsApp Bill & Receipt Worker Processor
   registerJobProcessor("tally.whatsapp.automation", async (envelope) => {
@@ -281,7 +285,7 @@ async function runScheduledMaintenance() {
         {}
       );
       refreshTenantDiskMetrics(tenant.tenantId);
-      sweepDueTallyPaymentReminders({
+      await sweepDueTallyPaymentReminders({
         workspaceId: tenant.tenantId,
         actorId: "worker_reminders",
       });

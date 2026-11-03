@@ -330,6 +330,7 @@ export const tallyParties = sqliteTable("tally_parties", {
     .notNull()
     .references(() => tallyCompanies.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
+  parentGroup: text("parent_group").notNull().default("Sundry Debtors"),
   phoneE164: text("phone_e164"),
   gstin: text("gstin"),
   closingBalancePaise: integer("closing_balance_paise").notNull().default(0),
@@ -341,6 +342,7 @@ export const tallyVouchers = sqliteTable(
   {
     id: text("id").primaryKey(),
     guid: text("guid").notNull().unique(),
+    masterId: text("master_id"),
     companyId: text("company_id")
       .notNull()
       .references(() => tallyCompanies.id, { onDelete: "cascade" }),
@@ -350,6 +352,9 @@ export const tallyVouchers = sqliteTable(
     partyPhoneE164: text("party_phone_e164"),
     amountPaise: integer("amount_paise").notNull(),
     paidAmountPaise: integer("paid_amount_paise").notNull().default(0),
+    originalCurrency: text("original_currency").notNull().default("INR"),
+    originalAmountMinor: integer("original_amount_minor"),
+    exchangeRateMicros: integer("exchange_rate_micros"),
     voucherDate: integer("voucher_date").notNull(),
     dueDate: integer("due_date"),
     paymentStatus: text("payment_status").notNull().default("unpaid"), // unpaid | partial | paid | cancelled
@@ -364,6 +369,25 @@ export const tallyVouchers = sqliteTable(
     index("idx_vouchers_type_status").on(t.voucherType, t.paymentStatus),
     index("idx_vouchers_due_date").on(t.dueDate),
   ]
+);
+
+export const tallyVoucherPdfs = sqliteTable(
+  "tally_voucher_pdfs",
+  {
+    voucherId: text("voucher_id").primaryKey(),
+    voucherGuid: text("voucher_guid").notNull(),
+    voucherNumber: text("voucher_number").notNull().default(""),
+    companyName: text("company_name").notNull().default("Primary Tally Company"),
+    filename: text("filename").notNull(),
+    pdfBase64: text("pdf_base64").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    sha256: text("sha256").notNull(),
+    alterId: integer("alter_id").notNull().default(0),
+    masterId: text("master_id"),
+    capturedFrom: text("captured_from").notNull().default("tally_native"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [index("idx_tally_voucher_pdfs_guid").on(t.voucherGuid)]
 );
 
 export const syncRuns = sqliteTable("sync_runs", {
@@ -385,9 +409,11 @@ export const outbox = sqliteTable(
     jobType: text("job_type").notNull(),
     idempotencyKey: text("idempotency_key").notNull().unique(),
     envelopeJson: text("envelope_json").notNull(),
-    status: text("status").notNull().default("pending"), // pending | enqueued | completed | failed
+    status: text("status").notNull().default("pending"), // pending | processing | enqueued | completed | failed
     attempts: integer("attempts").notNull().default(0),
     nextRunAt: integer("next_run_at").notNull(),
+    lockedAt: integer("locked_at"),
+    lockedBy: text("locked_by"),
     lastError: text("last_error"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),

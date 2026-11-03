@@ -756,23 +756,42 @@ export const verifyExternalConnectionHealth = defineAction({
 
 export type GoogleOAuthPurpose = "google_drive" | "google_business";
 
+export function generateGoogleOAuthPkcePair(): {
+  codeVerifier: string;
+  codeChallenge: string;
+} {
+  const codeVerifier = crypto.randomBytes(32).toString("base64url");
+  const codeChallenge = crypto
+    .createHash("sha256")
+    .update(codeVerifier, "ascii")
+    .digest("base64url");
+  return { codeVerifier, codeChallenge };
+}
+
+export function isGoogleOAuthPurposeConfigured(purpose: GoogleOAuthPurpose = "google_drive"): boolean {
+  const cfg = getPlatformGoogleOAuthConfig();
+  if (!cfg.isReady) return false;
+  return purpose === "google_drive" ? cfg.enableDriveOAuth : cfg.enableGbpOAuth;
+}
+
 export function buildGoogleOAuthAuthorizeUrl(params: {
   redirectUri: string;
   state: string;
   purpose: GoogleOAuthPurpose;
+  codeChallenge?: string;
 }): string {
   const cfg = getPlatformGoogleOAuthConfig();
   if (!cfg.isReady) {
     throw new RslError(
       "RSL-VAL-1001",
-      "Google OAuth 2.0 is not configured yet on the Staff Portal. Ask your Super Admin to save the Google OAuth Web Client ID & Secret under Staff Portal → OAuth & API Credentials."
+      "Google 1-click sign-in is pending platform setup. Please contact your workspace administrator or try again shortly."
     );
   }
   if (params.purpose === "google_drive" && !cfg.enableDriveOAuth) {
-    throw new RslError("RSL-VAL-1001", "Google Drive 1-click OAuth is currently disabled by platform admin.");
+    throw new RslError("RSL-VAL-1001", "Google Drive 1-click sign-in is currently turned off for this platform.");
   }
   if (params.purpose === "google_business" && !cfg.enableGbpOAuth) {
-    throw new RslError("RSL-VAL-1001", "Google Business Profile 1-click OAuth is currently disabled by platform admin.");
+    throw new RslError("RSL-VAL-1001", "Google Business Profile 1-click sign-in is currently turned off for this platform.");
   }
 
   const scopes =
@@ -799,6 +818,10 @@ export function buildGoogleOAuthAuthorizeUrl(params: {
   url.searchParams.set("prompt", "consent select_account");
   url.searchParams.set("include_granted_scopes", "true");
   url.searchParams.set("state", params.state);
+  if (params.codeChallenge) {
+    url.searchParams.set("code_challenge", params.codeChallenge);
+    url.searchParams.set("code_challenge_method", "S256");
+  }
   return url.toString();
 }
 
@@ -856,7 +879,22 @@ export async function refreshGoogleConnectionIfNeeded(
   });
 
   if (!resp.ok) {
-    return stored.accessToken || null;
+    const errBody = (await resp.json().catch(() => ({}))) as {
+      error?: string;
+      error_description?: string;
+    };
+    const meta = parseMetadataSafe(conn.metadataJson);
+    meta.lastLiveCheckMessage = `Google session expired or was revoked (${errBody.error_description || errBody.error || `HTTP ${resp.status}`}). Click 'Connect to Google Drive' to reconnect in one click.`;
+    db.update(controlSchema.connections)
+      .set({
+        status: "needs_reauth",
+        metadataJson: JSON.stringify(meta),
+        lastHealthCheckAt: now,
+        updatedAt: now,
+      })
+      .where(eq(controlSchema.connections.id, conn.id))
+      .run();
+    return null;
   }
 
   const data = (await resp.json()) as {
@@ -865,7 +903,19 @@ export async function refreshGoogleConnectionIfNeeded(
     refresh_token?: string;
   };
   if (!data.access_token) {
-    return stored.accessToken || null;
+    const meta = parseMetadataSafe(conn.metadataJson);
+    meta.lastLiveCheckMessage =
+      "Google refresh did not return a fresh access token. Click 'Connect to Google Drive' to reconnect.";
+    db.update(controlSchema.connections)
+      .set({
+        status: "needs_reauth",
+        metadataJson: JSON.stringify(meta),
+        lastHealthCheckAt: now,
+        updatedAt: now,
+      })
+      .where(eq(controlSchema.connections.id, conn.id))
+      .run();
+    return null;
   }
 
   const nextRefresh = data.refresh_token || stored.refreshToken;
@@ -965,6 +1015,7 @@ export async function completeGoogleOAuthConnection(params: {
   code: string;
   redirectUri: string;
   purpose: GoogleOAuthPurpose;
+  codeVerifier?: string;
 }): Promise<{
   connectionId: string;
   email: string;
@@ -976,7 +1027,7 @@ export async function completeGoogleOAuthConnection(params: {
   if (!cfg.isReady) {
     throw new RslError(
       "RSL-VAL-1001",
-      "Google OAuth credentials are not configured in the platform database."
+      "Google 1-click sign-in is pending platform setup. Please try again shortly."
     );
   }
 
@@ -986,6 +1037,7 @@ export async function completeGoogleOAuthConnection(params: {
     client_secret: cfg.clientSecret,
     redirect_uri: params.redirectUri,
     grant_type: "authorization_code",
+    ...(params.codeVerifier ? { code_verifier: params.codeVerifier } : {}),
   });
 
   const tokenResp = await fetch("https://oauth2.googleapis.com/token", {

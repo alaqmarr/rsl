@@ -12,12 +12,16 @@ import {
   getNativeTallyVoucherPdf,
 } from "@rsl/tally";
 import { tenantDataDb } from "@rsl/tenancy";
-import { executeWhatsAppTemplateSend } from "@rsl/whatsapp";
+import {
+  ensureWhatsAppBroadcastProcessorRegistered,
+  executeWhatsAppTemplateSend,
+} from "@rsl/whatsapp";
 
 let tallyAutomationRegistered = false;
 
 export function ensureTallyAutomationProcessorRegistered(): void {
   ensureSslProvisionProcessorRegistered();
+  ensureWhatsAppBroadcastProcessorRegistered();
   if (tallyAutomationRegistered) return;
 
   registerJobProcessor("tally.whatsapp.automation", async (envelope) => {

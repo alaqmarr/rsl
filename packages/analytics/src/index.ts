@@ -866,7 +866,7 @@ export function getPlatformAdminAnalytics() {
     .limit(30)
     .all();
 
-  const zeroResultSearches = rawCtrl
+  const zeroResultSearches = pLogs.$client
     .prepare(
       `SELECT query, COUNT(*) AS searches, MAX(created_at) AS lastSearchedAt
        FROM docs_search_logs

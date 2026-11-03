@@ -52,6 +52,7 @@ export const verifications = sqliteTable("verifications", {
   id: text("id").primaryKey(),
   identifier: text("identifier").notNull(),
   valueHash: text("value_hash").notNull(),
+  failedAttempts: integer("failed_attempts").notNull().default(0),
   expiresAt: integer("expires_at").notNull(),
   createdAt: integer("created_at").notNull(),
 });
@@ -258,7 +259,10 @@ export const invoices = sqliteTable("invoices", {
   workspaceId: text("workspace_id")
     .notNull()
     .references(() => workspaces.id, { onDelete: "cascade" }),
-  invoiceNumber: text("invoice_number").notNull().unique(), // sequential GST invoice e.g. RSL/26-27/0001
+  invoiceNumber: text("invoice_number").notNull().unique(), // sequential GST invoice e.g. RSL/26-27/0001, ADV/26-27/0001, CN/26-27/0001
+  docType: text("doc_type").notNull().default("tax_invoice"), // tax_invoice | advance_receipt | credit_note
+  linkedInvoiceId: text("linked_invoice_id"),
+  externalRefKey: text("external_ref_key"),
   financialYear: text("financial_year").notNull(),
   description: text("description").notNull(),
   subtotalPaise: integer("subtotal_paise").notNull(),
@@ -272,6 +276,15 @@ export const invoices = sqliteTable("invoices", {
   issuedAt: integer("issued_at").notNull(),
   paidAt: integer("paid_at"),
 });
+
+export const invoiceSequences = sqliteTable(
+  "invoice_sequences",
+  {
+    seriesKey: text("series_key").primaryKey(), // e.g. tax_invoice:26-27 | advance_receipt:26-27 | credit_note:26-27
+    lastValue: integer("last_value").notNull().default(0),
+    updatedAt: integer("updated_at").notNull(),
+  }
+);
 
 export const payments = sqliteTable("payments", {
   id: text("id").primaryKey(),
@@ -298,6 +311,8 @@ export const ledgerEntries = sqliteTable(
       .references(() => workspaces.id),
     entryType: text("entry_type").notNull(), // credit | debit | reserve | release | refund | staff_adjustment
     amountPaise: integer("amount_paise").notNull(), // positive for credit/release/refund, negative for debit/reserve
+    debitAccount: text("debit_account").notNull().default("customer_wallet"),
+    creditAccount: text("credit_account").notNull().default("platform_clearing"),
     currency: text("currency").notNull().default("INR"),
     serviceKey: text("service_key"),
     description: text("description").notNull(),
@@ -746,5 +761,36 @@ export const platformCredentials = sqliteTable("platform_credentials", {
   lastVerifyMessage: text("last_verify_message"),
   updatedAt: integer("updated_at").notNull(),
 });
+
+export const sslCertificates = sqliteTable(
+  "ssl_certificates",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    workspaceSlug: text("workspace_slug").notNull(),
+    zone: text("zone").notNull(), // tally | api
+    hostname: text("hostname").notNull().unique(),
+    wildcardParent: text("wildcard_parent").notNull(),
+    status: text("status").notNull().default("queued"), // queued | provisioning | active | renewing | failed
+    provider: text("provider").notNull().default("auto"),
+    coverageMode: text("coverage_mode").notNull().default("wildcard_san"),
+    serialHex: text("serial_hex"),
+    fingerprintSha256: text("fingerprint_sha256"),
+    certPath: text("cert_path"),
+    attempts: integer("attempts").notNull().default(0),
+    lastAttemptAt: integer("last_attempt_at"),
+    issuedAt: integer("issued_at"),
+    expiresAt: integer("expires_at"),
+    renewAfter: integer("renew_after"),
+    lastError: text("last_error"),
+    queuedAt: integer("queued_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    index("idx_ssl_certs_workspace").on(t.workspaceId),
+    index("idx_ssl_certs_status_renew").on(t.status, t.renewAfter),
+  ]
+);
+
 
 

@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { authenticatePublicApiKey } from "@rsl/api-keys";
 import { requireEntitlement } from "@rsl/billing";
-import { newId, resolveEndpointsFromHeaders, RslError } from "@rsl/core";
+import { decryptEnvelope, newId, resolveEndpointsFromHeaders, RslError, signHmac } from "@rsl/core";
 import { controlSchema, ingressSchema } from "@rsl/database";
 import {
   captureNativePdfsForVouchersFromLocalPort9000,
@@ -239,12 +239,45 @@ export async function GET(req: NextRequest) {
     // Over-The-Air (OTA) .tdl manifest & auto-update endpoints run even before plan unlock so setup is frictionless
     if (mode === "tdl-manifest") {
       const tdlBody = buildLatestWorkspaceTdl(req, caller.workspaceId, epRow.webhookToken);
-      const sha256 = crypto.createHash("sha256").update(tdlBody).digest("hex");
+      const sha256 = crypto.createHash("sha256").update(tdlBody, "utf8").digest("hex");
+      const sigPayload = `${LATEST_TALLY_TDL_VERSION}:${sha256}`;
+      const manifestHmac = signHmac(sigPayload, epRow.webhookToken);
+
+      let deviceHmac: string | undefined;
+      const requestedDeviceId = (
+        req.nextUrl.searchParams.get("deviceId") ||
+        req.headers.get("x-rsl-device-id") ||
+        ""
+      ).trim();
+      if (requestedDeviceId) {
+        const dev = controlDb()
+          .select({ signingSecretEncrypted: controlSchema.agentDevices.signingSecretEncrypted })
+          .from(controlSchema.agentDevices)
+          .where(
+            and(
+              eq(controlSchema.agentDevices.id, requestedDeviceId),
+              eq(controlSchema.agentDevices.workspaceId, caller.workspaceId)
+            )
+          )
+          .get();
+        if (dev?.signingSecretEncrypted) {
+          try {
+            const rawSecret = decryptEnvelope(dev.signingSecretEncrypted);
+            deviceHmac = signHmac(sigPayload, rawSecret);
+          } catch {
+            // Fall back to manifestHmac when envelope cannot be decrypted
+          }
+        }
+      }
+
       return NextResponse.json({
         ok: true,
+        version: LATEST_TALLY_TDL_VERSION,
         tdlVersion: LATEST_TALLY_TDL_VERSION,
         latestTdlVersion: LATEST_TALLY_TDL_VERSION,
         sha256,
+        manifestHmac,
+        ...(deviceHmac ? { deviceHmac } : {}),
         byteLength: Buffer.byteLength(tdlBody, "utf8"),
         downloadUrl: `${endpoints.tallyWebhookUrl}?mode=tdl-latest&token=${encodeURIComponent(epRow.webhookToken)}`,
       });
@@ -555,7 +588,15 @@ export async function POST(req: NextRequest) {
       .where(eq(ingressSchema.webhookInbox.id, inboxId))
       .run();
 
+    const endpointsForPost = resolveEndpointsFromHeaders(req.headers);
+    const isLoopbackCaller =
+      !sourceIp ||
+      sourceIp === "127.0.0.1" ||
+      sourceIp === "::1" ||
+      sourceIp === "::ffff:127.0.0.1";
     const shouldCaptureLocalPort9000PdfAsync =
+      endpointsForPost.isLocalDev &&
+      isLoopbackCaller &&
       !process.env.VITEST &&
       process.env.NODE_ENV !== "test" &&
       isTallyTdlUserAgent(userAgent) &&

@@ -29,15 +29,35 @@ export function ConnectToGoogleDriveButton({
   purpose = "google_drive",
   variant = "primary",
   size = "md",
+  configured = true,
 }: {
   returnTo?: string;
   label?: string;
   purpose?: "google_drive" | "google_business";
   variant?: "primary" | "white";
   size?: "sm" | "md";
+  configured?: boolean;
 }) {
-  const href = `/api/oauth/google/start?purpose=${encodeURIComponent(purpose)}&returnTo=${encodeURIComponent(returnTo)}`;
   const sizeClasses = size === "sm" ? "px-3.5 py-1.5 text-xs" : "px-4 py-2.5 text-[13px]";
+
+  if (!configured) {
+    return (
+      <span
+        role="button"
+        aria-disabled="true"
+        title="1-click Google Sign-In is pending platform setup"
+        className={`inline-flex shrink-0 cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-zinc-100/90 font-semibold text-zinc-500 ${sizeClasses}`}
+      >
+        <GoogleGLogo className="h-4 w-4 shrink-0 opacity-60" />
+        <span>{label}</span>
+        <span className="rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 ring-1 ring-zinc-200">
+          Setup Pending
+        </span>
+      </span>
+    );
+  }
+
+  const href = `/api/oauth/google/start?purpose=${encodeURIComponent(purpose)}&returnTo=${encodeURIComponent(returnTo)}`;
 
   if (variant === "white") {
     return (

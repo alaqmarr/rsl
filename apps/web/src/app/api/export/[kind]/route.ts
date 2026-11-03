@@ -13,6 +13,7 @@ import {
   exportTallyVouchersAsXml,
   generateStandaloneTallyConnectorMjs,
   generateTallyPrimeTdlAddOn,
+  generateWindowsTallyInstallerBat,
   getOrCreateTallyWebhookEndpoint,
   getTallyCompanyRoutingConfig,
 } from "@rsl/tally";
@@ -21,6 +22,7 @@ import { getOptionalWebSession } from "@/lib/session";
 const EXPORT_PERMISSION_MAP: Record<string, Permission[]> = {
   "tally-tdl": ["tally:sync.manage"],
   "tally-connector": ["tally:sync.manage"],
+  "tally-installer": ["tally:sync.manage"],
   "tally-xml": ["tally:view"],
   "tally-csv": ["tally:view"],
   "contacts-csv": ["inbox:view", "backup:manage"],
@@ -97,6 +99,27 @@ export async function GET(
       headers: {
         "Content-Type": "text/javascript; charset=utf-8",
         "Content-Disposition": `attachment; filename="rsl-tally-connector.mjs"`,
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
+  if (kind === "tally-installer") {
+    const serverUrl = preferLocal
+      ? endpoints.effectiveTallyBaseUrl
+      : endpoints.tallyCloudBaseUrl;
+    const ep = getOrCreateTallyWebhookEndpoint(wsId);
+    const pairingCode = req.nextUrl.searchParams.get("code") || undefined;
+    const bat = generateWindowsTallyInstallerBat({
+      serverUrl,
+      workspaceName: session.workspace.name,
+      webhookToken: ep.webhookToken,
+      pairingCode,
+    });
+    return new NextResponse(bat, {
+      headers: {
+        "Content-Type": "application/x-bat; charset=utf-8",
+        "Content-Disposition": `attachment; filename="Install-RSL-Tally-Sync.bat"`,
         "Cache-Control": "no-store",
       },
     });

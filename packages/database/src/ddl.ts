@@ -693,6 +693,52 @@ export const CONTROL_MIGRATIONS: SqlMigration[] = [
       );
     `,
   },
+  {
+    version: 8,
+    name: "0008_ssl_sequences_accounting_and_verification_lockout",
+    sql: `
+      ALTER TABLE verifications ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0;
+
+      ALTER TABLE invoices ADD COLUMN doc_type TEXT NOT NULL DEFAULT 'tax_invoice';
+      ALTER TABLE invoices ADD COLUMN linked_invoice_id TEXT;
+      ALTER TABLE invoices ADD COLUMN external_ref_key TEXT;
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_invoices_external_ref ON invoices(external_ref_key) WHERE external_ref_key IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS invoice_sequences (
+        series_key TEXT PRIMARY KEY,
+        last_value INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      );
+
+      ALTER TABLE ledger_entries ADD COLUMN debit_account TEXT NOT NULL DEFAULT 'customer_wallet';
+      ALTER TABLE ledger_entries ADD COLUMN credit_account TEXT NOT NULL DEFAULT 'platform_clearing';
+
+      CREATE TABLE IF NOT EXISTS ssl_certificates (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        workspace_slug TEXT NOT NULL,
+        zone TEXT NOT NULL,
+        hostname TEXT NOT NULL UNIQUE,
+        wildcard_parent TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued',
+        provider TEXT NOT NULL DEFAULT 'auto',
+        coverage_mode TEXT NOT NULL DEFAULT 'wildcard_san',
+        serial_hex TEXT,
+        fingerprint_sha256 TEXT,
+        cert_path TEXT,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_attempt_at INTEGER,
+        issued_at INTEGER,
+        expires_at INTEGER,
+        renew_after INTEGER,
+        last_error TEXT,
+        queued_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_ssl_certs_workspace ON ssl_certificates(workspace_id);
+      CREATE INDEX IF NOT EXISTS idx_ssl_certs_status_renew ON ssl_certificates(status, renew_after);
+    `,
+  },
 ];
 
 export const INGRESS_MIGRATIONS: SqlMigration[] = [
@@ -775,6 +821,20 @@ export const PLATFORM_LOGS_MIGRATIONS: SqlMigration[] = [
         version INTEGER PRIMARY KEY,
         applied_at INTEGER NOT NULL
       );
+    `,
+  },
+  {
+    version: 2,
+    name: "0002_docs_search_logs_decoupled",
+    sql: `
+      CREATE TABLE IF NOT EXISTS docs_search_logs (
+        id TEXT PRIMARY KEY,
+        query TEXT NOT NULL,
+        result_count INTEGER NOT NULL,
+        surface TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_platform_docs_search_ts ON docs_search_logs(created_at);
     `,
   },
 ];
@@ -1128,6 +1188,37 @@ export const TENANT_DATA_MIGRATIONS: SqlMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_tally_auto_event ON tally_automation_rules(trigger_event, active);
     `,
   },
+  {
+    version: 3,
+    name: "0003_tally_pdfs_masterid_currency_and_outbox_lock",
+    sql: `
+      ALTER TABLE tally_parties ADD COLUMN parent_group TEXT NOT NULL DEFAULT 'Sundry Debtors';
+
+      ALTER TABLE tally_vouchers ADD COLUMN master_id TEXT;
+      ALTER TABLE tally_vouchers ADD COLUMN original_currency TEXT NOT NULL DEFAULT 'INR';
+      ALTER TABLE tally_vouchers ADD COLUMN original_amount_minor INTEGER;
+      ALTER TABLE tally_vouchers ADD COLUMN exchange_rate_micros INTEGER;
+
+      CREATE TABLE IF NOT EXISTS tally_voucher_pdfs (
+        voucher_id TEXT PRIMARY KEY,
+        voucher_guid TEXT NOT NULL,
+        voucher_number TEXT NOT NULL DEFAULT '',
+        company_name TEXT NOT NULL DEFAULT 'Primary Tally Company',
+        filename TEXT NOT NULL,
+        pdf_base64 TEXT NOT NULL,
+        byte_size INTEGER NOT NULL,
+        sha256 TEXT NOT NULL,
+        alter_id INTEGER NOT NULL DEFAULT 0,
+        master_id TEXT,
+        captured_from TEXT NOT NULL DEFAULT 'tally_native',
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_tally_voucher_pdfs_guid ON tally_voucher_pdfs(voucher_guid);
+
+      ALTER TABLE outbox ADD COLUMN locked_at INTEGER;
+      ALTER TABLE outbox ADD COLUMN locked_by TEXT;
+    `,
+  },
 ];
 
 export const TENANT_LOGS_MIGRATIONS: SqlMigration[] = [
@@ -1290,6 +1381,7 @@ export const EXPECTED_TENANT_DATA_TABLES = new Set([
   "tally_companies",
   "tally_parties",
   "tally_vouchers",
+  "tally_voucher_pdfs",
   "sync_runs",
   "outbox",
   "settings",

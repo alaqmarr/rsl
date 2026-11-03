@@ -183,6 +183,18 @@ export const ERROR_CATALOG = {
     retryable: false,
     domain: "tally",
   },
+  "RSL-SYNC-CIRCUIT-BREAKER": {
+    code: "RSL-SYNC-CIRCUIT-BREAKER",
+    httpStatus: 409,
+    title: "Empty Tally snapshot blocked for data safety",
+    userMessage:
+      "Tally Prime returned 0 bills for a company that already has synced bills. Automatic deletion was blocked to protect your data while Tally restarts or loads.",
+    remediation:
+      "Ensure the correct company is open in Tally Prime and try syncing again. If you intentionally deleted every bill in the company, confirm an explicit empty Day Book reset.",
+    docsSlug: "errors/RSL-SYNC-CIRCUIT-BREAKER",
+    retryable: true,
+    domain: "tally",
+  },
   "RSL-BACKUP-1001": {
     code: "RSL-BACKUP-1001",
     httpStatus: 400,

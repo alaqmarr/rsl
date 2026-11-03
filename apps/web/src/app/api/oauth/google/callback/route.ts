@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { completeGoogleOAuthConnection, type GoogleOAuthPurpose } from "@rsl/connections";
-import { getEnv, resolveEndpointsFromHeaders, verifyHmac } from "@rsl/core";
+import { getEnv, isTrustedPlatformHost, resolveEndpointsFromHeaders, verifyHmac } from "@rsl/core";
 import { canRolePerform } from "@rsl/rbac";
 import { getOptionalWebSession } from "@/lib/session";
 
@@ -26,10 +26,20 @@ function buildAppRedirect(baseUrl: string, returnTo: string, kind: "notice" | "e
   url.searchParams.set(kind, msg);
   const res = NextResponse.redirect(url.toString());
   res.cookies.delete("rsl_google_oauth_state");
+  res.cookies.delete("rsl_google_oauth_pkce");
   return res;
 }
 
 export async function GET(req: NextRequest) {
+  const rawHost =
+    (req.headers.get("x-forwarded-host")?.split(",")[0] || req.headers.get("host") || "").trim();
+  if (rawHost && !isTrustedPlatformHost(rawHost)) {
+    return NextResponse.json(
+      { ok: false, error: "Untrusted Host header rejected for OAuth callback safety." },
+      { status: 400 }
+    );
+  }
+
   const endpoints = resolveEndpointsFromHeaders(req.headers);
   const appBaseUrl =
     endpoints.isLocalDev && endpoints.localBaseUrl
@@ -114,6 +124,26 @@ export async function GET(req: NextRequest) {
   }
 
   const redirectUri = `${appBaseUrl}/api/oauth/google/callback`;
+  const pkceCookieRaw = (req.cookies.get("rsl_google_oauth_pkce")?.value || "").trim();
+  let codeVerifier: string | undefined;
+  if (pkceCookieRaw.includes(".")) {
+    const [cvCandidate, cvSig] = pkceCookieRaw.split(".");
+    if (
+      cvCandidate &&
+      cvSig &&
+      /^[0-9a-f]+$/i.test(cvSig) &&
+      verifyHmac(cvCandidate, cvSig, getEnv().BETTER_AUTH_SECRET)
+    ) {
+      codeVerifier = cvCandidate;
+    } else {
+      return buildAppRedirect(
+        appBaseUrl,
+        returnTo,
+        "error",
+        "Google PKCE verification check failed. Click 'Connect to Google Drive' again."
+      );
+    }
+  }
 
   try {
     const result = await completeGoogleOAuthConnection({
@@ -122,6 +152,7 @@ export async function GET(req: NextRequest) {
       code,
       redirectUri,
       purpose: parsedState.purpose,
+      codeVerifier,
     });
 
     const successMsg =

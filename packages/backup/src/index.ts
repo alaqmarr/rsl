@@ -405,25 +405,50 @@ export const restoreSignedEncryptedBackup = defineAction({
           recursive: true,
           mode: 0o700,
         });
-        if (fs.existsSync(/*turbopackIgnore: true*/ reg.dataDbPath)) {
+        const hadExistingDb = fs.existsSync(/*turbopackIgnore: true*/ reg.dataDbPath);
+        if (hadExistingDb) {
           fs.copyFileSync(
             /*turbopackIgnore: true*/ reg.dataDbPath,
             /*turbopackIgnore: true*/ preRestorePath
           );
         }
 
-        // Remove stale WAL/SHM files before swapping data.db
-        for (const ext of ["-wal", "-shm"]) {
-          const walFile = `${reg.dataDbPath}${ext}`;
-          if (fs.existsSync(/*turbopackIgnore: true*/ walFile)) {
-            fs.unlinkSync(/*turbopackIgnore: true*/ walFile);
-          }
-        }
-
+        // Stage candidate replacement adjacent to target DB for atomic swap with automatic rollback
+        const atomicCandidatePath = `${reg.dataDbPath}.restoring.tmp`;
         fs.copyFileSync(
           /*turbopackIgnore: true*/ stagedDbPath,
-          /*turbopackIgnore: true*/ reg.dataDbPath
+          /*turbopackIgnore: true*/ atomicCandidatePath
         );
+
+        try {
+          // Remove stale WAL/SHM files before atomic rename swap
+          for (const ext of ["-wal", "-shm"]) {
+            const walFile = `${reg.dataDbPath}${ext}`;
+            if (fs.existsSync(/*turbopackIgnore: true*/ walFile)) {
+              fs.unlinkSync(/*turbopackIgnore: true*/ walFile);
+            }
+          }
+
+          fs.renameSync(
+            /*turbopackIgnore: true*/ atomicCandidatePath,
+            /*turbopackIgnore: true*/ reg.dataDbPath
+          );
+        } catch (swapError) {
+          if (fs.existsSync(/*turbopackIgnore: true*/ atomicCandidatePath)) {
+            try {
+              fs.unlinkSync(/*turbopackIgnore: true*/ atomicCandidatePath);
+            } catch {
+              // Ignore temp cleanup failure
+            }
+          }
+          if (hadExistingDb && fs.existsSync(/*turbopackIgnore: true*/ preRestorePath)) {
+            fs.copyFileSync(
+              /*turbopackIgnore: true*/ preRestorePath,
+              /*turbopackIgnore: true*/ reg.dataDbPath
+            );
+          }
+          throw swapError;
+        }
       } finally {
         ctrl
           .update(controlSchema.tenantRegistry)

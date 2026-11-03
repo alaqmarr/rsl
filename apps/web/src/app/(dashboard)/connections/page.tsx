@@ -81,6 +81,7 @@ export default async function ConnectedAccountsPage({
                   returnTo="/connections?tab=google_drive"
                   label="Connect to Google Drive"
                   size="sm"
+                  configured={googleOAuth.enableDriveOAuth}
                 />
               )}
               {activeDriveConn && (
