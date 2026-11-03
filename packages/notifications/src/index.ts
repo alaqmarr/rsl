@@ -129,14 +129,20 @@ export async function sendEmailVerificationCode(params: {
   const code = String(crypto.randomInt(100000, 999999));
   const codeHash = crypto.createHash("sha256").update(code).digest("hex");
   const verificationId = newEntityId("req", params.workspaceId ?? params.recipientName);
+  const identifier = `verify:${params.email.trim().toLowerCase()}`;
   const now = Date.now();
 
-  controlDb()
-    .insert(controlSchema.verifications)
+  const db = controlDb();
+  db.delete(controlSchema.verifications)
+    .where(eq(controlSchema.verifications.identifier, identifier))
+    .run();
+
+  db.insert(controlSchema.verifications)
     .values({
       id: verificationId,
-      identifier: `verify:${params.email.trim().toLowerCase()}`,
+      identifier,
       valueHash: codeHash,
+      failedAttempts: 0,
       expiresAt: now + 30 * 60 * 1000,
       createdAt: now,
     })
@@ -159,32 +165,65 @@ export async function sendEmailVerificationCode(params: {
   return { verificationId, emailId: res.emailId, status: res.status };
 }
 
+const MAX_EMAIL_VERIFICATION_ATTEMPTS = 5;
+
 export function confirmEmailVerificationCode(email: string, code: string): boolean {
   const db = controlDb();
-  const identifier = `verify:${email.trim().toLowerCase()}`;
+  const normalizedEmail = email.trim().toLowerCase();
+  const identifier = `verify:${normalizedEmail}`;
   const codeHash = crypto.createHash("sha256").update(code.trim()).digest("hex");
   const now = Date.now();
 
-  const match = db
+  const activeRows = db
     .select()
     .from(controlSchema.verifications)
     .where(
       and(
         eq(controlSchema.verifications.identifier, identifier),
-        eq(controlSchema.verifications.valueHash, codeHash),
         gt(controlSchema.verifications.expiresAt, now)
       )
     )
-    .get();
+    .all()
+    .sort((a, b) => b.createdAt - a.createdAt);
 
-  if (!match) return false;
+  const candidate = activeRows[0];
+  if (!candidate) return false;
+
+  if (candidate.failedAttempts >= MAX_EMAIL_VERIFICATION_ATTEMPTS) {
+    db.delete(controlSchema.verifications)
+      .where(eq(controlSchema.verifications.identifier, identifier))
+      .run();
+    return false;
+  }
+
+  const expectedBuf = Buffer.from(candidate.valueHash, "hex");
+  const actualBuf = Buffer.from(codeHash, "hex");
+  const isMatch =
+    expectedBuf.length === actualBuf.length && crypto.timingSafeEqual(expectedBuf, actualBuf);
+
+  if (!isMatch) {
+    const nextAttempts = candidate.failedAttempts + 1;
+    if (nextAttempts >= MAX_EMAIL_VERIFICATION_ATTEMPTS) {
+      db.delete(controlSchema.verifications)
+        .where(eq(controlSchema.verifications.identifier, identifier))
+        .run();
+    } else {
+      db.update(controlSchema.verifications)
+        .set({ failedAttempts: nextAttempts })
+        .where(eq(controlSchema.verifications.id, candidate.id))
+        .run();
+    }
+    return false;
+  }
 
   db.update(controlSchema.users)
     .set({ emailVerified: true, updatedAt: now })
-    .where(eq(controlSchema.users.email, email.trim().toLowerCase()))
+    .where(eq(controlSchema.users.email, normalizedEmail))
     .run();
 
-  db.delete(controlSchema.verifications).where(eq(controlSchema.verifications.id, match.id)).run();
+  db.delete(controlSchema.verifications)
+    .where(eq(controlSchema.verifications.identifier, identifier))
+    .run();
   return true;
 }
 
@@ -235,6 +274,10 @@ export function completePasswordReset(params: {
   rawToken: string;
   newPassword: string;
 }): void {
+  if (params.newPassword.length < 8) {
+    throw new RslError("RSL-VAL-1001", "New password must be at least 8 characters long.");
+  }
+
   const db = controlDb();
   const normalized = params.email.trim().toLowerCase();
   const tokenHash = crypto.createHash("sha256").update(params.rawToken.trim()).digest("hex");
@@ -256,12 +299,27 @@ export function completePasswordReset(params: {
     throw new RslError("RSL-AUTH-1001", "This password reset link is invalid or has expired.");
   }
 
+  const user = db
+    .select({ id: controlSchema.users.id })
+    .from(controlSchema.users)
+    .where(eq(controlSchema.users.email, normalized))
+    .get();
+
   db.update(controlSchema.users)
     .set({ passwordHash: hashPassword(params.newPassword), updatedAt: now })
     .where(eq(controlSchema.users.email, normalized))
     .run();
 
-  db.delete(controlSchema.verifications).where(eq(controlSchema.verifications.id, row.id)).run();
+  if (user) {
+    // Security (SEC-06): revoke all active sessions on password reset
+    db.delete(controlSchema.sessions)
+      .where(eq(controlSchema.sessions.userId, user.id))
+      .run();
+  }
+
+  db.delete(controlSchema.verifications)
+    .where(eq(controlSchema.verifications.identifier, `reset:${normalized}`))
+    .run();
 }
 
 export async function sendTeamInviteNotification(params: {

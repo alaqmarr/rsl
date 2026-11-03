@@ -390,6 +390,7 @@ export const WEB_ROUTE_ACCESS_RULES: Array<{
     label: "Ads & Social Posts",
   },
   { prefix: "/reviews", anyOf: ["reviews:view"], label: "Google Reviews" },
+  { prefix: "/settings", exact: true, anyOf: [], label: "Settings Index" },
   { prefix: "/settings/profile", anyOf: [], label: "My Profile" },
   {
     prefix: "/settings/business",
@@ -460,7 +461,7 @@ export function canPermissionsAccessWebRoute(
       return rule.anyOf.some((p) => permSet.has(p));
     }
   }
-  return true;
+  return false;
 }
 
 /* ============================================================================
@@ -586,5 +587,5 @@ export function canStaffAccessAdminRoute(staffRole: string, pathname: string): b
       return rule.anyOf.some((p) => perms.has(p));
     }
   }
-  return true;
+  return false;
 }

@@ -1,7 +1,14 @@
 import crypto from "node:crypto";
-import { and, eq, gt, sql } from "drizzle-orm";
+import { and, eq, gt, ne, sql } from "drizzle-orm";
 import { ensureServiceCatalogSeeded } from "@rsl/billing";
-import { hashPassword, newId, RslError, verifyPassword } from "@rsl/core";
+import {
+  decryptEnvelope,
+  encryptEnvelope,
+  hashPassword,
+  newId,
+  RslError,
+  verifyPassword,
+} from "@rsl/core";
 import { controlSchema, platformLogsSchema } from "@rsl/database";
 import { appendActionLog } from "@rsl/logging";
 import {
@@ -99,6 +106,10 @@ export function registerUserWithWorkspace(params: {
 }): { rawSessionToken: string; userId: string; workspaceId: string } {
   ensureSystemRolesSeeded();
   ensureServiceCatalogSeeded();
+
+  if (params.password.length < 8) {
+    throw new RslError("RSL-VAL-1001", "Password must be at least 8 characters long.");
+  }
 
   const db = controlDb();
   const normalizedEmail = params.email.trim().toLowerCase();
@@ -988,6 +999,7 @@ export function changeAuthenticatedUserPassword(params: {
   userId: string;
   currentPassword: string;
   newPassword: string;
+  preserveSessionId?: string;
 }): void {
   if (params.newPassword.length < 8) {
     throw new RslError("RSL-VAL-1001", "New password must be at least 8 characters long.");
@@ -1011,6 +1023,22 @@ export function changeAuthenticatedUserPassword(params: {
     })
     .where(eq(controlSchema.users.id, usr.id))
     .run();
+
+  // Security (SEC-06): revoke active sessions on password change
+  if (params.preserveSessionId) {
+    db.delete(controlSchema.sessions)
+      .where(
+        and(
+          eq(controlSchema.sessions.userId, usr.id),
+          ne(controlSchema.sessions.id, params.preserveSessionId)
+        )
+      )
+      .run();
+  } else {
+    db.delete(controlSchema.sessions)
+      .where(eq(controlSchema.sessions.userId, usr.id))
+      .run();
+  }
 }
 
 const GSTIN_FORMAT_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
@@ -1289,6 +1317,9 @@ export function bootstrapFirstPlatformStaff(params: {
   if (countPlatformStaff() > 0) {
     throw new Error("Initial staff account already exists. Sign in instead.");
   }
+  if (params.password.length < 8) {
+    throw new RslError("RSL-VAL-1001", "Password must be at least 8 characters long.");
+  }
 
   const db = controlDb();
   const staffId = newId();
@@ -1388,6 +1419,14 @@ export function resolveStaffSessionFromToken(rawToken: string | undefined | null
   return { sessionId: sess.id, staff };
 }
 
+export function signOutPlatformStaff(rawToken: string | undefined | null): void {
+  if (!rawToken) return;
+  controlDb()
+    .delete(controlSchema.platformStaffSessions)
+    .where(eq(controlSchema.platformStaffSessions.tokenHash, hashSessionToken(rawToken)))
+    .run();
+}
+
 /**
  * Audited 30-minute Staff Impersonation (Section 10)
  */
@@ -1395,7 +1434,7 @@ export function createImpersonationSession(params: {
   staffId: string;
   workspaceId: string;
   reason: string;
-}): { rawCustomerSessionToken: string; expiresAt: number } {
+}): { rawCustomerSessionToken: string; handoffCode: string; expiresAt: number } {
   if (params.reason.trim().length < 5) {
     throw new Error("A clear support reason (at least 5 characters) is required to impersonate.");
   }
@@ -1411,6 +1450,8 @@ export function createImpersonationSession(params: {
   const now = Date.now();
   const expiresAt = now + 30 * 60 * 1000; // Hard 30-minute cap
   const rawToken = crypto.randomBytes(32).toString("base64url");
+  const handoffCode = crypto.randomBytes(24).toString("base64url");
+  const handoffCodeHash = crypto.createHash("sha256").update(handoffCode).digest("hex");
 
   db.insert(controlSchema.sessions)
     .values({
@@ -1421,6 +1462,18 @@ export function createImpersonationSession(params: {
       impersonatorStaffId: params.staffId,
       impersonationReason: params.reason.trim(),
       expiresAt,
+      createdAt: now,
+    })
+    .run();
+
+  // Single-use 60-second encrypted handoff code (SEC-07): prevents raw session tokens in URLs
+  db.insert(controlSchema.verifications)
+    .values({
+      id: newId(),
+      identifier: `imp_handoff:${handoffCodeHash}`,
+      valueHash: encryptEnvelope(rawToken),
+      failedAttempts: 0,
+      expiresAt: now + 60 * 1000,
       createdAt: now,
     })
     .run();
@@ -1451,7 +1504,40 @@ export function createImpersonationSession(params: {
     })
     .run();
 
-  return { rawCustomerSessionToken: rawToken, expiresAt };
+  return { rawCustomerSessionToken: rawToken, handoffCode, expiresAt };
+}
+
+export function consumeImpersonationHandoffCode(handoffCode: string): string | null {
+  const trimmed = handoffCode.trim();
+  if (!trimmed) return null;
+  const db = controlDb();
+  const now = Date.now();
+  const handoffCodeHash = crypto.createHash("sha256").update(trimmed).digest("hex");
+  const identifier = `imp_handoff:${handoffCodeHash}`;
+
+  const row = db
+    .select()
+    .from(controlSchema.verifications)
+    .where(
+      and(
+        eq(controlSchema.verifications.identifier, identifier),
+        gt(controlSchema.verifications.expiresAt, now)
+      )
+    )
+    .get();
+
+  if (!row) return null;
+
+  // Atomically burn the handoff code on first consumption
+  db.delete(controlSchema.verifications)
+    .where(eq(controlSchema.verifications.id, row.id))
+    .run();
+
+  try {
+    return decryptEnvelope(row.valueHash);
+  } catch {
+    return null;
+  }
 }
 
 export function staffUpdateClientWorkspace(params: {
@@ -1497,8 +1583,8 @@ export function staffResetClientUserPassword(params: {
   userId: string;
   newPassword: string;
 }): { email: string } {
-  if (params.newPassword.length < 6) {
-    throw new RslError("RSL-VAL-1001", "New password must be at least 6 characters.");
+  if (params.newPassword.length < 8) {
+    throw new RslError("RSL-VAL-1001", "New password must be at least 8 characters long.");
   }
   const db = controlDb();
   const usr = db
@@ -1517,6 +1603,11 @@ export function staffResetClientUserPassword(params: {
       updatedAt: Date.now(),
     })
     .where(eq(controlSchema.users.id, usr.id))
+    .run();
+
+  // Security (SEC-06): revoke all existing sessions when password is reset by staff
+  db.delete(controlSchema.sessions)
+    .where(eq(controlSchema.sessions.userId, usr.id))
     .run();
 
   return { email: usr.email };
@@ -1579,8 +1670,8 @@ export function staffCreatePlatformMember(params: {
   if (params.name.trim().length < 2) {
     throw new RslError("RSL-VAL-1001", "Staff member name is required.");
   }
-  if (params.password.length < 6) {
-    throw new RslError("RSL-VAL-1001", "Password must be at least 6 characters.");
+  if (params.password.length < 8) {
+    throw new RslError("RSL-VAL-1001", "Password must be at least 8 characters long.");
   }
   const normalized = params.email.trim().toLowerCase();
   const db = controlDb();
@@ -1652,8 +1743,13 @@ export function staffUpdatePlatformMember(params: {
   const updates: Partial<typeof controlSchema.platformStaff.$inferInsert> = {};
   if (params.staffRole) updates.staffRole = params.staffRole;
   if (params.active !== undefined) updates.active = params.active;
-  if (params.newPassword && params.newPassword.trim().length >= 6) {
+  let passwordChanged = false;
+  if (params.newPassword !== undefined && params.newPassword.trim().length > 0) {
+    if (params.newPassword.trim().length < 8) {
+      throw new RslError("RSL-VAL-1001", "New password must be at least 8 characters long.");
+    }
     updates.passwordHash = hashPassword(params.newPassword.trim());
+    passwordChanged = true;
   }
 
   if (Object.keys(updates).length > 0) {
@@ -1663,7 +1759,7 @@ export function staffUpdatePlatformMember(params: {
       .run();
   }
 
-  if (params.active === false) {
+  if (params.active === false || passwordChanged) {
     db.delete(controlSchema.platformStaffSessions)
       .where(eq(controlSchema.platformStaffSessions.staffId, target.id))
       .run();

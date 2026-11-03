@@ -3,12 +3,44 @@
 // 1. ALL ports are strictly within 4500–4600 (4500, 4501, 4502, 4510, 4511, 4512, 4520).
 // 2. Every process is isolated in namespace "rsl-marketing" with explicit rsl-* names
 //    and isolated logs under LOG_DIR/pm2 so other PM2 apps on the server are NEVER touched.
-// 3. Automatically loads root .env (/opt/rslmarketing/.env) into all 7 RSL services.
+// 3. Direct Node execution (zero `pnpm` shell wrappers) so SIGINT/SIGTERM reaches Node cleanly
+//    without leaving orphaned child processes during reload or shutdown.
+// 4. Automatically loads root .env (/opt/rslmarketing/.env) into all 7 RSL services.
 
 const path = require("node:path");
 const fs = require("node:fs");
 
 const REPO_ROOT = process.env.RSL_APP_DIR || path.resolve(__dirname, "..", "..");
+
+function resolveNodeBinScript(pkgSubpath, searchDirs) {
+  for (const dir of searchDirs) {
+    try {
+      return require.resolve(pkgSubpath, { paths: [dir] });
+    } catch {
+      // Try next candidate directory
+    }
+    const directCandidate = path.join(dir, "node_modules", pkgSubpath);
+    if (fs.existsSync(directCandidate)) return directCandidate;
+  }
+  return path.join("node_modules", pkgSubpath);
+}
+
+const NEXT_WEB_BIN = resolveNodeBinScript("next/dist/bin/next", [
+  path.join(REPO_ROOT, "apps", "web"),
+  REPO_ROOT,
+]);
+const NEXT_ADMIN_BIN = resolveNodeBinScript("next/dist/bin/next", [
+  path.join(REPO_ROOT, "apps", "admin"),
+  REPO_ROOT,
+]);
+const NEXT_DOCS_BIN = resolveNodeBinScript("next/dist/bin/next", [
+  path.join(REPO_ROOT, "apps", "docs"),
+  REPO_ROOT,
+]);
+const TSX_CLI_BIN = resolveNodeBinScript("tsx/dist/cli.mjs", [
+  path.join(REPO_ROOT, "apps", "worker"),
+  REPO_ROOT,
+]);
 
 function parseRootDotEnv(envFilePath) {
   const parsed = {};
@@ -57,6 +89,7 @@ function sharedPm2Fields(name, maxMemory) {
     namespace: "rsl-marketing",
     instances: 1,
     exec_mode: "fork",
+    interpreter: process.execPath,
     autorestart: true,
     max_restarts: 15,
     min_uptime: "10s",
@@ -77,7 +110,7 @@ module.exports = {
     {
       ...sharedPm2Fields("rsl-web", "900M"),
       cwd: path.join(REPO_ROOT, "apps", "web"),
-      script: "node_modules/next/dist/bin/next",
+      script: NEXT_WEB_BIN,
       args: "start --port 4500",
       env: {
         ...sharedEnv,
@@ -87,7 +120,7 @@ module.exports = {
     {
       ...sharedPm2Fields("rsl-admin", "512M"),
       cwd: path.join(REPO_ROOT, "apps", "admin"),
-      script: "node_modules/next/dist/bin/next",
+      script: NEXT_ADMIN_BIN,
       args: "start --port 4501",
       env: {
         ...sharedEnv,
@@ -97,7 +130,7 @@ module.exports = {
     {
       ...sharedPm2Fields("rsl-docs", "384M"),
       cwd: path.join(REPO_ROOT, "apps", "docs"),
-      script: "node_modules/next/dist/bin/next",
+      script: NEXT_DOCS_BIN,
       args: "start --port 4502",
       env: {
         ...sharedEnv,
@@ -107,8 +140,8 @@ module.exports = {
     {
       ...sharedPm2Fields("rsl-worker-realtime", "512M"),
       cwd: path.join(REPO_ROOT, "apps", "worker"),
-      script: "pnpm",
-      args: "start:realtime",
+      script: TSX_CLI_BIN,
+      args: "src/index.ts --lane=realtime --health-port=4510",
       env: {
         ...sharedEnv,
         WORKER_HEALTH_PORT: 4510,
@@ -117,8 +150,8 @@ module.exports = {
     {
       ...sharedPm2Fields("rsl-worker-bulk", "512M"),
       cwd: path.join(REPO_ROOT, "apps", "worker"),
-      script: "pnpm",
-      args: "start:bulk",
+      script: TSX_CLI_BIN,
+      args: "src/index.ts --lane=bulk --health-port=4511",
       env: {
         ...sharedEnv,
         WORKER_HEALTH_PORT: 4511,
@@ -127,8 +160,8 @@ module.exports = {
     {
       ...sharedPm2Fields("rsl-worker-maintenance", "384M"),
       cwd: path.join(REPO_ROOT, "apps", "worker"),
-      script: "pnpm",
-      args: "start:maintenance",
+      script: TSX_CLI_BIN,
+      args: "src/index.ts --lane=maintenance --health-port=4512",
       env: {
         ...sharedEnv,
         WORKER_HEALTH_PORT: 4512,
@@ -137,8 +170,8 @@ module.exports = {
     {
       ...sharedPm2Fields("rsl-cleanup", "256M"),
       cwd: REPO_ROOT,
-      script: "pnpm",
-      args: "exec tsx infra/pm2/rsl-cleanup-service.ts",
+      script: TSX_CLI_BIN,
+      args: "infra/pm2/rsl-cleanup-service.ts",
       env: {
         ...sharedEnv,
         CLEANUP_SERVICE_PORT: 4520,

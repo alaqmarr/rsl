@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import http from "node:http";
 import * as Sentry from "@sentry/node";
 import { Worker } from "bullmq";
@@ -424,23 +425,49 @@ async function startWorker() {
 
   const healthServer = http.createServer((req, res) => {
     if (req.url === "/health" || req.url === "/api/health") {
+      const providedSecret = String(req.headers["x-rsl-internal-secret"] || "");
+      const expectedSecret = getEnv().ADMIN_AUTH_SECRET;
+      const isInternalCaller =
+        providedSecret.length > 0 &&
+        expectedSecret.length > 0 &&
+        providedSecret.length === expectedSecret.length &&
+        crypto.timingSafeEqual(
+          Buffer.from(providedSecret, "utf8"),
+          Buffer.from(expectedSecret, "utf8")
+        );
+
       try {
         const row = controlDb().$client.prepare("SELECT 1 AS ok").get() as { ok: number };
         const ok = !isDraining && row?.ok === 1;
         res.writeHead(ok ? 200 : 503, { "Content-Type": "application/json" });
         res.end(
-          JSON.stringify({
-            ok,
-            draining: isDraining,
-            service: "rsl-worker",
-            lanes: Array.from(lanes),
-            port: healthPort,
-            ts: new Date().toISOString(),
-          })
+          JSON.stringify(
+            isInternalCaller
+              ? {
+                  ok,
+                  status: ok ? "healthy" : "unhealthy",
+                  draining: isDraining,
+                  service: "rsl-worker",
+                  lanes: Array.from(lanes),
+                  port: healthPort,
+                  ts: new Date().toISOString(),
+                }
+              : {
+                  ok,
+                  status: ok ? "healthy" : "unhealthy",
+                }
+          )
         );
       } catch (err) {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: String(err) }));
+        logger.error({ err }, "Worker health probe failed");
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify(
+            isInternalCaller
+              ? { ok: false, status: "unhealthy", error: String(err) }
+              : { ok: false, status: "unhealthy" }
+          )
+        );
       }
       return;
     }

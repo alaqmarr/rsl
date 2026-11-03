@@ -162,8 +162,14 @@ export function getEnv(): AppEnv {
       "API_KEY_PEPPER",
     ];
     for (const key of requiredInProd) {
-      if (!parsed[key]) {
+      const val = String(parsed[key] || "").trim();
+      if (!val) {
         throw new Error(`Missing mandatory production environment variable: ${key}`);
+      }
+      if (val.length < 16) {
+        throw new Error(
+          `Production environment variable ${key} must be at least 16 characters of high-entropy secret material.`
+        );
       }
     }
   }

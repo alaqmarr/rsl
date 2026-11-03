@@ -46,29 +46,36 @@ export async function requireStaffSession() {
 
 export async function setStaffCookie(rawToken: string) {
   const jar = await cookies();
-  const cookieDomain = await resolveSharedCookieDomain();
+  // Security (SEC-02): strictly host-only cookie (omit `domain`) so `rsl_staff_session`
+  // is never sent to customer/public/wildcard subdomains.
   jar.set(ADMIN_SESSION_COOKIE, rawToken, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: 12 * 60 * 60,
-    ...(cookieDomain ? { domain: cookieDomain } : {}),
   });
 }
 
 export async function clearStaffCookie() {
   const jar = await cookies();
-  const cookieDomain = await resolveSharedCookieDomain();
+  const legacyCookieDomain = await resolveSharedCookieDomain();
   jar.delete(ADMIN_SESSION_COOKIE);
-  if (cookieDomain) {
+  jar.set(ADMIN_SESSION_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
+  });
+  if (legacyCookieDomain) {
     jar.set(ADMIN_SESSION_COOKIE, "", {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
       path: "/",
       maxAge: 0,
-      domain: cookieDomain,
+      domain: legacyCookieDomain,
     });
   }
 }

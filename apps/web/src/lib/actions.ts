@@ -1905,6 +1905,7 @@ export async function changePasswordAction(formData: FormData) {
       userId: session.user.id,
       currentPassword,
       newPassword,
+      preserveSessionId: session.sessionId,
     });
     appendActionLog({
       workspaceId: session.workspace.id,
@@ -2008,6 +2009,7 @@ export async function changePasswordJsonAction(formData: FormData): Promise<{
       userId: session.user.id,
       currentPassword,
       newPassword,
+      preserveSessionId: session.sessionId,
     });
 
     appendActionLog({

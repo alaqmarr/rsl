@@ -7,6 +7,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import {
+  ADMIN_SESSION_COOKIE,
   bootstrapFirstPlatformStaff,
   canStaffPerform,
   countPlatformStaff,
@@ -14,6 +15,7 @@ import {
   formatStaffRoleLabel,
   registerUserWithWorkspace,
   signInPlatformStaff,
+  signOutPlatformStaff,
   STAFF_PERMISSION_CATALOG,
   staffCreatePlatformMember,
   staffResetClientUserPassword,
@@ -227,6 +229,11 @@ export async function completeInitialPlatformSetupAction(formData: FormData) {
 }
 
 export async function staffLogoutAction() {
+  const jar = await cookies();
+  const raw = jar.get(ADMIN_SESSION_COOKIE)?.value;
+  if (raw) {
+    signOutPlatformStaff(raw);
+  }
   await clearStaffCookie();
   redirect("/login");
 }
@@ -974,11 +981,11 @@ export async function staffCreateNewClientAction(formData: FormData) {
   const stateCode = String(formData.get("stateCode") || "27").trim();
   const gstin = String(formData.get("gstin") || "").trim();
 
-  if (!businessName || !ownerName || !ownerEmail || password.length < 6) {
+  if (!businessName || !ownerName || !ownerEmail || password.length < 8) {
     return flashAdminRedirect(
       "/clients",
       "error",
-      "Provide business name, owner name, email, and password (min 6 chars)."
+      "Provide business name, owner name, email, and password (min 8 chars)."
     );
   }
 
@@ -1723,7 +1730,7 @@ export async function staffStartImpersonationAction(formData: FormData) {
   const returnTo = safeReturnTo(formData.get("returnTo"), "/");
   const staff = await requireStaffWithPermission("staff:impersonate", returnTo);
 
-  let tokenOut: { rawCustomerSessionToken: string };
+  let tokenOut: { handoffCode: string };
   try {
     tokenOut = createImpersonationSession({
       staffId: staff.id,
@@ -1738,8 +1745,17 @@ export async function staffStartImpersonationAction(formData: FormData) {
     );
   }
 
-  const webUrl = `${getEnv().APP_URL}/api/auth/impersonate?token=${encodeURIComponent(tokenOut.rawCustomerSessionToken)}`;
-  redirect(webUrl);
+  // Store single-use 60s handoff code in short-lived HttpOnly cookie so zero secrets appear in URLs
+  const jar = await cookies();
+  jar.set("rsl_imp_handoff", tokenOut.handoffCode, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/api/impersonate-launch",
+    maxAge: 60,
+  });
+
+  redirect("/api/impersonate-launch");
 }
 
 export async function staffReplayDeadLetterAction(formData: FormData) {

@@ -85,6 +85,18 @@ function getPm2ProcessList() {
   }
 }
 
+function assertNextBuildsPresent() {
+  const nextApps = ["web", "admin", "docs"];
+  for (const app of nextApps) {
+    const buildIdFile = path.join(REPO_ROOT, "apps", app, ".next", "BUILD_ID");
+    if (!fs.existsSync(buildIdFile)) {
+      throw new Error(
+        `[rsl-pm2] Refusing to start/reload: missing production Next.js build at apps/${app}/.next/BUILD_ID. Run 'pnpm build' first!`
+      );
+    }
+  }
+}
+
 function cleanNextBuildLocks() {
   const nextApps = ["web", "admin", "docs"];
   let cleaned = 0;
@@ -205,6 +217,7 @@ async function main() {
     }
 
     case "start": {
+      assertNextBuildsPresent();
       cleanOrphanedRslPortListeners(managedRslPids);
       cleanNextBuildLocks();
       runOneShotDbAndLogCleanup();
@@ -215,6 +228,7 @@ async function main() {
     }
 
     case "restart": {
+      assertNextBuildsPresent();
       runOneShotDbAndLogCleanup();
       cleanOrphanedRslPortListeners(managedRslPids);
       if (existingRslProcs.length > 0) {
@@ -232,7 +246,9 @@ async function main() {
     }
 
     case "reload": {
+      assertNextBuildsPresent();
       runOneShotDbAndLogCleanup();
+      cleanOrphanedRslPortListeners(managedRslPids);
       runPm2(["start", ECOSYSTEM_PATH, "--only", RSL_ONLY_CSV, "--update-env"]);
       runPm2(["save"]);
       await verifyRslHealth();

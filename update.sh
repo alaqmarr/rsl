@@ -150,6 +150,13 @@ pnpm docs:build
 pnpm typecheck
 pnpm build
 
+for app_name in web admin docs; do
+  if [ ! -f "$APP_DIR/apps/${app_name}/.next/BUILD_ID" ]; then
+    echo "ERROR: Build verification failed — missing apps/${app_name}/.next/BUILD_ID. Aborting PM2 reload to keep running services safe."
+    exit 1
+  fi
+done
+
 echo "==> [6/7] Running SQLite control & tenant migrations + reloading RSL PM2 services..."
 pnpm db:migrate:control
 pnpm db:migrate:tenants
