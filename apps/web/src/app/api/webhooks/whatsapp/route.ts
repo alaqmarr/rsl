@@ -3,9 +3,15 @@ import { and, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { dispatchWorkspaceWebhookEvent } from "@rsl/api-keys";
 import { isValidMetaWebhookVerifyToken } from "@rsl/connections";
-import { getEnv, newEntityId, newId, verifyHmac } from "@rsl/core";
+import { newEntityId, newId, verifyHmac } from "@rsl/core";
 import { controlSchema, ingressSchema, tenantDataSchema, tenantLogsSchema } from "@rsl/database";
-import { controlDb, ingressDb, tenantDataDb, tenantLogsDb } from "@rsl/tenancy";
+import {
+  controlDb,
+  getPlatformMetaAppConfig,
+  ingressDb,
+  tenantDataDb,
+  tenantLogsDb,
+} from "@rsl/tenancy";
 
 export async function GET(req: Request | NextRequest) {
   const sp = new URL(req.url).searchParams;
@@ -21,11 +27,11 @@ export async function GET(req: Request | NextRequest) {
 
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
-  const env = getEnv();
+  const metaSecret = getPlatformMetaAppConfig().appSecret;
   const sigHeader = req.headers.get("x-hub-signature-256") || "";
   const sigHex = sigHeader.replace(/^sha256=/i, "");
-  const signatureValid = env.META_APP_SECRET
-    ? verifyHmac(rawBody, sigHex, env.META_APP_SECRET)
+  const signatureValid = metaSecret
+    ? verifyHmac(rawBody, sigHex, metaSecret)
     : false;
 
   const eventId = `wa_${crypto.createHash("sha256").update(rawBody).digest("hex").slice(0, 24)}`;

@@ -8,6 +8,7 @@ export type AdminNavIconKey =
   | "staff"
   | "inspector"
   | "runbooks"
+  | "credentials"
   | "setup";
 
 export interface AdminNavItemMeta {
@@ -111,6 +112,13 @@ export const ADMIN_NAV_SECTIONS_META: AdminNavSectionMeta[] = [
         keywords: "runbooks health ports services guides",
         summary: "Live port health checks and step-by-step operational guides.",
         iconKey: "runbooks",
+      },
+      {
+        href: "/credentials",
+        label: "OAuth & API Credentials",
+        keywords: "google oauth drive consent credentials smtp r2 meta razorpay database keys",
+        summary: "Manage Google OAuth Consent Screen, SMTP, R2, Meta & Razorpay credentials in DB.",
+        iconKey: "credentials",
       },
       {
         href: "/setup",
@@ -366,6 +374,34 @@ export const ADMIN_PAGE_GUIDES: AdminPageGuide[] = [
       },
     ],
     cautions: [],
+  },
+  {
+    routePrefix: "/credentials",
+    title: "Staff SOP — Google OAuth Consent Screen & Database-Controlled API Credentials",
+    summary:
+      "Configure the RapidShift Labs Google OAuth 2.0 Web Client (for 1-click customer Google Drive & Business Profile connections), SMTP email, Cloudflare R2, Meta App, and Razorpay — encrypted directly in control.db without SSH .env edits.",
+    roleNote: "Super Admin only — all secrets encrypted with AES-256-GCM envelope keys.",
+    steps: [
+      {
+        title: "Create a Google 'Web Application' OAuth Client (NEVER a Service Account JSON!)",
+        detail:
+          "In console.cloud.google.com → APIs & Services → Library, enable 'Google Drive API'. Configure the 'RapidShift Labs' External OAuth Consent Screen and click PUBLISH APP. Then go to Credentials → + Create Credentials → OAuth client ID → Application type: Web application (do NOT choose Service Account).",
+      },
+      {
+        title: "Paste Exact Origin & Callback URI Shown on This Page",
+        detail:
+          "Copy the Authorized JavaScript Origin (https://app.rapidshiftlabs.in) and Authorized Redirect URI (https://app.rapidshiftlabs.in/api/oauth/google/callback) from the top guide card into Google Cloud Console, then paste either the downloaded client_secret_*.json or Client ID + Secret below.",
+      },
+      {
+        title: "Verify SMTP, Managed R2, Meta App & Razorpay in Database",
+        detail:
+          "Save any platform-wide API keys below to override .env immediately across all PM2 workers without restarting the server, and click 'Send Live Test Email' to verify SMTP delivery.",
+      },
+    ],
+    cautions: [
+      "Do NOT create or paste a Google Service Account JSON ('type': 'service_account'). Service accounts have zero personal Drive quota and cannot display Google's 'Sign in with Google' consent screen.",
+      "Always click 'PUBLISH APP' under Google Auth Platform → Audience so customer refresh tokens do not expire every 7 days.",
+    ],
   },
   {
     routePrefix: "/setup",

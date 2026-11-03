@@ -165,3 +165,32 @@ export function ActionLink({
     </Link>
   );
 }
+
+export function AdminCopyButton({
+  text,
+  label = "Copy",
+  copiedLabel = "Copied!",
+}: {
+  text: string;
+  label?: string;
+  copiedLabel?: string;
+}) {
+  const [copied, setCopied] = React.useState(false);
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (typeof navigator !== "undefined" && navigator.clipboard) {
+          void navigator.clipboard.writeText(text).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          });
+        }
+      }}
+      className="adm-btn-secondary py-1 px-2.5 text-[11px]"
+    >
+      {copied ? copiedLabel : label}
+    </button>
+  );
+}

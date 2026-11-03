@@ -675,6 +675,24 @@ export const CONTROL_MIGRATIONS: SqlMigration[] = [
       ALTER TABLE agent_devices ADD COLUMN last_error_message TEXT;
     `,
   },
+  {
+    version: 7,
+    name: "0007_platform_credentials_vault",
+    sql: `
+      CREATE TABLE IF NOT EXISTS platform_credentials (
+        provider_key TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        public_config_json TEXT NOT NULL DEFAULT '{}',
+        encrypted_secrets TEXT NOT NULL DEFAULT '',
+        masked_hints_json TEXT NOT NULL DEFAULT '{}',
+        updated_by_staff_id TEXT,
+        last_verified_at INTEGER,
+        last_verify_status TEXT,
+        last_verify_message TEXT,
+        updated_at INTEGER NOT NULL
+      );
+    `,
+  },
 ];
 
 export const INGRESS_MIGRATIONS: SqlMigration[] = [

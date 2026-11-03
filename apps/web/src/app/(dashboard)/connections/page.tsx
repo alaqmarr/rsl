@@ -6,6 +6,7 @@ import {
 } from "@rsl/connections";
 import { resolveEndpointsFromHeaders } from "@rsl/core";
 import { canRoleAccessWebRoute, canRolePerform, formatRoleLabel } from "@rsl/rbac";
+import { getPublicGoogleOAuthStatus } from "@rsl/tenancy";
 import { AccessRestrictedState, PageHeader, SectionCard, StatusPill } from "@rsl/ui";
 import { ConnectionsHub } from "@/components/connections-hub";
 import { FlashBanner } from "@/components/flash-banner";
@@ -38,6 +39,7 @@ export default async function ConnectedAccountsPage({
   });
 
   const data = listWorkspaceConnections(session.workspace.id);
+  const googleOAuth = getPublicGoogleOAuthStatus();
   const canManage = canRolePerform(session.roleSlug, "connections:manage", session.workspace.id);
   const webhookVerifyToken = canManage
     ? getOrCreateWorkspaceWebhookVerifyToken(session.workspace.id)
@@ -88,6 +90,7 @@ export default async function ConnectedAccountsPage({
         metaWebhookUrl={endpoints.metaWebhookUrl}
         webhookVerifyToken={webhookVerifyToken}
         canManage={canManage}
+        googleOAuth={googleOAuth}
       />
 
       {data.tallyDevices.length > 0 && (

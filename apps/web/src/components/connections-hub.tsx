@@ -30,12 +30,22 @@ export interface SerializedConnectionItem {
   updatedAt: number;
 }
 
+export interface GoogleOAuthClientStatus {
+  isReady: boolean;
+  enableDriveOAuth: boolean;
+  enableGbpOAuth: boolean;
+  consentAppName: string;
+  publishingStatus: "production" | "testing";
+  defaultDriveFolderName: string;
+}
+
 export interface ConnectionsHubProps {
   connections: SerializedConnectionItem[];
   whatsappWebhookUrl: string;
   metaWebhookUrl: string;
   webhookVerifyToken: string;
   canManage: boolean;
+  googleOAuth?: GoogleOAuthClientStatus;
 }
 
 interface WhitelistStep {
@@ -242,33 +252,33 @@ const CHANNEL_BLUEPRINTS: ChannelBlueprint[] = [
     kind: "google_business",
     shortLabel: "Google Business",
     title: "Google Business Profile (Store Reviews & Replies)",
-    badgeText: "GBP API",
+    badgeText: "1-Click Google OAuth",
     summary:
-      "Pull customer star ratings across store locations and publish verified owner replies directly to Google Maps & Search.",
+      "Sign in directly with Google to pull customer star ratings across store locations and publish verified owner replies to Google Maps & Search.",
     webhookMode: "none",
     webhookFields: [],
     requiredScopes: ["https://www.googleapis.com/auth/business.manage"],
     steps: [
       {
-        title: "1. Submit Google GBP API Quota Whitelisting Request",
+        title: "1. Click 'Sign in with Google Business Profile' on the Left",
         detail:
-          "Google sets Business Profile API quota to 0 QPM on new Cloud projects until whitelisted. Submit the Google Business Profile API Access Request form with your GCP Project Number and verified business domain to unlock 300 QPM.",
+          "You do NOT need Google Cloud Console, Service Account JSON files, or manual tokens. Click the Google Sign-In button and select the Google account that owns or manages your verified Google Business Profile listing.",
       },
       {
-        title: "2. Enable All Three GBP APIs in Google Cloud Console",
+        title: "2. Approve 'RapidShift Labs' on Google's Consent Screen",
         detail:
-          "In console.cloud.google.com → APIs & Services → Library, enable: My Business Business Information API, My Business Account Management API, and Google My Business API.",
-      },
-      {
-        title: "3. Whitelist Authorized Domain & OAuth Test Users",
-        detail:
-          "Under OAuth Consent Screen, add your domain to Authorized Domains and whitelist the Google email that owns/manages your verified Google Business Profile listing.",
-      },
-      {
-        title: "4. Issue OAuth Token with 'business.manage' Scope",
-        detail:
-          "Authorize scope 'https://www.googleapis.com/auth/business.manage' (offline access) and paste both the Access Token and optional Refresh Token along with your Location ID (locations/...).",
+          "Review the permission prompt on accounts.google.com and click Continue / Allow. RapidShift Labs receives a secure auto-renewing token encrypted in your workspace vault.",
         codeHint: "https://www.googleapis.com/auth/business.manage",
+      },
+      {
+        title: "3. Automatic Storefront & Location Discovery",
+        detail:
+          "Immediately after sign-in, RapidShift Labs discovers your verified GBP Account and primary Storefront Location ID automatically so customer reviews sync straight into the Google Reviews tab.",
+      },
+      {
+        title: "4. Multi-Branch Override (Only If You Manage Multiple Locations)",
+        detail:
+          "If your Google account manages multiple branches and you want to target a specific store, click 'Rotate Token / Edit' on the connected card below to enter a specific locations/... ID.",
       },
     ],
   },
@@ -276,33 +286,33 @@ const CHANNEL_BLUEPRINTS: ChannelBlueprint[] = [
     kind: "google_drive",
     shortLabel: "Google Drive",
     title: "Google Drive Off-Site Backup Vault",
-    badgeText: "Encrypted Drive",
+    badgeText: "1-Click Google OAuth",
     summary:
-      "Mirror signed AES-encrypted workspace backup bundles (.rslbackup) into a dedicated Google Drive folder under your company account.",
+      "Connect your Google Drive in 2 clicks using Google's official Consent Screen — creates a dedicated backup folder automatically and mirrors every encrypted .rslbackup archive.",
     webhookMode: "none",
     webhookFields: [],
     requiredScopes: ["https://www.googleapis.com/auth/drive.file"],
     steps: [
       {
-        title: "1. Enable Google Drive API in Google Cloud Console",
+        title: "1. Click 'Connect Google Drive with Google' (No Service Account JSON Needed!)",
         detail:
-          "Open console.cloud.google.com → APIs & Services → Library, search for 'Google Drive API', and click Enable.",
+          "Never create or upload a Google Service Account JSON file. Simply click the official Google Sign-In button on the left and pick the Gmail or Google Workspace account where you want off-site backups stored.",
       },
       {
-        title: "2. Create a Dedicated Backup Folder & Copy Folder ID",
+        title: "2. Privacy-First 'drive.file' Permission Scope",
         detail:
-          "Create a folder in Google Drive (e.g. RSL_Encrypted_Backups), open it in your browser, and copy the alphanumeric Folder ID after '/folders/' in the address bar.",
-      },
-      {
-        title: "3. Share Folder with Authorised Account (Editor Access)",
-        detail:
-          "Ensure the Google user or service account issuing the OAuth token has Editor access to that folder.",
-      },
-      {
-        title: "4. Generate Token with Least-Privilege 'drive.file' Scope",
-        detail:
-          "Authorize 'https://www.googleapis.com/auth/drive.file' so the token can only access files created by RSL Marketing, never unrelated company documents.",
+          "Google's Consent Screen only grants RapidShift Labs access to the specific backup folder & files it creates ('drive.file' scope). RapidShift Labs can NEVER view, list, or modify any other personal or company files in your Google Drive.",
         codeHint: "https://www.googleapis.com/auth/drive.file",
+      },
+      {
+        title: "3. Automatic Backup Folder Creation",
+        detail:
+          "As soon as you click Allow on Google's screen, RapidShift Labs automatically creates a 'RapidShift Labs Backups' folder in your Google Drive — no manual Folder ID copying required.",
+      },
+      {
+        title: "4. Automatic Off-Site Upload on Every Backup",
+        detail:
+          "Whenever you create an encrypted .rslbackup snapshot in Cloud Storage & Backups, a copy is uploaded automatically to your Google Drive folder with auto-renewing OAuth refresh tokens.",
       },
     ],
   },
@@ -323,6 +333,7 @@ export function ConnectionsHub({
   metaWebhookUrl,
   webhookVerifyToken: initialVerifyToken,
   canManage,
+  googleOAuth,
 }: ConnectionsHubProps) {
   const router = useRouter();
   const [selectedKind, setSelectedKind] = useState<ConnectionChannelKind>("whatsapp_cloud");
@@ -557,7 +568,80 @@ export function ConnectionsHub({
                 Owner or Admin to link or rotate external provider tokens.
               </div>
             ) : (
-              <form key={selectedKind} onSubmit={handleConnectSubmit} className="space-y-4 text-[13px]">
+              <div className="space-y-4">
+                {selectedKind.startsWith("google") && (
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50/75 p-4 text-[13px]">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200">
+                        Recommended • Official Google Consent Screen
+                      </span>
+                      <span className="text-[11px] font-semibold text-emerald-900">
+                        App: {googleOAuth?.consentAppName || "RapidShift Labs"}
+                      </span>
+                    </div>
+                    <h4 className="mt-2.5 text-sm font-bold text-slate-900">
+                      {selectedKind === "google_drive"
+                        ? "Connect Your Google Drive Automatically in 2 Clicks"
+                        : "Connect Google Business Profile with Google Sign-In"}
+                    </h4>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-700">
+                      {selectedKind === "google_drive"
+                        ? `No Google Cloud Console, no Service Account JSONs, and no manual Folder IDs needed. Sign in on Google's official screen — RapidShift Labs automatically creates '${googleOAuth?.defaultDriveFolderName || "RapidShift Labs Backups"}' in your Drive using the privacy-safe drive.file scope.`
+                        : "Sign in with the Google account that manages your verified Google Business Profile listing. Storefront locations and auto-renewing refresh tokens are configured automatically."}
+                    </p>
+
+                    {(selectedKind === "google_drive" && googleOAuth?.enableDriveOAuth) ||
+                    (selectedKind === "google_business" && googleOAuth?.enableGbpOAuth) ? (
+                      <div className="mt-3.5 flex flex-wrap items-center gap-3">
+                        <a
+                          href={`/api/oauth/google/start?purpose=${selectedKind}&returnTo=/connections`}
+                          className="rsl-btn-primary inline-flex items-center gap-2"
+                        >
+                          <span>
+                            {selectedKind === "google_drive"
+                              ? "Connect Google Drive with Google →"
+                              : "Sign in with Google Business Profile →"}
+                          </span>
+                        </a>
+                        <span className="text-[11px] text-emerald-900/80">
+                          Auto-renews tokens • Zero JSON files required
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="mt-3 rounded-xl border border-amber-200 bg-white/90 p-3 text-xs text-amber-950">
+                        <strong>Platform Google OAuth Pending Setup:</strong> Ask your Platform Super Admin to add the{" "}
+                        <strong>RapidShift Labs</strong> Web OAuth Client ID &amp; Secret under{" "}
+                        <code className="rounded bg-amber-100/70 px-1 py-0.5 font-mono text-[11px]">
+                          Staff Portal → OAuth &amp; API Credentials
+                        </code>{" "}
+                        to unlock 1-click Google Sign-In for all workspaces. You can still test with a manual or sandbox token below.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <details
+                  open={!selectedKind.startsWith("google")}
+                  className={
+                    selectedKind.startsWith("google")
+                      ? "group rounded-xl border border-zinc-200/90 bg-zinc-50/50 p-3.5"
+                      : ""
+                  }
+                >
+                  {selectedKind.startsWith("google") && (
+                    <summary className="cursor-pointer list-none text-xs font-semibold text-slate-700 select-none">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span>Advanced / Sandbox Testing Only: Paste Manual OAuth Token Override</span>
+                        <span className="text-[11px] font-normal text-zinc-500">(Click to expand)</span>
+                      </span>
+                    </summary>
+                  )}
+
+              <form
+                key={selectedKind}
+                onSubmit={handleConnectSubmit}
+                className={`space-y-4 text-[13px] ${selectedKind.startsWith("google") ? "mt-3.5 border-t border-zinc-200/80 pt-3.5" : ""}`}
+              >
                 {selectedKind === "whatsapp_cloud" && (
                   <>
                     <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
@@ -902,6 +986,8 @@ export function ConnectionsHub({
                   </Link>
                 </div>
               </form>
+                </details>
+              </div>
             )}
           </SectionCard>
 
@@ -1133,6 +1219,15 @@ export function ConnectionsHub({
 
                     {canManage && (
                       <div className="flex flex-wrap items-center gap-2">
+                        {((c.channelKind === "google_drive" && googleOAuth?.enableDriveOAuth) ||
+                          (c.channelKind === "google_business" && googleOAuth?.enableGbpOAuth)) && (
+                          <a
+                            href={`/api/oauth/google/start?purpose=${c.channelKind}&returnTo=/connections`}
+                            className="rsl-btn-primary py-1.5 text-xs"
+                          >
+                            Reconnect with Google
+                          </a>
+                        )}
                         <button
                           type="button"
                           disabled={Boolean(pendingCardAction)}

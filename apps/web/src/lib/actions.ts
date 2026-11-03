@@ -53,6 +53,7 @@ import {
   linkExternalConnection,
   rotateWorkspaceWebhookVerifyToken,
   updateExternalConnection,
+  uploadFileToWorkspaceGoogleDrive,
   verifyExternalConnectionHealth,
   type ConnectionChannelKind,
 } from "@rsl/connections";
@@ -1401,29 +1402,59 @@ export async function createEncryptedBackupAction(formData: FormData) {
   const res = await createSignedEncryptedBackup(session.ctx, { destinationLabel: label });
   if (!res.ok) return goWithError("/backups", res.error.message);
 
+  const bundleBytes = Buffer.from(res.data.bundleBufferBase64, "base64");
+  const fileName = `${res.data.backupId}.rslbackup`;
+
   try {
     await putWorkspaceObject({
       workspaceId: session.workspace.id,
       category: "backup_archive",
-      fileName: `${res.data.backupId}.rslbackup`,
+      fileName,
       mimeType: "application/json",
-      bytes: Buffer.from(res.data.bundleBufferBase64, "base64"),
+      bytes: bundleBytes,
       actorId: session.user.id,
     });
   } catch {
     // Local backup copy already saved
   }
 
+  const driveSync = await uploadFileToWorkspaceGoogleDrive({
+    workspaceId: session.workspace.id,
+    fileName,
+    mimeType: "application/json",
+    bytes: bundleBytes,
+  }).catch(() => ({ uploaded: false as const }));
+
   await sendStorageAndBackupNotification({
     workspaceId: session.workspace.id,
     businessName: session.workspace.name,
     recipientEmail: session.user.email,
     operationTitle: "Business Backup Created",
-    summaryLine: `Backup (${Math.max(1, Math.round(res.data.sizeBytes / 1024))} KB) is ready for download.`,
+    summaryLine: driveSync.uploaded
+      ? `Backup (${Math.max(1, Math.round(res.data.sizeBytes / 1024))} KB) is ready for download and synced automatically to Google Drive (${driveSync.driveEmail || "connected account"}).`
+      : `Backup (${Math.max(1, Math.round(res.data.sizeBytes / 1024))} KB) is ready for download.`,
     checksumOrDetails: `Backup ID: ${res.data.backupId}`,
   }).catch(() => undefined);
 
+  if (driveSync.uploaded) {
+    return goWithNotice(
+      "/backups",
+      `Backup created, ready to download, and uploaded automatically to Google Drive (${driveSync.driveEmail || "connected account"} → ${driveSync.folderName || "RapidShift Labs Backups"}).`
+    );
+  }
+
   return goWithNotice("/backups", "Backup created and ready to download.");
+}
+
+export async function disconnectGoogleDriveFromBackupsAction(formData: FormData) {
+  const session = await requireWebSession();
+  const connectionId = String(formData.get("connectionId") || "").trim();
+  if (!connectionId) {
+    return goWithError("/backups", "Missing Google Drive connection ID.");
+  }
+  const res = await disconnectExternalConnection(session.ctx, { connectionId });
+  if (!res.ok) return goWithError("/backups", res.error.message);
+  return goWithNotice("/backups", "Google Drive automatic backup connection disconnected.");
 }
 
 export async function restoreBackupAction(formData: FormData) {

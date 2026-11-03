@@ -52,13 +52,25 @@ import {
 } from "@rsl/billing";
 import { formatInr, getEnv, newEntityId, rupeesToPaise } from "@rsl/core";
 import { controlSchema, platformLogsSchema, tenantDataSchema } from "@rsl/database";
-import { sendBillingNotification } from "@rsl/notifications";
+import { sendBillingNotification, sendPlatformSmtpTestEmail } from "@rsl/notifications";
 import {
   enqueueWorkspaceSslProvisioning,
   rehydrateFromSqlite,
   replayDeadLetterJob,
 } from "@rsl/queue";
-import { controlDb, platformLogsDb, tenantDataDb } from "@rsl/tenancy";
+import {
+  clearPlatformCredentialOverride,
+  controlDb,
+  platformLogsDb,
+  recordPlatformCredentialVerification,
+  savePlatformGoogleOAuthConfig,
+  savePlatformManagedR2Config,
+  savePlatformMetaAppConfig,
+  savePlatformRazorpayConfig,
+  savePlatformSmtpConfig,
+  tenantDataDb,
+  type PlatformCredentialProviderKey,
+} from "@rsl/tenancy";
 import {
   extractTemplateVariables,
   staffUpdateWhatsAppTemplateStatus,
@@ -1976,5 +1988,290 @@ export async function staffProvisionClientSslAction(formData: FormData) {
     provisionedCount >= 2
       ? `Verified active HTTPS certificates for ${ws.slug}.tally.rapidshiftlabs.in & ${ws.slug}.api.rapidshiftlabs.in.`
       : `Queued backend SSL certificate provisioning for ${ws.slug}.tally.rapidshiftlabs.in & ${ws.slug}.api.rapidshiftlabs.in.`
+  );
+}
+
+/* ============================================================================
+ * Database-Controlled Platform OAuth & API Credentials Actions (Super Admin)
+ * ============================================================================ */
+
+function logStaffCredentialAction(staffId: string, action: string, summary: string) {
+  const now = Date.now();
+  platformLogsDb()
+    .insert(platformLogsSchema.staffActionLogs)
+    .values({
+      id: newEntityId("act", "creds"),
+      ts: now,
+      staffId,
+      action,
+      summary,
+      correlationId: `stf_${now}`,
+    })
+    .run();
+}
+
+export async function staffSaveGoogleOAuthCredentialsAction(formData: FormData) {
+  const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+
+  let oauthJsonRaw = String(formData.get("oauthJsonRaw") || "").trim();
+  const uploadedJson = formData.get("oauthJsonFile");
+  if (uploadedJson instanceof File && uploadedJson.size > 0) {
+    oauthJsonRaw = (await uploadedJson.text()).trim();
+  }
+
+  try {
+    const saved = savePlatformGoogleOAuthConfig({
+      enabled: formData.get("enabled") === "on",
+      oauthJsonRaw: oauthJsonRaw || undefined,
+      clientId: String(formData.get("clientId") || "").trim() || undefined,
+      clientSecret: String(formData.get("clientSecret") || "").trim() || undefined,
+      projectId: String(formData.get("projectId") || "").trim(),
+      consentAppName: String(formData.get("consentAppName") || "RapidShift Labs").trim(),
+      publishingStatus:
+        String(formData.get("publishingStatus") || "production") === "testing"
+          ? "testing"
+          : "production",
+      defaultDriveFolderName: String(
+        formData.get("defaultDriveFolderName") || "RapidShift Labs Backups"
+      ).trim(),
+      enableDriveOAuth: formData.get("enableDriveOAuth") === "on",
+      enableGbpOAuth: formData.get("enableGbpOAuth") === "on",
+      staffId: staff.id,
+    });
+
+    logStaffCredentialAction(
+      staff.id,
+      "platform.credentials.google_oauth.saved",
+      `Updated Google OAuth 2.0 Web Client (${saved.consentAppName}, Drive=${saved.enableDriveOAuth ? "ON" : "OFF"}, GBP=${saved.enableGbpOAuth ? "ON" : "OFF"}) in control.db`
+    );
+
+    return flashAdminRedirect(
+      "/credentials",
+      "notice",
+      `Google OAuth 2.0 Web Client (${saved.consentAppName}) encrypted and activated in database! Customers can now connect Google Drive in 1 click.`
+    );
+  } catch (err) {
+    return flashAdminRedirect(
+      "/credentials",
+      "error",
+      err instanceof Error ? err.message : "Failed to save Google OAuth credentials."
+    );
+  }
+}
+
+export async function staffSaveSmtpCredentialsAction(formData: FormData) {
+  const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+
+  try {
+    const port = Number(formData.get("port") || 465);
+    const saved = savePlatformSmtpConfig({
+      enabled: formData.get("enabled") === "on",
+      host: String(formData.get("host") || "smtp.gmail.com").trim(),
+      port: Number.isFinite(port) && port > 0 ? port : 465,
+      secure: formData.get("secure") === "on",
+      from: String(formData.get("from") || "").trim(),
+      user: String(formData.get("user") || "").trim(),
+      password: String(formData.get("password") || "").trim() || undefined,
+      staffId: staff.id,
+    });
+
+    logStaffCredentialAction(
+      staff.id,
+      "platform.credentials.smtp.saved",
+      `Updated database SMTP transport (${saved.host}:${saved.port}, user ${saved.user})`
+    );
+
+    return flashAdminRedirect(
+      "/credentials",
+      "notice",
+      `Outbound SMTP credentials (${saved.host}:${saved.port}) saved and encrypted in control.db.`
+    );
+  } catch (err) {
+    return flashAdminRedirect(
+      "/credentials",
+      "error",
+      err instanceof Error ? err.message : "Failed to save SMTP credentials."
+    );
+  }
+}
+
+export async function staffSendTestSmtpEmailAction(formData: FormData) {
+  const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  const recipientEmail = String(formData.get("recipientEmail") || staff.email).trim();
+  if (!recipientEmail || !recipientEmail.includes("@")) {
+    return flashAdminRedirect("/credentials", "error", "Enter a valid recipient email address.");
+  }
+
+  try {
+    const out = await sendPlatformSmtpTestEmail(recipientEmail);
+    recordPlatformCredentialVerification({
+      providerKey: "smtp_email",
+      status: out.status === "sent" ? "healthy" : "error",
+      message:
+        out.status === "sent"
+          ? `Test email delivered via live SMTP to ${recipientEmail}.`
+          : `SMTP connection failed or fell back to local queue (${out.transportMode}). Check SMTP host/port/App Password.`,
+    });
+
+    logStaffCredentialAction(
+      staff.id,
+      "platform.credentials.smtp.tested",
+      `Dispatched test SMTP email to ${recipientEmail} (${out.status})`
+    );
+
+    if (out.status !== "sent") {
+      return flashAdminRedirect(
+        "/credentials",
+        "error",
+        `SMTP handshake failed (queued locally instead of live send). Double-check your 16-character Google App Password (no spaces) and port 465 SSL.`
+      );
+    }
+
+    return flashAdminRedirect(
+      "/credentials",
+      "notice",
+      `Live test email sent to ${recipientEmail}! Check your inbox to confirm.`
+    );
+  } catch (err) {
+    recordPlatformCredentialVerification({
+      providerKey: "smtp_email",
+      status: "error",
+      message: err instanceof Error ? err.message : "SMTP test failed",
+    });
+    return flashAdminRedirect(
+      "/credentials",
+      "error",
+      err instanceof Error ? err.message : "Failed to send SMTP test email."
+    );
+  }
+}
+
+export async function staffSaveManagedR2CredentialsAction(formData: FormData) {
+  const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+
+  try {
+    const saved = savePlatformManagedR2Config({
+      enabled: formData.get("enabled") === "on",
+      accountId: String(formData.get("accountId") || "").trim(),
+      endpointUrl: String(formData.get("endpointUrl") || "").trim(),
+      accessKeyId: String(formData.get("accessKeyId") || "").trim(),
+      secretAccessKey: String(formData.get("secretAccessKey") || "").trim() || undefined,
+      bucketPrivate: String(formData.get("bucketPrivate") || "").trim(),
+      bucketPublic: String(formData.get("bucketPublic") || "").trim(),
+      publicBaseUrl: String(formData.get("publicBaseUrl") || "").trim(),
+      staffId: staff.id,
+    });
+
+    logStaffCredentialAction(
+      staff.id,
+      "platform.credentials.r2.saved",
+      `Updated Managed Cloudflare R2 / S3 credentials (private bucket: ${saved.bucketPrivate}) in control.db`
+    );
+
+    return flashAdminRedirect(
+      "/credentials",
+      "notice",
+      `Managed Cloud Storage (bucket '${saved.bucketPrivate}') encrypted and active in control.db.`
+    );
+  } catch (err) {
+    return flashAdminRedirect(
+      "/credentials",
+      "error",
+      err instanceof Error ? err.message : "Failed to save Managed R2 credentials."
+    );
+  }
+}
+
+export async function staffSaveMetaAppCredentialsAction(formData: FormData) {
+  const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+
+  try {
+    const saved = savePlatformMetaAppConfig({
+      enabled: formData.get("enabled") === "on",
+      appId: String(formData.get("appId") || "").trim(),
+      appSecret: String(formData.get("appSecret") || "").trim() || undefined,
+      configId: String(formData.get("configId") || "").trim(),
+      webhookVerifyToken: String(formData.get("webhookVerifyToken") || "").trim() || undefined,
+      graphVersion: String(formData.get("graphVersion") || "v21.0").trim(),
+      staffId: staff.id,
+    });
+
+    logStaffCredentialAction(
+      staff.id,
+      "platform.credentials.meta.saved",
+      `Updated Meta Platform App credentials (App ID ${saved.appId}, Graph ${saved.graphVersion}) in control.db`
+    );
+
+    return flashAdminRedirect(
+      "/credentials",
+      "notice",
+      `Meta / WhatsApp Platform App (${saved.appId}) encrypted and active for HMAC webhook verification.`
+    );
+  } catch (err) {
+    return flashAdminRedirect(
+      "/credentials",
+      "error",
+      err instanceof Error ? err.message : "Failed to save Meta App credentials."
+    );
+  }
+}
+
+export async function staffSaveRazorpayCredentialsAction(formData: FormData) {
+  const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+
+  try {
+    const saved = savePlatformRazorpayConfig({
+      enabled: formData.get("enabled") === "on",
+      keyId: String(formData.get("keyId") || "").trim(),
+      keySecret: String(formData.get("keySecret") || "").trim() || undefined,
+      webhookSecret: String(formData.get("webhookSecret") || "").trim() || undefined,
+      staffId: staff.id,
+    });
+
+    logStaffCredentialAction(
+      staff.id,
+      "platform.credentials.razorpay.saved",
+      `Updated Razorpay Gateway credentials (Key ID ${saved.keyId}) in control.db`
+    );
+
+    return flashAdminRedirect(
+      "/credentials",
+      "notice",
+      `Razorpay Payment Gateway (${saved.keyId}) encrypted and active in control.db.`
+    );
+  } catch (err) {
+    return flashAdminRedirect(
+      "/credentials",
+      "error",
+      err instanceof Error ? err.message : "Failed to save Razorpay credentials."
+    );
+  }
+}
+
+export async function staffClearPlatformCredentialAction(formData: FormData) {
+  const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  const providerKey = String(formData.get("providerKey") || "").trim() as PlatformCredentialProviderKey;
+  const allowedKeys: PlatformCredentialProviderKey[] = [
+    "google_oauth",
+    "smtp_email",
+    "cloudflare_r2",
+    "meta_app",
+    "razorpay",
+  ];
+  if (!allowedKeys.includes(providerKey)) {
+    return flashAdminRedirect("/credentials", "error", "Unknown credential provider key.");
+  }
+
+  clearPlatformCredentialOverride(providerKey);
+  logStaffCredentialAction(
+    staff.id,
+    "platform.credentials.cleared",
+    `Cleared database override for '${providerKey}' (reverted to .env fallback)`
+  );
+
+  return flashAdminRedirect(
+    "/credentials",
+    "notice",
+    `Removed database override for '${providerKey}'. Platform now falls back to server .env if present.`
   );
 }

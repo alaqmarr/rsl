@@ -317,13 +317,13 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
     guideSlug: "connecting-channels-whatsapp-meta-google",
     prerequisites: [
       "Requires Business Owner or Admin workspace role.",
-      "Have business.facebook.com/settings + developers.facebook.com/apps (for Meta/WhatsApp/IG) or console.cloud.google.com (for Google) open in a second tab.",
+      "For Meta / WhatsApp / Instagram: have business.facebook.com/settings + developers.facebook.com/apps open. For Google Drive or Google Business Profile: just click the 1-click 'Connect with Google' button (no Google Cloud Console or Service Account JSON needed!).",
     ],
     steps: [
       {
         title: "Select the Channel Tab You Want to Connect",
         detail:
-          "Click WhatsApp Cloud API, Instagram Business, Facebook Page, Meta Ads & Pixel, Google Business, or Google Drive at the top of the hub to load its exact required scopes and step-by-step whitelisting checklist.",
+          "Click WhatsApp Cloud API, Instagram Business, Facebook Page, Meta Ads & Pixel, Google Business, or Google Drive at the top of the hub. For Google Drive & Google Business, click the green 1-click Google Sign-In button to authorize via RapidShift Labs's official Google screen!",
       },
       {
         title: "Create an Admin System User & Generate a 'Never' Expiring Token (Meta)",
@@ -600,9 +600,14 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
           "RapidShift copies every existing Tally PDF and media file to your new bucket and verifies byte sizes before switching active storage.",
       },
       {
+        title: "Connect Google Drive in 1 Click for Automatic Off-Site Backups",
+        detail:
+          "Click 'Connect Google Drive with Google' on the Google Drive card (no Service Account JSON or Folder ID required!). Approve on Google's official RapidShift Labs screen — we automatically create 'RapidShift Labs Backups' using the privacy-safe drive.file scope and upload every .rslbackup snapshot automatically.",
+      },
+      {
         title: "Download Instant CSV / Tally XML / JSON Exports or Encrypted .rslbackup",
         detail:
-          "Use the top export buttons anytime, or enter an 8+ character passphrase under Create Backup to generate a signed AES-256-GCM '.rslbackup' snapshot.",
+          "Use the top export buttons anytime, or click 'Create Backup Now' to generate a signed AES-256-GCM '.rslbackup' snapshot (downloaded locally and mirrored to Google Drive if connected).",
       },
       {
         title: "Restore Safely Without Losing Wallet Balance, GST Invoices or STOP Lists",

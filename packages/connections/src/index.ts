@@ -3,8 +3,12 @@ import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { decryptEnvelope, encryptEnvelope, getEnv, newId, RslError } from "@rsl/core";
 import { controlSchema } from "@rsl/database";
-import { defineAction } from "@rsl/logging";
-import { controlDb } from "@rsl/tenancy";
+import { appendActionLog, defineAction } from "@rsl/logging";
+import {
+  controlDb,
+  getPlatformGoogleOAuthConfig,
+  getPlatformMetaAppConfig,
+} from "@rsl/tenancy";
 
 export interface StoredTokenPayload {
   accessToken: string;
@@ -37,7 +41,11 @@ export interface ConnectionMetadata {
   accountId?: string;
   storeName?: string;
   folderId?: string;
+  folderName?: string;
+  folderWebViewLink?: string;
   driveEmail?: string;
+  googleUserName?: string;
+  oauthConnected?: boolean;
   maskedTokenHint?: string;
   tokenMode?: "live" | "sandbox";
   lastLiveCheckMessage?: string;
@@ -124,6 +132,10 @@ export function rotateWorkspaceWebhookVerifyToken(workspaceId: string): string {
 export function isValidMetaWebhookVerifyToken(candidate: string | null | undefined): boolean {
   const clean = (candidate || "").trim();
   if (!clean) return false;
+  const dbMetaToken = getPlatformMetaAppConfig().webhookVerifyToken;
+  if (dbMetaToken && clean === dbMetaToken) {
+    return true;
+  }
   const envExpected = getEnv().META_WEBHOOK_VERIFY_TOKEN;
   if (envExpected && clean === envExpected) {
     return true;
@@ -679,6 +691,10 @@ export const verifyExternalConnectionHealth = defineAction({
         }
       } else if (conn.provider === "google" || conn.provider === "gdrive") {
         try {
+          const refreshed = await refreshGoogleConnectionIfNeeded(ctx.workspaceId, conn.id);
+          if (refreshed) {
+            accessToken = refreshed;
+          }
           const resp = await fetch(
             `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`,
             {
@@ -688,11 +704,12 @@ export const verifyExternalConnectionHealth = defineAction({
           );
           if (resp.ok) {
             nextStatus = "healthy";
-            liveMessage = "Verified live with Google OAuth2 Token Info API.";
+            liveMessage =
+              "Verified live with Google OAuth2 API (automatic refresh token active).";
           } else {
             nextStatus = "needs_reauth";
             liveMessage =
-              "Google OAuth2 rejected this token (expired or invalid). Generate a fresh OAuth access token with business.manage / drive.file scope.";
+              "Google OAuth2 rejected this token. Click 'Connect with Google' to re-authorize your account in one click.";
           }
         } catch {
           liveMessage = "Vault token intact (Google OAuth API unreachable from current network).";
@@ -705,9 +722,17 @@ export const verifyExternalConnectionHealth = defineAction({
       meta.maskedTokenHint = maskSecretToken(accessToken);
     }
 
+    const freshConnRow = db
+      .select({ encryptedTokens: controlSchema.connections.encryptedTokens, expiresAt: controlSchema.connections.expiresAt })
+      .from(controlSchema.connections)
+      .where(eq(controlSchema.connections.id, conn.id))
+      .get();
+
     db.update(controlSchema.connections)
       .set({
         status: nextStatus,
+        encryptedTokens: freshConnRow?.encryptedTokens ?? conn.encryptedTokens,
+        expiresAt: freshConnRow?.expiresAt ?? conn.expiresAt,
         metadataJson: JSON.stringify(meta),
         lastHealthCheckAt: now,
         updatedAt: now,
@@ -724,3 +749,697 @@ export const verifyExternalConnectionHealth = defineAction({
     };
   },
 });
+
+/* ============================================================================
+ * Automatic 1-Click Google OAuth 2.0 Consent Screen Flow (`drive.file` & GBP)
+ * ============================================================================ */
+
+export type GoogleOAuthPurpose = "google_drive" | "google_business";
+
+export function buildGoogleOAuthAuthorizeUrl(params: {
+  redirectUri: string;
+  state: string;
+  purpose: GoogleOAuthPurpose;
+}): string {
+  const cfg = getPlatformGoogleOAuthConfig();
+  if (!cfg.isReady) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Google OAuth 2.0 is not configured yet on the Staff Portal. Ask your Super Admin to save the Google OAuth Web Client ID & Secret under Staff Portal → OAuth & API Credentials."
+    );
+  }
+  if (params.purpose === "google_drive" && !cfg.enableDriveOAuth) {
+    throw new RslError("RSL-VAL-1001", "Google Drive 1-click OAuth is currently disabled by platform admin.");
+  }
+  if (params.purpose === "google_business" && !cfg.enableGbpOAuth) {
+    throw new RslError("RSL-VAL-1001", "Google Business Profile 1-click OAuth is currently disabled by platform admin.");
+  }
+
+  const scopes =
+    params.purpose === "google_drive"
+      ? [
+          "openid",
+          "email",
+          "profile",
+          "https://www.googleapis.com/auth/drive.file",
+        ]
+      : [
+          "openid",
+          "email",
+          "profile",
+          "https://www.googleapis.com/auth/business.manage",
+        ];
+
+  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  url.searchParams.set("client_id", cfg.clientId);
+  url.searchParams.set("redirect_uri", params.redirectUri);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", scopes.join(" "));
+  url.searchParams.set("access_type", "offline");
+  url.searchParams.set("prompt", "consent select_account");
+  url.searchParams.set("include_granted_scopes", "true");
+  url.searchParams.set("state", params.state);
+  return url.toString();
+}
+
+export async function refreshGoogleConnectionIfNeeded(
+  workspaceId: string,
+  connectionId: string
+): Promise<string | null> {
+  const db = controlDb();
+  const conn = db
+    .select()
+    .from(controlSchema.connections)
+    .where(
+      and(
+        eq(controlSchema.connections.id, connectionId),
+        eq(controlSchema.connections.workspaceId, workspaceId)
+      )
+    )
+    .get();
+  if (!conn) return null;
+
+  let stored: StoredTokenPayload;
+  try {
+    stored = JSON.parse(decryptEnvelope(conn.encryptedTokens)) as StoredTokenPayload;
+  } catch {
+    return null;
+  }
+
+  const now = Date.now();
+  const stillFresh = Boolean(conn.expiresAt && conn.expiresAt > now + 90_000 && stored.accessToken);
+  if (stillFresh) {
+    return stored.accessToken;
+  }
+
+  if (!stored.refreshToken) {
+    return stored.accessToken || null;
+  }
+
+  const cfg = getPlatformGoogleOAuthConfig();
+  if (!cfg.isReady) {
+    return stored.accessToken || null;
+  }
+
+  const body = new URLSearchParams({
+    client_id: cfg.clientId,
+    client_secret: cfg.clientSecret,
+    refresh_token: stored.refreshToken,
+    grant_type: "refresh_token",
+  });
+
+  const resp = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+    signal: AbortSignal.timeout(8000),
+  });
+
+  if (!resp.ok) {
+    return stored.accessToken || null;
+  }
+
+  const data = (await resp.json()) as {
+    access_token?: string;
+    expires_in?: number;
+    refresh_token?: string;
+  };
+  if (!data.access_token) {
+    return stored.accessToken || null;
+  }
+
+  const nextRefresh = data.refresh_token || stored.refreshToken;
+  const nextExpiresAt = now + Math.max(300, Number(data.expires_in || 3599)) * 1000;
+  const nextEncrypted = encryptEnvelope(
+    JSON.stringify({
+      accessToken: data.access_token,
+      refreshToken: nextRefresh,
+      issuedAt: now,
+    } satisfies StoredTokenPayload)
+  );
+
+  const meta = parseMetadataSafe(conn.metadataJson);
+  meta.maskedTokenHint = maskSecretToken(data.access_token);
+
+  db.update(controlSchema.connections)
+    .set({
+      encryptedTokens: nextEncrypted,
+      expiresAt: nextExpiresAt,
+      status: "healthy",
+      metadataJson: JSON.stringify(meta),
+      updatedAt: now,
+    })
+    .where(eq(controlSchema.connections.id, conn.id))
+    .run();
+
+  return data.access_token;
+}
+
+async function ensureGoogleDriveBackupFolder(
+  accessToken: string,
+  desiredFolderName: string
+): Promise<{ folderId: string; folderName: string; webViewLink?: string }> {
+  const safeName = desiredFolderName.replace(/'/g, "\\'");
+  const q = `mimeType='application/vnd.google-apps.folder' and trashed=false and name='${safeName}'`;
+  const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,webViewLink)&pageSize=5`;
+
+  const searchResp = await fetch(searchUrl, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(8000),
+  });
+
+  if (searchResp.ok) {
+    const found = (await searchResp.json()) as {
+      files?: Array<{ id: string; name: string; webViewLink?: string }>;
+    };
+    const first = found.files?.[0];
+    if (first?.id) {
+      return {
+        folderId: first.id,
+        folderName: first.name || desiredFolderName,
+        webViewLink: first.webViewLink,
+      };
+    }
+  }
+
+  const createResp = await fetch(
+    "https://www.googleapis.com/drive/v3/files?fields=id,name,webViewLink",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: desiredFolderName,
+        mimeType: "application/vnd.google-apps.folder",
+      }),
+      signal: AbortSignal.timeout(8000),
+    }
+  );
+
+  if (!createResp.ok) {
+    const errTxt = await createResp.text().catch(() => "");
+    throw new RslError(
+      "RSL-SYS-1001",
+      `Google Drive signed in, but creating backup folder failed (${createResp.status}). Verify 'Google Drive API' is enabled in your Google Cloud project. ${errTxt.slice(0, 180)}`
+    );
+  }
+
+  const created = (await createResp.json()) as {
+    id: string;
+    name?: string;
+    webViewLink?: string;
+  };
+  return {
+    folderId: created.id,
+    folderName: created.name || desiredFolderName,
+    webViewLink: created.webViewLink,
+  };
+}
+
+export async function completeGoogleOAuthConnection(params: {
+  workspaceId: string;
+  actorId: string;
+  code: string;
+  redirectUri: string;
+  purpose: GoogleOAuthPurpose;
+}): Promise<{
+  connectionId: string;
+  email: string;
+  displayName: string;
+  folderName?: string;
+  locationId?: string;
+}> {
+  const cfg = getPlatformGoogleOAuthConfig();
+  if (!cfg.isReady) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Google OAuth credentials are not configured in the platform database."
+    );
+  }
+
+  const tokenParams = new URLSearchParams({
+    code: params.code,
+    client_id: cfg.clientId,
+    client_secret: cfg.clientSecret,
+    redirect_uri: params.redirectUri,
+    grant_type: "authorization_code",
+  });
+
+  const tokenResp = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: tokenParams.toString(),
+    signal: AbortSignal.timeout(10000),
+  });
+
+  const tokenData = (await tokenResp.json().catch(() => ({}))) as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+    scope?: string;
+    error?: string;
+    error_description?: string;
+  };
+
+  if (!tokenResp.ok || !tokenData.access_token) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      `Google OAuth token exchange failed: ${tokenData.error_description || tokenData.error || `HTTP ${tokenResp.status}`}. Check that Authorized Redirect URI '${params.redirectUri}' is added in Google Cloud Console.`
+    );
+  }
+
+  const accessToken = tokenData.access_token;
+  const refreshToken = tokenData.refresh_token;
+  const expiresInSec = Math.max(300, Number(tokenData.expires_in || 3599));
+  const scopesGranted = (tokenData.scope || "")
+    .split(/\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // Fetch Google user email & name
+  let email = "connected-account@gmail.com";
+  let googleUserName = "Google Account";
+  let googleSub = "";
+  try {
+    const userResp = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (userResp.ok) {
+      const u = (await userResp.json()) as { email?: string; name?: string; sub?: string };
+      if (u.email) email = u.email;
+      if (u.name) googleUserName = u.name;
+      if (u.sub) googleSub = u.sub;
+    }
+  } catch {
+    // non-fatal
+  }
+
+  const db = controlDb();
+  const now = Date.now();
+  const expiresAt = now + expiresInSec * 1000;
+
+  if (params.purpose === "google_drive") {
+    const folder = await ensureGoogleDriveBackupFolder(accessToken, cfg.defaultDriveFolderName);
+
+    const existing = db
+      .select()
+      .from(controlSchema.connections)
+      .where(
+        and(
+          eq(controlSchema.connections.workspaceId, params.workspaceId),
+          eq(controlSchema.connections.provider, "gdrive")
+        )
+      )
+      .get();
+
+    let preservedRefresh = refreshToken;
+    if (!preservedRefresh && existing) {
+      try {
+        preservedRefresh = (
+          JSON.parse(decryptEnvelope(existing.encryptedTokens)) as StoredTokenPayload
+        ).refreshToken;
+      } catch {
+        preservedRefresh = undefined;
+      }
+    }
+
+    const encryptedTokens = encryptEnvelope(
+      JSON.stringify({
+        accessToken,
+        refreshToken: preservedRefresh,
+        issuedAt: now,
+      } satisfies StoredTokenPayload)
+    );
+
+    const displayName = `Google Drive (${email})`;
+    const meta: ConnectionMetadata = {
+      channelKind: "google_drive",
+      driveEmail: email,
+      googleUserName,
+      folderId: folder.folderId,
+      folderName: folder.folderName,
+      folderWebViewLink: folder.webViewLink,
+      oauthConnected: true,
+      maskedTokenHint: maskSecretToken(accessToken),
+      tokenMode: "live",
+      lastLiveCheckMessage: `Connected via Google Consent Screen (${email}) • Folder '${folder.folderName}' ready.`,
+      lastLiveCheckedAccountName: email,
+    };
+
+    const connectionId = existing?.id ?? newId();
+    if (existing) {
+      db.update(controlSchema.connections)
+        .set({
+          displayName,
+          externalAccountId: folder.folderId,
+          encryptedTokens,
+          scopesGrantedJson: JSON.stringify(scopesGranted),
+          metadataJson: JSON.stringify(meta),
+          status: "healthy",
+          lastHealthCheckAt: now,
+          expiresAt,
+          updatedAt: now,
+        })
+        .where(eq(controlSchema.connections.id, existing.id))
+        .run();
+    } else {
+      db.insert(controlSchema.connections)
+        .values({
+          id: connectionId,
+          workspaceId: params.workspaceId,
+          provider: "gdrive",
+          displayName,
+          externalAccountId: folder.folderId,
+          encryptedTokens,
+          scopesGrantedJson: JSON.stringify(scopesGranted),
+          metadataJson: JSON.stringify(meta),
+          status: "healthy",
+          lastHealthCheckAt: now,
+          expiresAt,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+    }
+
+    // Also register/update backup_destinations so /backups reflects automatic Drive sync
+    const existingDest = db
+      .select()
+      .from(controlSchema.backupDestinations)
+      .where(
+        and(
+          eq(controlSchema.backupDestinations.workspaceId, params.workspaceId),
+          eq(controlSchema.backupDestinations.provider, "gdrive")
+        )
+      )
+      .get();
+
+    const destConfigEnc = encryptEnvelope(
+      JSON.stringify({
+        connectionId,
+        folderId: folder.folderId,
+        folderName: folder.folderName,
+        driveEmail: email,
+      })
+    );
+
+    if (existingDest) {
+      db.update(controlSchema.backupDestinations)
+        .set({
+          name: `Google Drive — ${email}`,
+          encryptedConfig: destConfigEnc,
+          status: "healthy",
+          consecutiveFailures: 0,
+          lastValidatedAt: now,
+        })
+        .where(eq(controlSchema.backupDestinations.id, existingDest.id))
+        .run();
+    } else {
+      db.insert(controlSchema.backupDestinations)
+        .values({
+          id: newId(),
+          workspaceId: params.workspaceId,
+          name: `Google Drive — ${email}`,
+          provider: "gdrive",
+          encryptedConfig: destConfigEnc,
+          schedule: "daily",
+          retentionCount: 14,
+          encryptionMode: "platform",
+          status: "healthy",
+          consecutiveFailures: 0,
+          lastValidatedAt: now,
+          createdAt: now,
+        })
+        .run();
+    }
+
+    appendActionLog({
+      workspaceId: params.workspaceId,
+      actorType: "user",
+      actorId: params.actorId,
+      source: "web",
+      action: "connections.linked",
+      outcome: "success",
+      requestId: newId(),
+      correlationId: newId(),
+      durationMs: 15,
+      summary: `Connected Google Drive (${email}) via OAuth Consent Screen — folder '${folder.folderName}' ready`,
+    });
+
+    return {
+      connectionId,
+      email,
+      displayName,
+      folderName: folder.folderName,
+    };
+  }
+
+  // Google Business Profile (`google_business`) OAuth auto-discovery
+  let accountId = "";
+  let locationId = "";
+  let storeName = "";
+  try {
+    const accResp = await fetch("https://mybusinessaccountmanagement.googleapis.com/v1/accounts", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(7000),
+    });
+    if (accResp.ok) {
+      const accBody = (await accResp.json()) as {
+        accounts?: Array<{ name?: string; accountName?: string }>;
+      };
+      const firstAcc = accBody.accounts?.[0];
+      if (firstAcc?.name) {
+        accountId = firstAcc.name;
+        const locResp = await fetch(
+          `https://mybusinessbusinessinformation.googleapis.com/v1/${firstAcc.name}/locations?readMask=name,title&pageSize=10`,
+          {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            signal: AbortSignal.timeout(7000),
+          }
+        );
+        if (locResp.ok) {
+          const locBody = (await locResp.json()) as {
+            locations?: Array<{ name?: string; title?: string }>;
+          };
+          const firstLoc = locBody.locations?.[0];
+          if (firstLoc?.name) {
+            locationId = firstLoc.name;
+            storeName = firstLoc.title || "";
+          }
+        }
+      }
+    }
+  } catch {
+    // Graceful fallback if GBP API quota is pending approval
+  }
+
+  const existingGbp = db
+    .select()
+    .from(controlSchema.connections)
+    .where(
+      and(
+        eq(controlSchema.connections.workspaceId, params.workspaceId),
+        eq(controlSchema.connections.provider, "google")
+      )
+    )
+    .get();
+
+  let preservedRefresh = refreshToken;
+  if (!preservedRefresh && existingGbp) {
+    try {
+      preservedRefresh = (
+        JSON.parse(decryptEnvelope(existingGbp.encryptedTokens)) as StoredTokenPayload
+      ).refreshToken;
+    } catch {
+      preservedRefresh = undefined;
+    }
+  }
+
+  const encryptedTokens = encryptEnvelope(
+    JSON.stringify({
+      accessToken,
+      refreshToken: preservedRefresh,
+      issuedAt: now,
+    } satisfies StoredTokenPayload)
+  );
+
+  const extId = locationId || accountId || googleSub || email;
+  const displayName = storeName ? `${storeName} (${email})` : `Google Business (${email})`;
+  const meta: ConnectionMetadata = {
+    channelKind: "google_business",
+    accountId: accountId || undefined,
+    locationId: locationId || undefined,
+    storeName: storeName || undefined,
+    driveEmail: email,
+    googleUserName,
+    oauthConnected: true,
+    maskedTokenHint: maskSecretToken(accessToken),
+    tokenMode: "live",
+    lastLiveCheckMessage: locationId
+      ? `Connected via Google Consent Screen (${storeName || locationId}).`
+      : `Connected Google OAuth (${email}). Enter your store Location ID if you manage multiple branches.`,
+    lastLiveCheckedAccountName: storeName || email,
+  };
+
+  const connectionId = existingGbp?.id ?? newId();
+  if (existingGbp) {
+    db.update(controlSchema.connections)
+      .set({
+        displayName,
+        externalAccountId: extId,
+        encryptedTokens,
+        scopesGrantedJson: JSON.stringify(scopesGranted),
+        metadataJson: JSON.stringify(meta),
+        status: "healthy",
+        lastHealthCheckAt: now,
+        expiresAt,
+        updatedAt: now,
+      })
+      .where(eq(controlSchema.connections.id, existingGbp.id))
+      .run();
+  } else {
+    db.insert(controlSchema.connections)
+      .values({
+        id: connectionId,
+        workspaceId: params.workspaceId,
+        provider: "google",
+        displayName,
+        externalAccountId: extId,
+        encryptedTokens,
+        scopesGrantedJson: JSON.stringify(scopesGranted),
+        metadataJson: JSON.stringify(meta),
+        status: "healthy",
+        lastHealthCheckAt: now,
+        expiresAt,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+  }
+
+  upsertRoutingEntry("google", extId, params.workspaceId, now);
+
+  appendActionLog({
+    workspaceId: params.workspaceId,
+    actorType: "user",
+    actorId: params.actorId,
+    source: "web",
+    action: "connections.linked",
+    outcome: "success",
+    requestId: newId(),
+    correlationId: newId(),
+    durationMs: 15,
+    summary: `Connected Google Business Profile (${email}) via OAuth Consent Screen`,
+  });
+
+  return {
+    connectionId,
+    email,
+    displayName,
+    locationId: locationId || undefined,
+  };
+}
+
+/**
+ * Uploads an encrypted .rslbackup archive directly to the customer's connected Google Drive folder (`drive.file`).
+ */
+export async function uploadFileToWorkspaceGoogleDrive(params: {
+  workspaceId: string;
+  fileName: string;
+  mimeType: string;
+  bytes: Buffer;
+}): Promise<{
+  uploaded: boolean;
+  driveFileId?: string;
+  driveEmail?: string;
+  folderName?: string;
+  error?: string;
+}> {
+  const conn = controlDb()
+    .select()
+    .from(controlSchema.connections)
+    .where(
+      and(
+        eq(controlSchema.connections.workspaceId, params.workspaceId),
+        eq(controlSchema.connections.provider, "gdrive")
+      )
+    )
+    .get();
+
+  if (!conn) {
+    return { uploaded: false };
+  }
+
+  const accessToken = await refreshGoogleConnectionIfNeeded(params.workspaceId, conn.id);
+  if (!accessToken || /^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken)) {
+    return { uploaded: false };
+  }
+
+  const meta = parseMetadataSafe(conn.metadataJson);
+  let folderId = meta.folderId;
+  let folderName = meta.folderName || getPlatformGoogleOAuthConfig().defaultDriveFolderName;
+
+  try {
+    if (!folderId) {
+      const ensured = await ensureGoogleDriveBackupFolder(accessToken, folderName);
+      folderId = ensured.folderId;
+      folderName = ensured.folderName;
+    }
+
+    const boundary = `rsl_gdrive_${crypto.randomBytes(12).toString("hex")}`;
+    const metadataPart = JSON.stringify({
+      name: params.fileName,
+      parents: folderId ? [folderId] : undefined,
+      mimeType: params.mimeType,
+    });
+
+    const preamble = Buffer.from(
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadataPart}\r\n--${boundary}\r\nContent-Type: ${params.mimeType}\r\n\r\n`,
+      "utf8"
+    );
+    const epilogue = Buffer.from(`\r\n--${boundary}--`, "utf8");
+    const multipartBody = Buffer.concat([preamble, params.bytes, epilogue]);
+
+    const uploadResp = await fetch(
+      "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": `multipart/related; boundary=${boundary}`,
+        },
+        body: multipartBody,
+        signal: AbortSignal.timeout(20000),
+      }
+    );
+
+    if (!uploadResp.ok) {
+      const errTxt = await uploadResp.text().catch(() => "");
+      return {
+        uploaded: false,
+        driveEmail: meta.driveEmail,
+        folderName,
+        error: `Google Drive upload HTTP ${uploadResp.status}: ${errTxt.slice(0, 140)}`,
+      };
+    }
+
+    const uploadedFile = (await uploadResp.json()) as { id?: string };
+    return {
+      uploaded: true,
+      driveFileId: uploadedFile.id,
+      driveEmail: meta.driveEmail,
+      folderName,
+    };
+  } catch (err) {
+    return {
+      uploaded: false,
+      driveEmail: meta.driveEmail,
+      folderName,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}

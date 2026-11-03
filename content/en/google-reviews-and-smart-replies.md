@@ -17,7 +17,7 @@ Replying politely and promptly to every 5-star praise and 1-to-3-star concern on
 ## Step 1 — Connect Google Business Profile & Sync Store Reviews
 
 1. First, ensure **Google Business Profile Reviews** (`google.reviews`) is unlocked in **Plans & Wallet** (`/billing`).
-2. Connect your store's Google Business Profile token and `locations/...` ID in **Connected Channels** (`/connections` -> **Google Business**) — see Part 5 of [Connecting WhatsApp, Instagram, Facebook & Google](/guides/connecting-channels-whatsapp-meta-google) for every Google Cloud Console click.
+2. Connect your store's Google Business Profile in 2 clicks under **Connected Channels** (`/connections` -> **Google Business** -> **Sign in with Google Business Profile →**) — see Part 5 of [Connecting WhatsApp, Instagram, Facebook & Google](/guides/connecting-channels-whatsapp-meta-google).
 3. Open **Google Reviews** (`/reviews`) in your left sidebar.
 4. Click **Sync Reviews** (or log an offline/imported store review in the **Record / Test Store Review** card during setup) to pull incoming customer ratings, reviewer names, star scores (`1★` to `5★`), and review comments.
 

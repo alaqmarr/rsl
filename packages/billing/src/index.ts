@@ -2,7 +2,7 @@ import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { formatInr, getEnv, newId, RslError, verifyHmac } from "@rsl/core";
 import { controlSchema } from "@rsl/database";
 import { sendBillingNotification } from "@rsl/notifications";
-import { controlDb } from "@rsl/tenancy";
+import { controlDb, getPlatformRazorpayConfig } from "@rsl/tenancy";
 import {
   BILLING_CYCLE_META,
   type BillingCycle,
@@ -1411,14 +1411,13 @@ export function consumeUsage(params: {
 }
 
 export function verifyRazorpaySignature(rawBody: string, signatureHex: string): boolean {
-  const secret = getEnv().RAZORPAY_WEBHOOK_SECRET;
+  const secret = getPlatformRazorpayConfig().webhookSecret;
   if (!secret) return false;
   return verifyHmac(rawBody, signatureHex, secret);
 }
 
 export function isRazorpayCheckoutConfigured(): boolean {
-  const env = getEnv();
-  return Boolean(env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET);
+  return getPlatformRazorpayConfig().isReady;
 }
 
 export function submitWalletRechargeRequest(params: {
@@ -1571,8 +1570,8 @@ export async function createRazorpayOrderForWallet(params: {
   workspaceId: string;
   amountPaise: number;
 }): Promise<{ orderId: string; keyId: string; amountWithGstPaise: number }> {
-  const env = getEnv();
-  if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET) {
+  const rzp = getPlatformRazorpayConfig();
+  if (!rzp.isReady) {
     throw new RslError(
       "RSL-VAL-1001",
       "Online gateway checkout is not enabled yet. Please pay via UPI / Bank Transfer and submit your UTR reference below."
@@ -1583,7 +1582,7 @@ export async function createRazorpayOrderForWallet(params: {
   }
 
   const amountWithGstPaise = Math.round(params.amountPaise * 1.18);
-  const authHeader = Buffer.from(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`).toString("base64");
+  const authHeader = Buffer.from(`${rzp.keyId}:${rzp.keySecret}`).toString("base64");
   const resp = await fetch("https://api.razorpay.com/v1/orders", {
     method: "POST",
     headers: {
@@ -1623,7 +1622,7 @@ export async function createRazorpayOrderForWallet(params: {
 
   return {
     orderId: data.id,
-    keyId: env.RAZORPAY_KEY_ID,
+    keyId: rzp.keyId,
     amountWithGstPaise,
   };
 }
@@ -1635,7 +1634,7 @@ export function verifyRazorpayCheckoutAndCreditWallet(params: {
   signatureHex: string;
   actorId: string;
 }): { balancePaise: number; invoiceNumber?: string } {
-  const secret = getEnv().RAZORPAY_KEY_SECRET;
+  const secret = getPlatformRazorpayConfig().keySecret;
   if (!secret) {
     throw new RslError("RSL-VAL-1001", "Payment gateway secret is not configured.");
   }

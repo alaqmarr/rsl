@@ -5,7 +5,7 @@ import nodemailer from "nodemailer";
 import { render } from "@react-email/render";
 import { getEnv, hashPassword, newEntityId, RslError } from "@rsl/core";
 import { controlSchema } from "@rsl/database";
-import { controlDb } from "@rsl/tenancy";
+import { controlDb, getPlatformSmtpConfig } from "@rsl/tenancy";
 import {
   BillingAndWalletAlertTemplate,
   EmailVerificationTemplate,
@@ -33,29 +33,29 @@ async function dispatchHtmlEmail(params: {
   reactElement: React.ReactElement;
   customSmtp?: CustomSmtpConfig | null;
 }): Promise<{ emailId: string; status: "sent" | "queued_local"; transportMode: string }> {
-  const env = getEnv();
   const renderedHtml = await render(params.reactElement);
   const renderedText = await render(params.reactElement, { plainText: true });
   const emailId = newEntityId("eml", params.workspaceId ?? "rsl");
 
   const useCustom = Boolean(params.customSmtp?.user && params.customSmtp?.pass);
-  const usePlatformGmail = Boolean(env.GMAIL_SMTP_USER && env.GMAIL_SMTP_APP_PASSWORD);
+  const platformSmtp = getPlatformSmtpConfig();
+  const usePlatformGmail = platformSmtp.isReady;
 
   if (useCustom || usePlatformGmail) {
     const transportMode = useCustom ? "client_smtp" : "gmail_smtp";
     const transporter = nodemailer.createTransport({
-      host: useCustom ? params.customSmtp!.host : env.SMTP_HOST,
-      port: useCustom ? params.customSmtp!.port : env.SMTP_PORT,
-      secure: useCustom ? params.customSmtp!.secure : env.SMTP_SECURE,
+      host: useCustom ? params.customSmtp!.host : platformSmtp.host,
+      port: useCustom ? params.customSmtp!.port : platformSmtp.port,
+      secure: useCustom ? params.customSmtp!.secure : platformSmtp.secure,
       auth: {
-        user: useCustom ? params.customSmtp!.user : env.GMAIL_SMTP_USER,
-        pass: useCustom ? params.customSmtp!.pass : env.GMAIL_SMTP_APP_PASSWORD,
+        user: useCustom ? params.customSmtp!.user : platformSmtp.user,
+        pass: useCustom ? params.customSmtp!.pass : platformSmtp.password,
       },
     });
 
     try {
       const info = await transporter.sendMail({
-        from: useCustom ? params.customSmtp!.from : env.EMAIL_FROM || env.GMAIL_SMTP_USER,
+        from: useCustom ? params.customSmtp!.from : platformSmtp.from || platformSmtp.user,
         to: params.to,
         subject: params.subject,
         html: renderedHtml,
@@ -354,4 +354,30 @@ export function listRecentEmails(workspaceId?: string, limit = 30) {
     .orderBy(desc(controlSchema.emailDeliveries.createdAt))
     .limit(limit)
     .all();
+}
+
+export async function sendPlatformSmtpTestEmail(recipientEmail: string): Promise<{
+  emailId: string;
+  status: "sent" | "queued_local";
+  transportMode: string;
+}> {
+  const smtp = getPlatformSmtpConfig();
+  if (!smtp.isReady) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Save your SMTP Username and App Password first before sending a live test email."
+    );
+  }
+  return dispatchHtmlEmail({
+    to: recipientEmail.trim(),
+    templateKey: "smtp_test",
+    subject: "RapidShift Labs — Live Database SMTP Verification",
+    reactElement: React.createElement(StorageAndBackupReportTemplate, {
+      businessName: "RapidShift Labs Staff Portal",
+      operationTitle: "Outbound SMTP Transport Verified",
+      summaryLine: `Delivered successfully via ${smtp.host}:${smtp.port} (${smtp.source} credentials).`,
+      checksumOrDetails: `Sender: ${smtp.from} • Verified at ${new Date().toISOString()}`,
+      backupsUrl: `${getEnv().ADMIN_URL}/credentials`,
+    }),
+  });
 }

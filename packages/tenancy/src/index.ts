@@ -562,3 +562,4 @@ export function getTenancyHandleMetrics() {
 }
 
 export * from "./ssl";
+export * from "./platform-credentials";

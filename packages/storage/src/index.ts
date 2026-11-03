@@ -20,7 +20,7 @@ import {
 } from "@rsl/core";
 import { controlSchema } from "@rsl/database";
 import { defineAction } from "@rsl/logging";
-import { controlDb } from "@rsl/tenancy";
+import { controlDb, getPlatformManagedR2Config } from "@rsl/tenancy";
 
 export interface S3CredentialsPayload {
   accessKeyId: string;
@@ -61,18 +61,16 @@ async function writeToBackend(params: {
   region?: string | null;
   creds?: S3CredentialsPayload | null;
 }): Promise<void> {
-  const env = getEnv();
-
   if (params.mode === "rsl_managed") {
-    if (env.R2_ACCOUNT_ID && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY && env.R2_BUCKET_PRIVATE) {
-      const s3 = buildS3Client(
-        `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-        "auto",
-        { accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: env.R2_SECRET_ACCESS_KEY }
-      );
+    const r2 = getPlatformManagedR2Config();
+    if (r2.isReady) {
+      const s3 = buildS3Client(r2.endpointUrl, "auto", {
+        accessKeyId: r2.accessKeyId,
+        secretAccessKey: r2.secretAccessKey,
+      });
       await s3.send(
         new PutObjectCommand({
-          Bucket: env.R2_BUCKET_PRIVATE,
+          Bucket: r2.bucketPrivate,
           Key: `${params.workspaceId}/${params.objectKey}`,
           Body: params.bytes,
           ContentType: params.mimeType,
@@ -111,18 +109,16 @@ async function readFromBackend(params: {
   region?: string | null;
   creds?: S3CredentialsPayload | null;
 }): Promise<Buffer> {
-  const env = getEnv();
-
   if (params.mode === "rsl_managed") {
-    if (env.R2_ACCOUNT_ID && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY && env.R2_BUCKET_PRIVATE) {
-      const s3 = buildS3Client(
-        `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-        "auto",
-        { accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: env.R2_SECRET_ACCESS_KEY }
-      );
+    const r2 = getPlatformManagedR2Config();
+    if (r2.isReady) {
+      const s3 = buildS3Client(r2.endpointUrl, "auto", {
+        accessKeyId: r2.accessKeyId,
+        secretAccessKey: r2.secretAccessKey,
+      });
       const out = await s3.send(
         new GetObjectCommand({
-          Bucket: env.R2_BUCKET_PRIVATE,
+          Bucket: r2.bucketPrivate,
           Key: `${params.workspaceId}/${params.objectKey}`,
         })
       );

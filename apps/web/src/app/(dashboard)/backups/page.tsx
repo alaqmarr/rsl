@@ -1,13 +1,17 @@
+import Link from "next/link";
 import { getWorkspaceDatabaseManagementInfo } from "@rsl/backup";
 import { getWorkspacePlansByKeys } from "@rsl/billing";
+import { listWorkspaceConnections } from "@rsl/connections";
 import { canRoleAccessWebRoute, canRolePerform, formatRoleLabel } from "@rsl/rbac";
 import { getWorkspaceStorageStatus } from "@rsl/storage";
+import { getPublicGoogleOAuthStatus } from "@rsl/tenancy";
 import { AccessRestrictedState, MetricCard, PageHeader, SectionCard, StatusPill } from "@rsl/ui";
 import { InlineAddonPlanBanner } from "@/components/feature-plan-gate";
 import { FlashBanner } from "@/components/flash-banner";
 import { SubmitButton } from "@/components/ios-feedback";
 import {
   createEncryptedBackupAction,
+  disconnectGoogleDriveFromBackupsAction,
   importContactsCsvAction,
   optimizeDatabaseAction,
   requestCustomAdapterAction,
@@ -57,6 +61,11 @@ export default async function DatabaseStorageAndBackupsPage({
 
   const dbInfo = getWorkspaceDatabaseManagementInfo(session.workspace.id);
   const storage = getWorkspaceStorageStatus(session.workspace.id);
+  const googleOAuth = getPublicGoogleOAuthStatus();
+  const workspaceConnections = listWorkspaceConnections(session.workspace.id);
+  const activeDriveConn = workspaceConnections.connections.find(
+    (c) => c.channelKind === "google_drive"
+  );
   const addonPlans = getWorkspacePlansByKeys(session.workspace.id, [
     "backup.export",
     "storage.managed",
@@ -254,6 +263,120 @@ export default async function DatabaseStorageAndBackupsPage({
                 </li>
               ))}
             </ul>
+          </div>
+        )}
+      </SectionCard>
+
+      {/* Automatic Google Drive Off-Site Backup (1-Click Google OAuth) */}
+      <SectionCard
+        title="Google Drive Automatic Off-Site Backup"
+        subtitle="Connect your personal or Google Workspace Drive in 2 clicks using Google's official Consent Screen — zero Service Account JSON files or manual Folder IDs needed."
+        action={
+          <StatusPill
+            label={
+              activeDriveConn
+                ? activeDriveConn.status === "healthy"
+                  ? "Connected to Google Drive"
+                  : "Needs Reconnect"
+                : googleOAuth.enableDriveOAuth
+                  ? "Ready for 1-Click Connect"
+                  : "Pending Platform Setup"
+            }
+            tone={
+              activeDriveConn
+                ? activeDriveConn.status === "healthy"
+                  ? "emerald"
+                  : "amber"
+                : googleOAuth.enableDriveOAuth
+                  ? "sky"
+                  : "stone"
+            }
+          />
+        }
+      >
+        {activeDriveConn ? (
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-emerald-200/90 bg-emerald-50/65 p-4 text-[13px]">
+            <div className="min-w-0 space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-bold text-slate-900">
+                  {activeDriveConn.metadata.driveEmail || activeDriveConn.displayName}
+                </span>
+                <span className="rounded-md border border-emerald-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-emerald-900">
+                  Folder: {activeDriveConn.metadata.folderName || googleOAuth.defaultDriveFolderName}
+                </span>
+              </div>
+              <p className="text-xs leading-relaxed text-slate-700">
+                Every encrypted <code className="font-mono">.rslbackup</code> snapshot you create below is automatically uploaded into{" "}
+                <strong>{activeDriveConn.metadata.folderName || googleOAuth.defaultDriveFolderName}</strong> using Google&apos;s privacy-safe{" "}
+                <code className="font-mono">drive.file</code> scope (RapidShift Labs cannot view any other files in your Drive).
+              </p>
+              {activeDriveConn.metadata.folderWebViewLink && (
+                <a
+                  href={activeDriveConn.metadata.folderWebViewLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-block text-xs font-semibold text-emerald-800 hover:underline"
+                >
+                  Open Backup Folder in Google Drive ↗
+                </a>
+              )}
+            </div>
+
+            {canManageStorage && (
+              <div className="flex flex-wrap items-center gap-2">
+                {googleOAuth.enableDriveOAuth && (
+                  <a
+                    href="/api/oauth/google/start?purpose=google_drive&returnTo=/backups"
+                    className="rsl-btn-secondary py-1.5 text-xs"
+                  >
+                    Switch / Reconnect Google Account
+                  </a>
+                )}
+                <form action={disconnectGoogleDriveFromBackupsAction}>
+                  <input type="hidden" name="connectionId" value={activeDriveConn.id} />
+                  <SubmitButton
+                    className="rsl-btn-danger-soft py-1.5 text-xs"
+                    pendingText="Disconnecting..."
+                  >
+                    Disconnect Drive
+                  </SubmitButton>
+                </form>
+              </div>
+            )}
+          </div>
+        ) : !canManageStorage ? (
+          <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-3.5 text-xs text-zinc-600">
+            Read-only view — ask the Business Owner or an Admin to connect Google Drive for automatic off-site backups.
+          </div>
+        ) : googleOAuth.enableDriveOAuth ? (
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-emerald-200/90 bg-emerald-50/60 p-4 text-[13px]">
+            <div className="max-w-2xl space-y-1">
+              <div className="font-bold text-slate-900">
+                Mirror Encrypted Backups to Your Own Google Drive Automatically
+              </div>
+              <p className="text-xs leading-relaxed text-slate-700">
+                Click the button on the right to sign in on Google&apos;s official{" "}
+                <strong>{googleOAuth.consentAppName}</strong> consent screen. A dedicated{" "}
+                <strong>{googleOAuth.defaultDriveFolderName}</strong> folder is created automatically, and RapidShift Labs only receives{" "}
+                <code className="font-mono">drive.file</code> access (never access to your other Google Drive documents).
+              </p>
+            </div>
+            <a
+              href="/api/oauth/google/start?purpose=google_drive&returnTo=/backups"
+              className="rsl-btn-primary shrink-0"
+            >
+              Connect Google Drive with Google →
+            </a>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200/90 bg-zinc-50/75 p-4 text-xs text-zinc-600">
+            <span>
+              1-click Google Sign-In will appear here automatically once your Platform Admin configures the{" "}
+              <strong>RapidShift Labs</strong> Google OAuth Web Client in the Staff Portal.
+            </span>
+            <Link href="/connections" className="rsl-btn-secondary py-1.5 text-xs">
+              Open Connected Channels →
+            </Link>
           </div>
         )}
       </SectionCard>

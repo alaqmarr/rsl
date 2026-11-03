@@ -12,6 +12,7 @@ import {
   FileText,
   HelpCircle,
   IndianRupee,
+  KeyRound,
   LayoutDashboard,
   MailCheck,
   Menu,
@@ -57,6 +58,7 @@ const ADMIN_ICONS: Record<AdminNavIconKey, React.ComponentType<{ className?: str
   staff: ShieldCheck,
   inspector: ClipboardList,
   runbooks: BookOpen,
+  credentials: KeyRound,
   setup: Wrench,
 };
 

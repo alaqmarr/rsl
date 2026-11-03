@@ -733,3 +733,18 @@ export const billingReminderLogs = sqliteTable(
   (t) => [index("idx_billing_reminders_ws").on(t.workspaceId, t.createdAt)]
 );
 
+// Database-Controlled Platform Credentials & OAuth Vault (Super Admin managed)
+export const platformCredentials = sqliteTable("platform_credentials", {
+  providerKey: text("provider_key").primaryKey(), // google_oauth | smtp_email | cloudflare_r2 | meta_app | razorpay
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  publicConfigJson: text("public_config_json").notNull().default("{}"),
+  encryptedSecrets: text("encrypted_secrets").notNull().default(""), // AES-256-GCM envelope via encryptEnvelope()
+  maskedHintsJson: text("masked_hints_json").notNull().default("{}"),
+  updatedByStaffId: text("updated_by_staff_id"),
+  lastVerifiedAt: integer("last_verified_at"),
+  lastVerifyStatus: text("last_verify_status"), // healthy | error
+  lastVerifyMessage: text("last_verify_message"),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+

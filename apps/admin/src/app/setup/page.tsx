@@ -2,7 +2,12 @@ import { headers } from "next/headers";
 import { CheckCircle2, Lock, ShieldCheck } from "lucide-react";
 import { countPlatformStaff } from "@rsl/auth";
 import { getEnv, resolveEndpointsFromHeaders } from "@rsl/core";
-import { controlDb, ingressDb, platformLogsDb } from "@rsl/tenancy";
+import {
+  controlDb,
+  getSafePlatformCredentialsAdminSnapshot,
+  ingressDb,
+  platformLogsDb,
+} from "@rsl/tenancy";
 import { BrandLogo, FlashBanner } from "@rsl/ui";
 import { SubmitButton } from "@/components/ios-feedback";
 import { completeInitialPlatformSetupAction } from "@/lib/actions";
@@ -31,7 +36,18 @@ export default async function PlatformSetupPage({
   const prefilledKey = typeof sp.key === "string" ? sp.key.trim() : "";
 
   const adminConsoleHref = endpoints.isLocalDev ? "/" : endpoints.adminBaseUrl;
+  const adminCredentialsHref = endpoints.isLocalDev
+    ? "/credentials"
+    : `${endpoints.adminBaseUrl}/credentials`;
   const adminLoginHref = endpoints.isLocalDev ? "/login" : `${endpoints.adminBaseUrl}/login`;
+  const credSnap = getSafePlatformCredentialsAdminSnapshot();
+  const readyConnectorsCount = [
+    credSnap.google.isReady,
+    credSnap.smtp.isReady,
+    credSnap.r2.isReady,
+    credSnap.meta.isReady,
+    credSnap.razorpay.isReady,
+  ].filter(Boolean).length;
 
   const readinessModules = [
     {
@@ -59,17 +75,18 @@ export default async function PlatformSetupPage({
     },
     {
       step: "04",
-      title: "External Connectors (Expandable)",
+      title: "Database OAuth & API Credentials",
       status:
-        env.RAZORPAY_KEY_ID || env.META_APP_ID || env.GMAIL_SMTP_USER
-          ? "Partially Configured"
-          : "Optional / Ready",
+        readyConnectorsCount > 0
+          ? `${readyConnectorsCount} / 5 Active`
+          : "Configure in Admin Portal",
       ready: true,
       summary: [
-        `Razorpay: ${env.RAZORPAY_KEY_ID ? "Set" : "Pending"}`,
-        `Meta Cloud: ${env.META_APP_ID ? "Set" : "Pending"}`,
-        `SMTP: ${env.GMAIL_SMTP_USER ? "Set" : "Pending"}`,
-        `R2 Backup: ${env.R2_BUCKET_PRIVATE ? "Set" : "Pending"}`,
+        `Google OAuth: ${credSnap.google.isReady ? "1-Click Ready" : "Pending"}`,
+        `SMTP: ${credSnap.smtp.isReady ? "Live" : "Pending"}`,
+        `R2 Storage: ${credSnap.r2.isReady ? "Active" : "Pending"}`,
+        `Meta App: ${credSnap.meta.isReady ? "Set" : "Pending"}`,
+        `Razorpay: ${credSnap.razorpay.isReady ? "Set" : "Optional"}`,
       ].join(" • "),
     },
   ];
@@ -291,9 +308,14 @@ export default async function PlatformSetupPage({
                     setup suite expands.
                   </p>
                 </div>
-                <a href={adminConsoleHref} className="adm-btn-primary px-5 py-2.5 text-xs">
-                  Open Staff Operations Console →
-                </a>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <a href={adminCredentialsHref} className="adm-btn-secondary px-4 py-2.5 text-xs">
+                    Manage OAuth &amp; DB Credentials →
+                  </a>
+                  <a href={adminConsoleHref} className="adm-btn-primary px-5 py-2.5 text-xs">
+                    Open Staff Operations Console →
+                  </a>
+                </div>
               </div>
 
               <div className="mt-6 grid gap-4 sm:grid-cols-2">

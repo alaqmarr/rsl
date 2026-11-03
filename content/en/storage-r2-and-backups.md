@@ -69,14 +69,22 @@ Even without any backup add-on unlocked, you can export your live records at any
 
 *(Requires **Encrypted Customer Backups & Export** (`backup.export`) unlocked in **Plans & Wallet**.)*
 
-### A. Creating an Encrypted Backup
+### A. Connecting Google Drive in 2 Clicks (Optional Automatic Off-Site Sync)
 
-1. Scroll to **Create Password-Protected Workspace Backup** on `/backups`.
-2. Enter a strong **Backup Encryption Passphrase** (minimum 8 characters — store this passphrase safely in your password manager, as AES-256-GCM archives cannot be decrypted without it!).
-3. Click **Generate Encrypted `.rslbackup` Snapshot**.
-4. Once complete, click **Download `.rslbackup`** in the **Backup History** table (and if Google Drive Backup Vault is connected in `/connections`, mirror a copy off-site!).
+1. On **Backups & Storage** (`/backups`), locate the **Google Drive Automatic Off-Site Backup** card.
+2. Click **Connect Google Drive with Google →** (you never need Google Cloud Console, Service Account JSON keys, or manual Folder IDs!).
+3. Sign in on Google's official **RapidShift Labs** consent screen and click **Allow**:
+   - Uses Google's strict `drive.file` privacy scope — RapidShift Labs can **only** write to its own backup folder and can **never** read any other files in your Google Drive.
+   - Automatically creates a **`RapidShift Labs Backups`** folder in your Google Drive.
+4. Once connected, every backup you create below is automatically uploaded into your Google Drive folder!
 
-### B. Restoring Safely Without Overwriting Financial or Opt-Out Ledgers
+### B. Creating an Encrypted Backup
+
+1. Scroll to **Download Full Workspace Backup (`.rslbackup`)** on `/backups`.
+2. Confirm or customize the backup label and click **Create Backup Now**.
+3. Once complete, click **Download `.rslbackup`** in the backup list — and if your Google Drive is connected above, a copy is already safely uploaded to your **`RapidShift Labs Backups`** folder in Google Drive!
+
+### C. Restoring Safely Without Overwriting Financial or Opt-Out Ledgers
 
 1. Scroll to **Restore Workspace from `.rslbackup`** on `/backups`.
 2. Select your `.rslbackup` file, enter the exact **Backup Encryption Passphrase**, type `RESTORE` in the confirmation box, and click **Verify & Restore Backup**.
