@@ -85,7 +85,7 @@ export async function GET(req: NextRequest) {
       appBaseUrl,
       returnTo,
       "error",
-      "Your Google sign-in session expired or changed workspaces. Click 'Connect with Google' again."
+      "Your Google sign-in session expired or changed workspaces. Click 'Connect to Google Drive' again."
     );
   }
 

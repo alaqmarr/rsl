@@ -1423,7 +1423,10 @@ export async function createEncryptedBackupAction(formData: FormData) {
     fileName,
     mimeType: "application/json",
     bytes: bundleBytes,
-  }).catch(() => ({ uploaded: false as const }));
+  }).catch((err) => ({
+    uploaded: false as const,
+    error: err instanceof Error ? err.message : String(err),
+  }));
 
   await sendStorageAndBackupNotification({
     workspaceId: session.workspace.id,
@@ -1443,7 +1446,60 @@ export async function createEncryptedBackupAction(formData: FormData) {
     );
   }
 
+  if ("error" in driveSync && driveSync.error) {
+    return goWithError(
+      "/backups",
+      `Local backup saved, but Google Drive upload failed: ${driveSync.error}`
+    );
+  }
+
   return goWithNotice("/backups", "Backup created and ready to download.");
+}
+
+export async function syncBackupToGoogleDriveNowAction() {
+  const session = await requireWebSession();
+  await enforceFeaturePaidEntitlement(session.workspace.id, "backup.export", "/backups");
+
+  const res = await createSignedEncryptedBackup(session.ctx, {
+    destinationLabel: "Google Drive Off-Site Vault",
+  });
+  if (!res.ok) return goWithError("/backups", res.error.message);
+
+  const bundleBytes = Buffer.from(res.data.bundleBufferBase64, "base64");
+  const fileName = `${res.data.backupId}.rslbackup`;
+
+  try {
+    await putWorkspaceObject({
+      workspaceId: session.workspace.id,
+      category: "backup_archive",
+      fileName,
+      mimeType: "application/json",
+      bytes: bundleBytes,
+      actorId: session.user.id,
+    });
+  } catch {
+    // Local archive already persisted
+  }
+
+  const driveSync = await uploadFileToWorkspaceGoogleDrive({
+    workspaceId: session.workspace.id,
+    fileName,
+    mimeType: "application/json",
+    bytes: bundleBytes,
+  });
+
+  if (!driveSync.uploaded) {
+    return goWithError(
+      "/backups",
+      driveSync.error ||
+        "Google Drive is not connected yet or requires re-authentication. Click 'Connect to Google Drive' first."
+    );
+  }
+
+  return goWithNotice(
+    "/backups",
+    `Encrypted backup (${fileName}) created and uploaded directly to Google Drive (${driveSync.driveEmail || "connected account"} → folder '${driveSync.folderName || "RapidShift Labs Backups"}')!`
+  );
 }
 
 export async function disconnectGoogleDriveFromBackupsAction(formData: FormData) {

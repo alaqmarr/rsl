@@ -40,6 +40,11 @@ const SETTINGS_TABS: SettingsTabItem[] = [
     label: "All API Tokens",
     description: "Channels, Tally & REST keys",
   },
+  {
+    href: "/backups",
+    label: "Cloud Storage & Backups",
+    description: "Google Drive, R2 & .rslbackup",
+  },
 ];
 
 export function SettingsNav() {

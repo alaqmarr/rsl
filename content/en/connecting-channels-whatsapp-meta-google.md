@@ -138,7 +138,7 @@ Every external channel connection is managed in **Connected Channels** (`/connec
 > **No Google Cloud Console or Service Account JSON Needed!** RapidShift Labs provides a direct **"Sign in with Google"** consent screen so you never have to create GCP projects, Service Account JSON keys, or manual OAuth tokens.
 
 1. Open `https://app.rapidshiftlabs.in/connections` (**Connected Channels**) and click the **Google Business** tab at the top.
-2. Click the green **Sign in with Google Business Profile →** button.
+2. Click the **Connect Google Business Profile** button.
 3. On Google's official sign-in screen (`accounts.google.com`), pick the Google account that owns or manages your verified **Google Business Profile** store listing.
 4. Review the **RapidShift Labs** permission prompt (`business.manage` — to read customer reviews and publish owner replies) and click **Continue / Allow**.
 5. You are redirected straight back to RapidShift Labs with a green **Healthy** connection card, auto-renewing refresh token, and your primary Storefront Location ID linked automatically!
@@ -148,12 +148,12 @@ Every external channel connection is managed in **Connected Channels** (`/connec
 
 ## Part 6 — Connecting Google Drive Off-Site Backup Vault (1-Click Google Sign-In)
 
-1. Open either **Backups & Storage** (`/backups`) or **Connected Channels** (`/connections -> Google Drive`).
-2. Click **Connect Google Drive with Google →** (do **not** create or upload any Google Service Account JSON file!).
+1. Open either **Backups & Storage** (`/backups`) or **Connected Channels** (`/connections`) — the **Connect to Google Drive** button is right at the top of both pages.
+2. Click **Connect to Google Drive** (do **not** create or upload any Google Service Account JSON file!).
 3. Sign in with the Gmail or Google Workspace account where you want encrypted off-site backups stored and click **Allow** on the **RapidShift Labs** consent screen:
    - RapidShift Labs requests **only** Google's privacy-safe `https://www.googleapis.com/auth/drive.file` permission. It can **only** access the backup folder it creates and can **never** see, list, or read any other personal or company files in your Google Drive.
 4. RapidShift Labs **automatically creates a `RapidShift Labs Backups` folder** inside your Google Drive (no manual Folder ID copying required!).
-5. Every time you click **Create Backup Now** on `/backups`, your encrypted `.rslbackup` snapshot is both downloadable in your browser and **uploaded automatically into your Google Drive folder**!
+5. Every time you click **Create Backup Now** (or **Backup & Upload to Google Drive Now**) on `/backups`, your encrypted `.rslbackup` snapshot is both downloadable in your browser and **uploaded automatically into your Google Drive folder**!
 
 ---
 

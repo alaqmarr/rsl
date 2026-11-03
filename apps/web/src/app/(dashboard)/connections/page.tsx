@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import Link from "next/link";
 import {
+  type ConnectionChannelKind,
   getOrCreateWorkspaceWebhookVerifyToken,
   listWorkspaceConnections,
 } from "@rsl/connections";
@@ -10,8 +11,18 @@ import { getPublicGoogleOAuthStatus } from "@rsl/tenancy";
 import { AccessRestrictedState, PageHeader, SectionCard, StatusPill } from "@rsl/ui";
 import { ConnectionsHub } from "@/components/connections-hub";
 import { FlashBanner } from "@/components/flash-banner";
+import { ConnectToGoogleDriveButton, GoogleGLogo } from "@/components/google-drive-connect-button";
 import { SettingsNav } from "@/components/settings-nav";
 import { requireWebSession } from "@/lib/session";
+
+const VALID_CHANNEL_KINDS = new Set<ConnectionChannelKind>([
+  "whatsapp_cloud",
+  "instagram_business",
+  "facebook_page",
+  "meta_ads_pixel",
+  "google_business",
+  "google_drive",
+]);
 
 export default async function ConnectedAccountsPage({
   searchParams,
@@ -50,18 +61,43 @@ export default async function ConnectedAccountsPage({
     session.workspace.id
   );
   const canAccessTally = canRoleAccessWebRoute(session.roleSlug, "/tally", session.workspace.id);
+  const activeDriveConn = data.connections.find((c) => c.channelKind === "google_drive");
+  const requestedKind = (sp.tab || sp.kind || "").trim() as ConnectionChannelKind;
+  const initialKind: ConnectionChannelKind | undefined = VALID_CHANNEL_KINDS.has(requestedKind)
+    ? requestedKind
+    : undefined;
 
   return (
     <div className="w-full space-y-6">
       <PageHeader
         eyebrow="Settings & Account"
         title="Connected Channels & Whitelisting Studio"
-        subtitle="Connect WhatsApp Business Cloud API, Instagram Business, Facebook Pages, Meta Ads, and Google Business Profile with live API verification and step-by-step whitelisting checklists."
+        subtitle="Connect Google Drive for off-site backups, Google Business Profile, WhatsApp Business Cloud API, Instagram Business, Facebook Pages, and Meta Ads with live API verification."
         actions={
-          canAccessTokens ? (
-            <Link href="/settings/tokens" className="rsl-btn-secondary">
-              Manage All API Tokens
-            </Link>
+          canManage || canAccessTokens ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {canManage && !activeDriveConn && (
+                <ConnectToGoogleDriveButton
+                  returnTo="/connections?tab=google_drive"
+                  label="Connect to Google Drive"
+                  size="sm"
+                />
+              )}
+              {activeDriveConn && (
+                <Link
+                  href="/backups"
+                  className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/90 px-3 py-1.5 text-xs font-semibold text-emerald-900 transition hover:bg-emerald-100"
+                >
+                  <GoogleGLogo className="h-3.5 w-3.5" />
+                  <span>Google Drive Connected ✓</span>
+                </Link>
+              )}
+              {canAccessTokens && (
+                <Link href="/settings/tokens" className="rsl-btn-secondary">
+                  Manage All API Tokens
+                </Link>
+              )}
+            </div>
           ) : undefined
         }
       />
@@ -71,6 +107,7 @@ export default async function ConnectedAccountsPage({
       <FlashBanner notice={sp.notice} error={sp.error} />
 
       <ConnectionsHub
+        initialKind={initialKind}
         connections={data.connections.map((c) => ({
           id: c.id,
           provider: c.provider,

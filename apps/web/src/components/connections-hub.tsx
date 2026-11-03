@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { EmptyWorkspaceState, IosSpinner, SectionCard, sileo, StatusPill } from "@rsl/ui";
 import type { ConnectionChannelKind, ConnectionMetadata } from "@rsl/connections";
 import { CopyTextButton } from "@/components/client-utils";
+import { ConnectToGoogleDriveButton, GoogleGLogo } from "@/components/google-drive-connect-button";
 import {
   connectChannelJsonAction,
   disconnectConnectionJsonAction,
@@ -40,6 +41,7 @@ export interface GoogleOAuthClientStatus {
 }
 
 export interface ConnectionsHubProps {
+  initialKind?: ConnectionChannelKind;
   connections: SerializedConnectionItem[];
   whatsappWebhookUrl: string;
   metaWebhookUrl: string;
@@ -260,7 +262,7 @@ const CHANNEL_BLUEPRINTS: ChannelBlueprint[] = [
     requiredScopes: ["https://www.googleapis.com/auth/business.manage"],
     steps: [
       {
-        title: "1. Click 'Sign in with Google Business Profile' on the Left",
+        title: "1. Click 'Connect Google Business Profile' on the Left",
         detail:
           "You do NOT need Google Cloud Console, Service Account JSON files, or manual tokens. Click the Google Sign-In button and select the Google account that owns or manages your verified Google Business Profile listing.",
       },
@@ -294,9 +296,9 @@ const CHANNEL_BLUEPRINTS: ChannelBlueprint[] = [
     requiredScopes: ["https://www.googleapis.com/auth/drive.file"],
     steps: [
       {
-        title: "1. Click 'Connect Google Drive with Google' (No Service Account JSON Needed!)",
+        title: "1. Click 'Connect to Google Drive' (No Service Account JSON Needed!)",
         detail:
-          "Never create or upload a Google Service Account JSON file. Simply click the official Google Sign-In button on the left and pick the Gmail or Google Workspace account where you want off-site backups stored.",
+          "Never create or upload a Google Service Account JSON file. Simply click 'Connect to Google Drive' on the left and pick the Gmail or Google Workspace account where you want off-site backups stored.",
       },
       {
         title: "2. Privacy-First 'drive.file' Permission Scope",
@@ -328,6 +330,7 @@ const CHANNEL_LABEL_BY_KIND: Record<ConnectionChannelKind, string> = {
 };
 
 export function ConnectionsHub({
+  initialKind,
   connections,
   whatsappWebhookUrl,
   metaWebhookUrl,
@@ -336,7 +339,9 @@ export function ConnectionsHub({
   googleOAuth,
 }: ConnectionsHubProps) {
   const router = useRouter();
-  const [selectedKind, setSelectedKind] = useState<ConnectionChannelKind>("whatsapp_cloud");
+  const [selectedKind, setSelectedKind] = useState<ConnectionChannelKind>(
+    initialKind ?? "whatsapp_cloud"
+  );
   const [verifyToken, setVerifyToken] = useState(initialVerifyToken);
   const [showAccessToken, setShowAccessToken] = useState(false);
   const [accessTokenInput, setAccessTokenInput] = useState("");
@@ -515,9 +520,70 @@ export function ConnectionsHub({
 
   const activeCallbackUrl =
     activeBlueprint.webhookMode === "whatsapp" ? whatsappWebhookUrl : metaWebhookUrl;
+  const activeDriveConn = connections.find((c) => c.channelKind === "google_drive");
 
   return (
     <div className="w-full space-y-6">
+      {/* Quick-Connect Google Drive Off-Site Backup Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200/90 bg-emerald-50/70 px-4 py-3 text-[13px]">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white shadow-2xs ring-1 ring-emerald-200">
+            <GoogleGLogo className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            {activeDriveConn ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-bold text-slate-900">
+                  Google Drive Backups Connected ({activeDriveConn.metadata.driveEmail || activeDriveConn.displayName})
+                </span>
+                <span className="rounded-md border border-emerald-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-emerald-900">
+                  Folder: {activeDriveConn.metadata.folderName || googleOAuth?.defaultDriveFolderName || "RapidShift Labs Backups"}
+                </span>
+              </div>
+            ) : (
+              <div>
+                <span className="font-bold text-slate-900">
+                  Off-Site Encrypted Backups to Your Google Drive
+                </span>{" "}
+                <span className="text-xs text-slate-700">
+                  — Connect your Google Drive in 1 click (auto-creates your backup folder, zero JSON files needed).
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {activeDriveConn ? (
+            <>
+              {activeDriveConn.metadata.folderWebViewLink && (
+                <a
+                  href={activeDriveConn.metadata.folderWebViewLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rsl-btn-secondary py-1.5 text-xs"
+                >
+                  Open Drive Folder ↗
+                </a>
+              )}
+              <Link href="/backups" className="rsl-btn-primary py-1.5 text-xs">
+                Manage Backups →
+              </Link>
+            </>
+          ) : canManage ? (
+            <ConnectToGoogleDriveButton
+              returnTo="/connections?tab=google_drive"
+              label="Connect to Google Drive"
+              size="sm"
+            />
+          ) : (
+            <Link href="/backups" className="rsl-btn-secondary py-1.5 text-xs">
+              View Backup Status →
+            </Link>
+          )}
+        </div>
+      </div>
+
       {/* Channel Selector Tabs */}
       <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {CHANNEL_BLUEPRINTS.map((bp) => {
@@ -590,32 +656,26 @@ export function ConnectionsHub({
                         : "Sign in with the Google account that manages your verified Google Business Profile listing. Storefront locations and auto-renewing refresh tokens are configured automatically."}
                     </p>
 
-                    {(selectedKind === "google_drive" && googleOAuth?.enableDriveOAuth) ||
-                    (selectedKind === "google_business" && googleOAuth?.enableGbpOAuth) ? (
-                      <div className="mt-3.5 flex flex-wrap items-center gap-3">
-                        <a
-                          href={`/api/oauth/google/start?purpose=${selectedKind}&returnTo=/connections`}
-                          className="rsl-btn-primary inline-flex items-center gap-2"
-                        >
-                          <span>
-                            {selectedKind === "google_drive"
-                              ? "Connect Google Drive with Google →"
-                              : "Sign in with Google Business Profile →"}
-                          </span>
-                        </a>
-                        <span className="text-[11px] text-emerald-900/80">
-                          Auto-renews tokens • Zero JSON files required
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="mt-3 rounded-xl border border-amber-200 bg-white/90 p-3 text-xs text-amber-950">
-                        <strong>Platform Google OAuth Pending Setup:</strong> Ask your Platform Super Admin to add the{" "}
-                        <strong>RapidShift Labs</strong> Web OAuth Client ID &amp; Secret under{" "}
-                        <code className="rounded bg-amber-100/70 px-1 py-0.5 font-mono text-[11px]">
-                          Staff Portal → OAuth &amp; API Credentials
-                        </code>{" "}
-                        to unlock 1-click Google Sign-In for all workspaces. You can still test with a manual or sandbox token below.
-                      </div>
+                    <div className="mt-3.5 flex flex-wrap items-center gap-3">
+                      <ConnectToGoogleDriveButton
+                        purpose={selectedKind === "google_drive" ? "google_drive" : "google_business"}
+                        returnTo={`/connections?tab=${selectedKind}`}
+                        label={
+                          selectedKind === "google_drive"
+                            ? "Connect to Google Drive"
+                            : "Connect Google Business Profile"
+                        }
+                      />
+                      <span className="text-[11px] text-emerald-900/80">
+                        Auto-renews tokens • Zero JSON files required
+                      </span>
+                    </div>
+
+                    {((selectedKind === "google_drive" && !googleOAuth?.enableDriveOAuth) ||
+                      (selectedKind === "google_business" && !googleOAuth?.enableGbpOAuth)) && (
+                      <p className="mt-2.5 text-[11px] font-medium text-amber-900">
+                        Note: Platform Google OAuth keys have not been saved yet under Staff Portal → OAuth &amp; API Credentials. Save them once in the Admin Portal so live Google Sign-In activates immediately.
+                      </p>
                     )}
                   </div>
                 )}
@@ -1219,14 +1279,29 @@ export function ConnectionsHub({
 
                     {canManage && (
                       <div className="flex flex-wrap items-center gap-2">
-                        {((c.channelKind === "google_drive" && googleOAuth?.enableDriveOAuth) ||
-                          (c.channelKind === "google_business" && googleOAuth?.enableGbpOAuth)) && (
+                        {c.channelKind === "google_drive" && c.metadata.folderWebViewLink && (
                           <a
-                            href={`/api/oauth/google/start?purpose=${c.channelKind}&returnTo=/connections`}
-                            className="rsl-btn-primary py-1.5 text-xs"
+                            href={c.metadata.folderWebViewLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="rsl-btn-secondary py-1.5 text-xs"
                           >
-                            Reconnect with Google
+                            Open Drive Folder ↗
                           </a>
+                        )}
+                        {(c.channelKind === "google_drive" ||
+                          c.channelKind === "google_business") && (
+                          <ConnectToGoogleDriveButton
+                            purpose={c.channelKind}
+                            returnTo={`/connections?tab=${c.channelKind}`}
+                            label={
+                              c.channelKind === "google_drive"
+                                ? "Reconnect Google Drive"
+                                : "Reconnect Google"
+                            }
+                            variant="white"
+                            size="sm"
+                          />
                         )}
                         <button
                           type="button"

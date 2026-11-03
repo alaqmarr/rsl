@@ -26,6 +26,7 @@ import { AccessRestrictedState, PageHeader, SectionCard, StatusPill } from "@rsl
 import { ApiTokensHub } from "@/components/api-tokens-hub";
 import { CopyTextButton } from "@/components/client-utils";
 import { FlashBanner } from "@/components/flash-banner";
+import { ConnectToGoogleDriveButton } from "@/components/google-drive-connect-button";
 import { SettingsNav } from "@/components/settings-nav";
 import { requireWebSession } from "@/lib/session";
 
@@ -96,6 +97,9 @@ export default async function UnifiedApiTokensPage({
 
   const tallyCert = sslCerts.find((c) => c.zone === "tally");
   const apiCert = sslCerts.find((c) => c.zone === "api");
+  const hasDriveConnected = connectionsData.connections.some(
+    (c) => c.channelKind === "google_drive"
+  );
 
   return (
     <div className="w-full space-y-6">
@@ -105,6 +109,14 @@ export default async function UnifiedApiTokensPage({
         subtitle="Manage every token and dedicated SSL client endpoint across your business in a single screen — External Channel tokens, Tally Prime webhook token, Meta webhook verify token, and Platform REST API keys."
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {canManageConnections && !hasDriveConnected && (
+              <ConnectToGoogleDriveButton
+                returnTo="/settings/tokens"
+                label="Connect to Google Drive"
+                variant="white"
+                size="sm"
+              />
+            )}
             {canAccessConnections && (
               <Link href="/connections" className="rsl-btn-secondary">
                 Channel Whitelisting Steps

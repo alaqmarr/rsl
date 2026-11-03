@@ -69,14 +69,14 @@ Even without any backup add-on unlocked, you can export your live records at any
 
 *(Requires **Encrypted Customer Backups & Export** (`backup.export`) unlocked in **Plans & Wallet**.)*
 
-### A. Connecting Google Drive in 2 Clicks (Optional Automatic Off-Site Sync)
+### A. Connecting Google Drive in 1 Click (Automatic Off-Site Sync)
 
-1. On **Backups & Storage** (`/backups`), locate the **Google Drive Automatic Off-Site Backup** card.
-2. Click **Connect Google Drive with Google →** (you never need Google Cloud Console, Service Account JSON keys, or manual Folder IDs!).
+1. Open **Backups & Storage** (`/backups`) — the **Google Drive Automatic Off-Site Backups** card is right at the top of the page (and a **Connect to Google Drive** button also sits in the top-right header).
+2. Click **Connect to Google Drive** (you never need Google Cloud Console, Service Account JSON keys, or manual Folder IDs!).
 3. Sign in on Google's official **RapidShift Labs** consent screen and click **Allow**:
    - Uses Google's strict `drive.file` privacy scope — RapidShift Labs can **only** write to its own backup folder and can **never** read any other files in your Google Drive.
    - Automatically creates a **`RapidShift Labs Backups`** folder in your Google Drive.
-4. Once connected, every backup you create below is automatically uploaded into your Google Drive folder!
+4. Once connected, every backup you create below is automatically uploaded into your Google Drive folder — or click **Backup & Upload to Google Drive Now** right on the Google Drive card!
 
 ### B. Creating an Encrypted Backup
 
