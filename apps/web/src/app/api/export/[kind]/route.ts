@@ -10,6 +10,8 @@ import { resolveEndpointsFromHeaders, RslError } from "@rsl/core";
 import { exportActionLogsAsCsv } from "@rsl/logging";
 import { authorizeAny, type Permission } from "@rsl/rbac";
 import {
+  exportTallyInventoryAsCsv,
+  exportTallyInventoryAsXml,
   exportTallyVouchersAsCsv,
   exportTallyVouchersAsXml,
   generateStandaloneTallyConnectorMjs,
@@ -26,6 +28,8 @@ const EXPORT_PERMISSION_MAP: Record<string, Permission[]> = {
   "tally-installer": ["tally:sync.manage"],
   "tally-xml": ["tally:view"],
   "tally-csv": ["tally:view"],
+  "inventory-csv": ["tally:view"],
+  "inventory-xml": ["tally:view"],
   "contacts-csv": ["inbox:view", "backup:manage"],
   "portable-json": ["backup:manage"],
   "analytics-csv": ["tally:view", "ads:view", "pixel:view", "billing:view"],
@@ -143,6 +147,28 @@ export async function GET(
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="${session.workspace.slug}-tally-bills.csv"`,
+      },
+    });
+  }
+
+  if (kind === "inventory-csv") {
+    const csv = exportTallyInventoryAsCsv(wsId);
+    return new NextResponse(`\uFEFF${csv}`, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${session.workspace.slug}-tally-inventory.csv"`,
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
+  if (kind === "inventory-xml") {
+    const xml = exportTallyInventoryAsXml(wsId);
+    return new NextResponse(xml, {
+      headers: {
+        "Content-Type": "application/xml; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${session.workspace.slug}-tally-stock-items.xml"`,
+        "Cache-Control": "no-store",
       },
     });
   }

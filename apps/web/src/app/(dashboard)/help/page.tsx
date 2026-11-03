@@ -295,7 +295,7 @@ export default async function PersonalizedHelpPage({
               </div>
             }
           >
-            <div className="max-w-4xl">
+            <div className="w-full">
               <FormattedGuideBody markdown={activeArticle.bodyMarkdown} linkMode="help" />
             </div>
 

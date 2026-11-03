@@ -145,9 +145,9 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
   },
   {
     routePrefix: "/tally",
-    title: "Connecting Tally Prime (.tdl v2.5 + Port 9000) & Sending Exact Tally PDFs",
+    title: "Connecting Tally Prime (.tdl v2.6 + Port 9000) & Sending Exact Tally PDFs",
     summary:
-      "Sync Tally Prime live, preserve your 100% untouched Tally-printed PDF invoice byte-for-byte, route multiple companies, and automate WhatsApp bills & reminders.",
+      "Sync Tally Prime live without overwriting past bills, preserve your 100% untouched Tally-printed PDF invoice byte-for-byte, update stock automatically, and automate WhatsApp bills & reminders.",
     estimatedTime: "8 min setup",
     guideSlug: "tally-sync-and-import",
     prerequisites: [
@@ -164,22 +164,22 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
         title: "Step 2 — Enable Local XML Server Port 9000 Inside Tally Prime",
         detail:
           "In Tally Prime on your Windows PC, press F1 (Help) -> Settings -> Connectivity -> Client/Server Configuration. Set 'TallyPrime acts as' = Both, 'Enable ODBC' = Yes, and 'Port' = 9000, then press Ctrl + A (restart Tally if prompted). Test http://127.0.0.1:9000 in Chrome.",
-        tip: "Port 9000 lets RapidShift export Tally Prime's exact native printed Voucher PDF (%PDF-1.x) with your logo, IRN/QR, HSN table, and bank details completely untouched!",
+        tip: "Port 9000 lets RapidShift export Tally Prime's exact native printed Voucher PDF (%PDF-1.x) AND sync your Stock Items, Godowns, and Batch balances automatically!",
       },
       {
-        title: "Step 3 — Download .tdl v2.5 Without Windows Renaming It to (1) or .txt",
+        title: "Step 3 — Download .tdl v2.6 Without Windows Renaming It to (1) or .txt",
         detail:
-          "In Windows File Explorer, enable View -> Show -> File name extensions. Click 'Download Pre-Configured .tdl v2.5' and save/overwrite C:\\TallyPrime\\rsl-tally-whatsapp.tdl (never let Chrome rename it to 'rsl-tally-whatsapp (1).tdl').",
+          "In Windows File Explorer, enable View -> Show -> File name extensions. Click 'Download Pre-Configured .tdl v2.6' and save/overwrite C:\\TallyPrime\\rsl-tally-whatsapp.tdl (never let Chrome rename it to 'rsl-tally-whatsapp (1).tdl').",
       },
       {
-        title: "Step 4 — Load .tdl v2.5 in Tally Prime (F1 -> TDLs & Add-Ons -> F4)",
+        title: "Step 4 — Load .tdl v2.6 in Tally Prime (F1 -> TDLs & Add-Ons -> F4)",
         detail:
           "In Tally Prime, press F1 -> TDLs & Add-Ons -> F4 (Manage Local TDLs). Set 'Load selected TDL files on startup' = Yes, enter C:\\TallyPrime\\rsl-tally-whatsapp.tdl, set 'Load TDL' = Yes, and press Ctrl + A. Confirm status says 'Loaded'.",
       },
       {
         title: "Step 5 — Click 'RSL Cloud Connection Test' & 'RSL Sync All Bills Now'",
         detail:
-          "On Gateway of Tally, click 'RSL Cloud Connection Test' (confirm Connected popup), then click 'RSL Sync All Bills Now' once. Optionally also pair the Windows Connector (rsl-tally-connector.mjs v2.2) for background native PDF uploads and OTA .tdl auto-updates.",
+          "On Gateway of Tally, click 'RSL Cloud Connection Test' (confirm Connected popup), then click 'RSL Sync All Bills Now' once. Optionally also pair the Windows Connector (rsl-tally-connector.mjs v2.4) for background native PDF + Stock Item sync and OTA .tdl auto-updates.",
       },
       {
         title: "Step 6 — Create Your 'tally_tax_invoice_pdf' Instant WhatsApp Rule",
@@ -191,6 +191,43 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       "Leaving 'Mobile no.' blank inside the customer's Party Ledger in Tally Prime — without a mobile number on the party ledger, Tally syncs the bill to your dashboard but WhatsApp has no phone number to message.",
       "Letting Windows save a second download as 'rsl-tally-whatsapp (1).tdl' while Tally Prime F4 still points to the old file.",
       "Selecting a text-only template instead of 'tally_tax_invoice_pdf' when you want Tally's printed PDF attached.",
+    ],
+  },
+  {
+    routePrefix: "/inventory",
+    title: "Using Tally Inventory, Godown Stock, Batch Expiry & Reorder Intelligence",
+    summary:
+      "Track live closing stock, stock valuation, godown & batch expiry balances, fast vs. non-moving dead stock (30/60/90+ days), and share 1-click WhatsApp item quotes.",
+    estimatedTime: "5 min walkthrough",
+    guideSlug: "tally-sync-and-import",
+    prerequisites: [
+      "Unlock 'Tally Prime Sync & Payment Reminders' in Plans & Wallet.",
+      "Pair Windows Connector v2.4 (or sync Port 9000 / upload Tally Masters XML or CSV) to populate opening stock items, godowns, and standard selling/cost rates.",
+    ],
+    steps: [
+      {
+        title: "Sync Stock Items & Godowns from Tally Prime or Upload Masters XML / CSV",
+        detail:
+          "Open 'Add SKU / Sync & Import' (or run Windows Connector v2.4) to import Tally StockItem, Godown, and Party Credit Limit masters in seconds.",
+      },
+      {
+        title: "Automatic Stock Updates Whenever Bills Are Created, Edited, or Cancelled",
+        detail:
+          "Every Sales invoice deducts stock, Credit Note or Purchase voucher adds stock, and cancelling/deleting a bill automatically restores exact quantities across your Stock Summary and Godowns!",
+      },
+      {
+        title: "Check Reorder Shortfalls & 60+ Day Dead Stock Capital Lock",
+        detail:
+          "Switch to 'Reorder & Dead Stock' to see items below reorder level alongside slow/inactive inventory tying up working capital for 30, 60, or 90+ days.",
+      },
+      {
+        title: "Share Instant WhatsApp Price Quotes from Your Live Stock Register",
+        detail:
+          "Use the search bar in 'Stock Summary & Price List' to check available stock, HSN, and GST rate on phone calls, and click 'Quote on WhatsApp' to share instant availability & pricing.",
+      },
+    ],
+    commonMistakes: [
+      "Importing only Sales Vouchers without Opening Balances — import Tally StockItem masters (or set Opening Qty on the item) so Closing Qty = Opening + Inward - Outward matches Tally's Stock Summary.",
     ],
   },
   {

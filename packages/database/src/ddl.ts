@@ -1219,6 +1219,103 @@ export const TENANT_DATA_MIGRATIONS: SqlMigration[] = [
       ALTER TABLE outbox ADD COLUMN locked_by TEXT;
     `,
   },
+  {
+    version: 4,
+    name: "0004_tally_inventory_godowns_batches_and_line_items",
+    sql: `
+      ALTER TABLE tally_parties ADD COLUMN email TEXT;
+      ALTER TABLE tally_parties ADD COLUMN state_name TEXT;
+      ALTER TABLE tally_parties ADD COLUMN address TEXT;
+      ALTER TABLE tally_parties ADD COLUMN credit_limit_paise INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE tally_parties ADD COLUMN credit_days INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE tally_parties ADD COLUMN opening_balance_paise INTEGER NOT NULL DEFAULT 0;
+
+      CREATE TABLE IF NOT EXISTS tally_godowns (
+        id TEXT PRIMARY KEY,
+        godown_guid TEXT NOT NULL UNIQUE,
+        company_id TEXT NOT NULL REFERENCES tally_companies(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        parent_name TEXT NOT NULL DEFAULT 'Primary',
+        address TEXT,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_tally_godowns_company ON tally_godowns(company_id, name);
+
+      CREATE TABLE IF NOT EXISTS tally_stock_items (
+        id TEXT PRIMARY KEY,
+        item_guid TEXT NOT NULL UNIQUE,
+        master_id TEXT,
+        company_id TEXT NOT NULL REFERENCES tally_companies(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        sku_code TEXT,
+        part_number TEXT,
+        stock_group TEXT NOT NULL DEFAULT 'Primary',
+        stock_category TEXT,
+        uom TEXT NOT NULL DEFAULT 'PCS',
+        hsn_code TEXT,
+        gst_rate_bps INTEGER NOT NULL DEFAULT 1800,
+        selling_price_paise INTEGER NOT NULL DEFAULT 0,
+        cost_price_paise INTEGER NOT NULL DEFAULT 0,
+        opening_qty REAL NOT NULL DEFAULT 0,
+        opening_value_paise INTEGER NOT NULL DEFAULT 0,
+        closing_qty REAL NOT NULL DEFAULT 0,
+        closing_rate_paise INTEGER NOT NULL DEFAULT 0,
+        closing_value_paise INTEGER NOT NULL DEFAULT 0,
+        reorder_level_qty REAL NOT NULL DEFAULT 0,
+        min_order_qty REAL NOT NULL DEFAULT 0,
+        total_sold_qty REAL NOT NULL DEFAULT 0,
+        total_sold_paise INTEGER NOT NULL DEFAULT 0,
+        total_purchased_qty REAL NOT NULL DEFAULT 0,
+        total_purchased_paise INTEGER NOT NULL DEFAULT 0,
+        last_sold_at INTEGER,
+        last_purchased_at INTEGER,
+        synced_from_tally_master INTEGER NOT NULL DEFAULT 0,
+        alter_id INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_stock_items_company_group ON tally_stock_items(company_id, stock_group);
+      CREATE INDEX IF NOT EXISTS idx_stock_items_company_name ON tally_stock_items(company_id, name);
+
+      CREATE TABLE IF NOT EXISTS tally_stock_balances (
+        id TEXT PRIMARY KEY,
+        item_id TEXT NOT NULL REFERENCES tally_stock_items(id) ON DELETE CASCADE,
+        company_id TEXT NOT NULL REFERENCES tally_companies(id) ON DELETE CASCADE,
+        godown_name TEXT NOT NULL DEFAULT 'Main Location',
+        batch_name TEXT NOT NULL DEFAULT 'Primary Batch',
+        mfg_date INTEGER,
+        expiry_date INTEGER,
+        closing_qty REAL NOT NULL DEFAULT 0,
+        closing_value_paise INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_stock_balance_loc_batch ON tally_stock_balances(item_id, godown_name, batch_name);
+      CREATE INDEX IF NOT EXISTS idx_stock_balances_company_godown ON tally_stock_balances(company_id, godown_name);
+
+      CREATE TABLE IF NOT EXISTS tally_voucher_items (
+        id TEXT PRIMARY KEY,
+        voucher_id TEXT NOT NULL REFERENCES tally_vouchers(id) ON DELETE CASCADE,
+        company_id TEXT NOT NULL REFERENCES tally_companies(id) ON DELETE CASCADE,
+        stock_item_id TEXT REFERENCES tally_stock_items(id) ON DELETE SET NULL,
+        item_name TEXT NOT NULL,
+        godown_name TEXT NOT NULL DEFAULT 'Main Location',
+        batch_name TEXT NOT NULL DEFAULT 'Primary Batch',
+        hsn_code TEXT,
+        uom TEXT NOT NULL DEFAULT 'PCS',
+        billed_qty REAL NOT NULL DEFAULT 0,
+        actual_qty REAL NOT NULL DEFAULT 0,
+        rate_paise INTEGER NOT NULL DEFAULT 0,
+        discount_bps INTEGER NOT NULL DEFAULT 0,
+        gst_rate_bps INTEGER NOT NULL DEFAULT 0,
+        amount_paise INTEGER NOT NULL DEFAULT 0,
+        voucher_type TEXT NOT NULL,
+        voucher_date INTEGER NOT NULL,
+        party_name TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_voucher_items_vch ON tally_voucher_items(voucher_id);
+      CREATE INDEX IF NOT EXISTS idx_voucher_items_item ON tally_voucher_items(stock_item_id, voucher_date);
+    `,
+  },
 ];
 
 export const TENANT_LOGS_MIGRATIONS: SqlMigration[] = [
@@ -1380,7 +1477,11 @@ export const EXPECTED_TENANT_DATA_TABLES = new Set([
   "reminder_rules",
   "tally_companies",
   "tally_parties",
+  "tally_godowns",
+  "tally_stock_items",
+  "tally_stock_balances",
   "tally_vouchers",
+  "tally_voucher_items",
   "tally_voucher_pdfs",
   "sync_runs",
   "outbox",

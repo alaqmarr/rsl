@@ -16,7 +16,7 @@ export default async function LegalPublicLayout({
   return (
     <div className="flex min-h-screen flex-col bg-[#F8F9FB] text-slate-900">
       <header className="no-print sticky top-0 z-30 border-b border-zinc-200/85 bg-white/95 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3.5 sm:px-6 lg:px-8">
+        <div className="flex w-full items-center justify-between gap-4 px-5 py-3.5 sm:px-8 lg:px-10 xl:px-14">
           <div className="flex min-w-0 items-center gap-4">
             <Link href="/" className="min-w-0 shrink-0">
               <BrandLogo variant="long" size="sm" subtitle="Marketing & Tally Prime Suite" />

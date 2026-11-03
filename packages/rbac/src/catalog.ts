@@ -380,6 +380,11 @@ export const WEB_ROUTE_ACCESS_RULES: Array<{
     label: "Tally Prime & Bills",
   },
   {
+    prefix: "/inventory",
+    anyOf: ["tally:view", "tally:sync.manage", "tally:invoice.send"],
+    label: "Inventory & Stock",
+  },
+  {
     prefix: "/whatsapp",
     anyOf: ["whatsapp:view", "whatsapp:send", "whatsapp:template.manage", "whatsapp:broadcast"],
     label: "WhatsApp & Templates",

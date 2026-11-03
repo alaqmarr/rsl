@@ -51,6 +51,10 @@ export type EntityTypePrefix =
   | "tco"   // Tally Company
   | "tpt"   // Tally Party Ledger
   | "tvch"  // Tally Voucher / Bill
+  | "tgdn"  // Tally Godown / Warehouse
+  | "titem" // Tally Stock Item (SKU)
+  | "tsb"   // Tally Stock Batch / Godown Balance
+  | "tvli"  // Tally Voucher Line Item
   | "sync"  // Tally Sync Run
   | "obx"   // Queue Outbox Item
   | "act"   // Action Log Row

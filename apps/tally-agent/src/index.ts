@@ -206,7 +206,9 @@ function buildIncrementalTallyCollectionXml(sinceAlterId: number, companyName?: 
   <BODY>
     <DESC>
       <STATICVARIABLES>
-        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>${companyTag}
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+        <SVFROMDATE>20000401</SVFROMDATE>
+        <SVTODATE>20990331</SVTODATE>${companyTag}
       </STATICVARIABLES>
       <TDL>
         <TDLMESSAGE>
@@ -215,6 +217,8 @@ function buildIncrementalTallyCollectionXml(sinceAlterId: number, companyName?: 
             <NATIVEMETHOD>MasterID, GUID, AlterID, Date, VoucherNumber, VoucherTypeName, PartyLedgerName, PartyMobileNo, Amount, BasicDueDateOfPymt, IsCancelled, IsOptional</NATIVEMETHOD>
             <NATIVEMETHOD>LedgerEntries.LedgerName, LedgerEntries.IsPartyLedger, LedgerEntries.Amount</NATIVEMETHOD>
             <NATIVEMETHOD>AllLedgerEntries.LedgerName, AllLedgerEntries.IsPartyLedger, AllLedgerEntries.Amount</NATIVEMETHOD>
+            <NATIVEMETHOD>AllInventoryEntries.StockItemName, AllInventoryEntries.ActualQty, AllInventoryEntries.BilledQty, AllInventoryEntries.Rate, AllInventoryEntries.Discount, AllInventoryEntries.Amount, AllInventoryEntries.IsDeemedPositive, AllInventoryEntries.BatchAllocations.GodownName, AllInventoryEntries.BatchAllocations.BatchName, AllInventoryEntries.BatchAllocations.ExpiryPeriod</NATIVEMETHOD>
+            <NATIVEMETHOD>InventoryEntries.StockItemName, InventoryEntries.ActualQty, InventoryEntries.BilledQty, InventoryEntries.Rate, InventoryEntries.Discount, InventoryEntries.Amount, InventoryEntries.IsDeemedPositive, InventoryEntries.BatchAllocations.GodownName, InventoryEntries.BatchAllocations.BatchName</NATIVEMETHOD>
             <COMPUTE>RSLPartyPhone : $LedgerMobile:Ledger:$PartyLedgerName</COMPUTE>
             <COMPUTE>RSLBaseVchType : $Parent:VoucherType:$VoucherTypeName</COMPUTE>
             <COMPUTE>SVCurrentCompany : $$CurrentCompany</COMPUTE>
@@ -448,9 +452,67 @@ async function exportNativeVoucherPdfsForBlocks(
   return results;
 }
 
+function buildTallyStockItemsXml(companyName?: string): string {
+  const companyTag = companyName?.trim()
+    ? `\n        <SVCURRENTCOMPANY>${escapeXml(companyName.trim())}</SVCURRENTCOMPANY>`
+    : "";
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<ENVELOPE>
+  <HEADER>
+    <VERSION>1</VERSION>
+    <TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Collection</TYPE>
+    <ID>RSLSyncStockItems</ID>
+  </HEADER>
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+        <SVFROMDATE>20000401</SVFROMDATE>
+        <SVTODATE>20990331</SVTODATE>${companyTag}
+      </STATICVARIABLES>
+      <TDL>
+        <TDLMESSAGE>
+          <COLLECTION NAME="RSLSyncStockItems" ISMODIFY="No">
+            <TYPE>StockItem</TYPE>
+            <NATIVEMETHOD>MasterID, GUID, AlterID, Name, Parent, Category, BaseUnits, PartNo, OpeningBalance, OpeningValue, ClosingBalance, ClosingRate, ClosingValue, ReorderBase, MinimumOrderBase</NATIVEMETHOD>
+            <NATIVEMETHOD>BatchAllocations.GodownName, BatchAllocations.BatchName, BatchAllocations.ClosingBalance, BatchAllocations.ClosingValue, BatchAllocations.MfdOn, BatchAllocations.ExpiryPeriod</NATIVEMETHOD>
+            <NATIVEMETHOD>StandardPriceList.Rate, StandardCostList.Rate</NATIVEMETHOD>
+            <COMPUTE>SVCurrentCompany : $$CurrentCompany</COMPUTE>
+          </COLLECTION>
+        </TDLMESSAGE>
+      </TDL>
+    </DESC>
+  </BODY>
+</ENVELOPE>`;
+}
+
+async function fetchTallyStockItemsXml(
+  tallyHost: string,
+  tallyPort: number,
+  companyName?: string
+): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const resp = await fetch(`http://${tallyHost}:${tallyPort}`, {
+      method: "POST",
+      headers: { "Content-Type": "text/xml; charset=utf-8" },
+      body: buildTallyStockItemsXml(companyName),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!resp.ok) return null;
+    const xml = await resp.text();
+    return /<(?:STOCKITEM|GODOWN|LEDGER)(?:\s|>)/i.test(xml) ? xml : null;
+  } catch {
+    return null;
+  }
+}
+
 function wrapVoucherBlocksAsEnvelope(blocks: string[], companyName: string | null): string {
   const compXml = companyName ? `<SVCURRENTCOMPANY>${escapeXml(companyName)}</SVCURRENTCOMPANY>` : "";
-  return `<?xml version="1.0" encoding="UTF-8"?><ENVELOPE><BODY><DESC><STATICVARIABLES>${compXml}</STATICVARIABLES></DESC><DATA><TALLYMESSAGE>${blocks.join("\n")}</TALLYMESSAGE></DATA></BODY></ENVELOPE>`;
+  return `<?xml version="1.0" encoding="UTF-8"?><ENVELOPE><BODY><DESC><STATICVARIABLES><SVFROMDATE>20000401</SVFROMDATE><SVTODATE>20990331</SVTODATE>${compXml}</STATICVARIABLES></DESC><DATA><TALLYMESSAGE>${blocks.join("\n")}</TALLYMESSAGE></DATA></BODY></ENVELOPE>`;
 }
 
 function extractMaxAlterId(xml: string): number {
@@ -495,6 +557,7 @@ async function sendSignedHeartbeat(
 async function pushTallyXmlToCloud(params: {
   state: AgentStateFile;
   xmlContent: string;
+  mastersXml?: string | null;
   companyName: string | null;
   fullSnapshot: boolean;
   voucherPdfs: Array<{
@@ -507,13 +570,15 @@ async function pushTallyXmlToCloud(params: {
     pdfBase64: string;
   }>;
 }): Promise<void> {
-  const { state, xmlContent, companyName, fullSnapshot, voucherPdfs } = params;
+  const { state, xmlContent, mastersXml, companyName, fullSnapshot, voucherPdfs } = params;
   const body = JSON.stringify({
     format: "tally_xml",
     rawXml: xmlContent,
     rawContent: xmlContent,
+    mastersXml: mastersXml ?? undefined,
     companyName: companyName ?? undefined,
     fullSnapshot,
+    hasExplicitDateSpan: true,
     voucherPdfs,
   });
   const { timestamp, signature } = signPayload(state.signingSecret, body);
@@ -670,6 +735,9 @@ async function main() {
 
       state!.exportedPdfAlterIds ??= {};
       let allChunksSucceeded = true;
+      const mastersXml = fullReconcilePass
+        ? await fetchTallyStockItemsXml(state!.tallyHost, state!.tallyPort, companyName || undefined)
+        : null;
 
       if (allBlocks.length <= VOUCHER_CHUNK_SIZE) {
         const voucherPdfs = await exportNativeVoucherPdfsForBlocks(
@@ -683,6 +751,7 @@ async function main() {
           await pushTallyXmlToCloud({
             state: state!,
             xmlContent: probe.xml,
+            mastersXml,
             companyName: probe.companyName,
             fullSnapshot: fullReconcilePass && Boolean(probe.companyName),
             voucherPdfs,

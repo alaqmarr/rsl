@@ -79,7 +79,7 @@ export function PublicLandingPage({
     <div className="min-h-screen bg-[#F8F9FB] text-slate-900">
       {/* Sticky Public Storefront Header */}
       <header className="sticky top-0 z-30 border-b border-zinc-200/85 bg-white/95 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-3.5 lg:px-8">
+        <div className="flex w-full items-center justify-between gap-4 px-5 py-3.5 sm:px-8 lg:px-10 xl:px-14">
           <Link href="/" className="min-w-0 shrink-0">
             <BrandLogo variant="long" size="md" subtitle="Marketing & Tally Prime Suite" />
           </Link>
@@ -128,7 +128,7 @@ export function PublicLandingPage({
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl space-y-20 px-5 py-12 lg:px-8 lg:py-16">
+      <main className="w-full space-y-20 px-5 py-12 sm:px-8 lg:px-10 lg:py-16 xl:px-14">
         {/* Hero Section */}
         <section className="grid grid-cols-1 items-center gap-10 lg:grid-cols-[1.15fr_0.85fr]">
           <div className="space-y-6">
@@ -138,14 +138,14 @@ export function PublicLandingPage({
             </div>
 
             <h1 className="text-3xl font-extrabold leading-[1.15] tracking-tight text-slate-900 sm:text-4xl lg:text-[42px]">
-              Send Tally Prime GST Bills on WhatsApp Automatically &amp; Collect Payments Faster.
+              Send Tally Prime GST Bills on WhatsApp, Track Live Inventory &amp; Collect Payments Faster.
             </h1>
 
-            <p className="max-w-2xl text-[15px] leading-relaxed text-zinc-600">
+            <p className="text-[15px] leading-relaxed text-zinc-600">
               Built for Indian wholesalers, manufacturers, retailers, and Chartered Accountants.
-              Deliver official PDF tax invoices the moment a bill is saved in Tally Prime, reply to
-              WhatsApp &amp; Instagram customers from one shared team inbox, and keep encrypted daily
-              backups in your own Google Drive.
+              Deliver official untouched Tally-printed PDF tax invoices on WhatsApp, monitor real-time
+              stock &amp; godown inventory, reply to WhatsApp &amp; Instagram customers from one shared
+              team inbox, and keep encrypted daily backups in your own Google Drive.
             </p>
 
             <div className="flex flex-wrap items-center gap-3 pt-1">
@@ -245,12 +245,12 @@ export function PublicLandingPage({
 
         {/* Bento Grid Capabilities (#features) */}
         <section id="features" className="space-y-6 scroll-mt-24">
-          <div className="max-w-2xl">
+          <div>
             <div className="text-xs font-bold tracking-wider text-emerald-700 uppercase">
               Complete 15-Tool Business Suite
             </div>
             <h2 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-              Everything your accounts, sales, and customer support teams need — isolated per company.
+              Everything your accounts, inventory, sales, and customer support teams need — isolated per company.
             </h2>
           </div>
 
@@ -260,12 +260,12 @@ export function PublicLandingPage({
                 <FileSpreadsheet className="h-5 w-5" />
               </div>
               <h3 className="mt-4 text-lg font-bold text-slate-900">
-                2-Way Tally Prime Live Sync &amp; Receivables Aging
+                Live Tally Prime Sync, Inventory &amp; Receivables Aging
               </h3>
               <p className="mt-1.5 text-[13.5px] leading-relaxed text-zinc-600">
-                Sync Sales, Receipts, Credit Notes, Purchase bills, and Ledger Masters across multiple
-                Tally companies. Export CA-verified balanced double-entry XML vouchers in Indian
-                Standard Time (IST) with zero duplicate entries.
+                Sync Sales, Receipts, Credit Notes, Purchase bills, Stock Items, Godowns, Batch Expiry
+                dates, and Party Credit Limits across multiple Tally companies — updating live stock
+                automatically without ever overwriting saved bills.
               </p>
               <div className="mt-4 flex flex-wrap gap-2 text-xs font-medium text-slate-700">
                 <span className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1">
@@ -273,6 +273,9 @@ export function PublicLandingPage({
                 </span>
                 <span className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1">
                   Native Tally PDF Attachment
+                </span>
+                <span className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1">
+                  Godowns, Reorder &amp; Dead Stock
                 </span>
                 <span className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1">
                   30 / 60 / 90+ Day Aging Stack

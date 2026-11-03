@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, uniqueIndex, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, uniqueIndex, index } from "drizzle-orm/sqlite-core";
 
 // Inbox & Contacts
 export const contacts = sqliteTable(
@@ -332,10 +332,135 @@ export const tallyParties = sqliteTable("tally_parties", {
   name: text("name").notNull(),
   parentGroup: text("parent_group").notNull().default("Sundry Debtors"),
   phoneE164: text("phone_e164"),
+  email: text("email"),
   gstin: text("gstin"),
+  stateName: text("state_name"),
+  address: text("address"),
+  creditLimitPaise: integer("credit_limit_paise").notNull().default(0),
+  creditDays: integer("credit_days").notNull().default(0),
+  openingBalancePaise: integer("opening_balance_paise").notNull().default(0),
   closingBalancePaise: integer("closing_balance_paise").notNull().default(0),
   updatedAt: integer("updated_at").notNull(),
 });
+
+export const tallyGodowns = sqliteTable(
+  "tally_godowns",
+  {
+    id: text("id").primaryKey(),
+    godownGuid: text("godown_guid").notNull().unique(),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => tallyCompanies.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    parentName: text("parent_name").notNull().default("Primary"),
+    address: text("address"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [index("idx_tally_godowns_company").on(t.companyId, t.name)]
+);
+
+export const tallyStockItems = sqliteTable(
+  "tally_stock_items",
+  {
+    id: text("id").primaryKey(),
+    itemGuid: text("item_guid").notNull().unique(),
+    masterId: text("master_id"),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => tallyCompanies.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    skuCode: text("sku_code"),
+    partNumber: text("part_number"),
+    stockGroup: text("stock_group").notNull().default("Primary"),
+    stockCategory: text("stock_category"),
+    uom: text("uom").notNull().default("PCS"),
+    hsnCode: text("hsn_code"),
+    gstRateBps: integer("gst_rate_bps").notNull().default(1800),
+    sellingPricePaise: integer("selling_price_paise").notNull().default(0),
+    costPricePaise: integer("cost_price_paise").notNull().default(0),
+    openingQty: real("opening_qty").notNull().default(0),
+    openingValuePaise: integer("opening_value_paise").notNull().default(0),
+    closingQty: real("closing_qty").notNull().default(0),
+    closingRatePaise: integer("closing_rate_paise").notNull().default(0),
+    closingValuePaise: integer("closing_value_paise").notNull().default(0),
+    reorderLevelQty: real("reorder_level_qty").notNull().default(0),
+    minOrderQty: real("min_order_qty").notNull().default(0),
+    totalSoldQty: real("total_sold_qty").notNull().default(0),
+    totalSoldPaise: integer("total_sold_paise").notNull().default(0),
+    totalPurchasedQty: real("total_purchased_qty").notNull().default(0),
+    totalPurchasedPaise: integer("total_purchased_paise").notNull().default(0),
+    lastSoldAt: integer("last_sold_at"),
+    lastPurchasedAt: integer("last_purchased_at"),
+    syncedFromTallyMaster: integer("synced_from_tally_master", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    alterId: integer("alter_id").notNull().default(1),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    index("idx_stock_items_company_group").on(t.companyId, t.stockGroup),
+    index("idx_stock_items_company_name").on(t.companyId, t.name),
+  ]
+);
+
+export const tallyStockBalances = sqliteTable(
+  "tally_stock_balances",
+  {
+    id: text("id").primaryKey(),
+    itemId: text("item_id")
+      .notNull()
+      .references(() => tallyStockItems.id, { onDelete: "cascade" }),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => tallyCompanies.id, { onDelete: "cascade" }),
+    godownName: text("godown_name").notNull().default("Main Location"),
+    batchName: text("batch_name").notNull().default("Primary Batch"),
+    mfgDate: integer("mfg_date"),
+    expiryDate: integer("expiry_date"),
+    closingQty: real("closing_qty").notNull().default(0),
+    closingValuePaise: integer("closing_value_paise").notNull().default(0),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_stock_balance_loc_batch").on(t.itemId, t.godownName, t.batchName),
+    index("idx_stock_balances_company_godown").on(t.companyId, t.godownName),
+  ]
+);
+
+export const tallyVoucherItems = sqliteTable(
+  "tally_voucher_items",
+  {
+    id: text("id").primaryKey(),
+    voucherId: text("voucher_id")
+      .notNull()
+      .references(() => tallyVouchers.id, { onDelete: "cascade" }),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => tallyCompanies.id, { onDelete: "cascade" }),
+    stockItemId: text("stock_item_id").references(() => tallyStockItems.id, {
+      onDelete: "set null",
+    }),
+    itemName: text("item_name").notNull(),
+    godownName: text("godown_name").notNull().default("Main Location"),
+    batchName: text("batch_name").notNull().default("Primary Batch"),
+    hsnCode: text("hsn_code"),
+    uom: text("uom").notNull().default("PCS"),
+    billedQty: real("billed_qty").notNull().default(0),
+    actualQty: real("actual_qty").notNull().default(0),
+    ratePaise: integer("rate_paise").notNull().default(0),
+    discountBps: integer("discount_bps").notNull().default(0),
+    gstRateBps: integer("gst_rate_bps").notNull().default(0),
+    amountPaise: integer("amount_paise").notNull().default(0),
+    voucherType: text("voucher_type").notNull(),
+    voucherDate: integer("voucher_date").notNull(),
+    partyName: text("party_name").notNull(),
+  },
+  (t) => [
+    index("idx_voucher_items_vch").on(t.voucherId),
+    index("idx_voucher_items_item").on(t.stockItemId, t.voucherDate),
+  ]
+);
 
 export const tallyVouchers = sqliteTable(
   "tally_vouchers",

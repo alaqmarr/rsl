@@ -113,7 +113,7 @@ export default async function GuideDetailPage({
             </details>
           )}
 
-          <div className="mt-6 max-w-4xl border-t border-zinc-200/80 pt-6">
+          <div className="mt-6 w-full border-t border-zinc-200/80 pt-6">
             <FormattedGuideBody markdown={article.bodyMarkdown} linkMode="docs" />
           </div>
         </div>

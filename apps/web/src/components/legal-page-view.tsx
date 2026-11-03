@@ -50,7 +50,7 @@ export function LegalDocumentView({
   entity: LegalEntityContext;
 }) {
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
+    <div className="w-full px-5 py-8 sm:px-8 lg:px-10 lg:py-12 xl:px-14">
       {/* Mobile Policy Switcher Pills */}
       <nav
         aria-label="Compliance policies mobile navigation"
@@ -143,7 +143,7 @@ export function LegalDocumentView({
               <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
                 {doc.title}
               </h1>
-              <p className="max-w-2xl text-sm leading-relaxed text-zinc-600">
+              <p className="text-sm leading-relaxed text-zinc-600">
                 {doc.subtitle}
               </p>
             </div>
@@ -313,7 +313,7 @@ export function LegalHubView({
   entity: LegalEntityContext;
 }) {
   return (
-    <div className="mx-auto max-w-7xl space-y-10 px-4 py-10 sm:px-6 lg:px-8 lg:py-14">
+    <div className="w-full space-y-10 px-5 py-10 sm:px-8 lg:px-10 lg:py-14 xl:px-14">
       {/* Hero Banner */}
       <section className="rounded-3xl border border-zinc-200/90 bg-white p-7 shadow-[0_8px_30px_rgba(15,23,42,0.04)] sm:p-10">
         <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-900">
@@ -324,7 +324,7 @@ export function LegalHubView({
         <h1 className="mt-3 text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">
           Legal Agreements, Privacy, GST Billing &amp; Compliance Policies
         </h1>
-        <p className="mt-2 max-w-3xl text-[15px] leading-relaxed text-zinc-600">
+        <p className="mt-2 text-[15px] leading-relaxed text-zinc-600">
           Transparent legal, billing, refund, and data-protection policies governing{" "}
           <strong>{entity.legalName}</strong> ({entity.primaryDomain}) — aligned with India&apos;s
           DPDP Act 2023, CGST/IGST Act 2017 (SAC 998314), Google API Services Limited Use Policy,

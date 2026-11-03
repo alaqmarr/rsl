@@ -54,7 +54,7 @@ export default async function ErrorCodeDetailPage({
   );
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <div className="w-full space-y-6">
       <div className="flex items-center gap-2 text-xs text-zinc-500">
         <ActionLink href="/errors" className="font-semibold text-emerald-700 hover:underline">
           ← All Error Codes

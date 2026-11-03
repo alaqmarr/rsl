@@ -338,7 +338,7 @@ export default async function StaffRunbooksPage({
               title={rb.title}
               action={<StatusPill label="Staff SOP Guide" tone="emerald" showDot={false} />}
             >
-              <div className="max-w-4xl">
+              <div className="w-full">
                 <FormattedGuideBody markdown={rb.body} linkMode="docs" />
               </div>
             </SectionCard>

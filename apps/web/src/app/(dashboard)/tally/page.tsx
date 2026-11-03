@@ -7,6 +7,7 @@ import {
   FileSpreadsheet,
   FileText,
   IndianRupee,
+  Package,
   Search,
   Webhook,
 } from "lucide-react";
@@ -247,10 +248,14 @@ export default async function TallySyncPage({
         subtitle={`Sync Tally Prime sales bills, receipts, cancellations, and deletions to ${endpoints.primaryDomain} — and send your exact Tally-printed PDF invoice on WhatsApp automatically.`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <ActionLink href="/inventory" spinnerSize="xs" className="rsl-btn-secondary">
+              <Package className="mr-1.5 inline h-3.5 w-3.5" />
+              Inventory &amp; Stock ({tally.totals.stockItemsCount})
+            </ActionLink>
             {canManageTally && (
               <>
                 <a href={topTdlDownloadHref} className="rsl-btn-primary">
-                  Download Tally Add-On (.tdl v2.5)
+                  Download Tally Add-On (.tdl v2.6)
                 </a>
                 <a href={topConnectorDownloadHref} className="rsl-btn-secondary">
                   Download Windows Connector
@@ -529,8 +534,8 @@ export default async function TallySyncPage({
                 title="No Tally bills or receipts yet"
                 description={
                   localPortProbe?.reachable && canManageTally
-                    ? `Tally Prime is open on this PC (Company: ${localPortProbe.activeCompanyName || "Active"} • ${localPortProbe.voucherCount} bill(s)). Click 'Fetch Bills from Tally Now' in the green bar above to pull your saved invoices and native Tally PDFs in 1 click, or load our .tdl v2.5 add-on.`
-                    : "Connect Tally Prime via our 1-click .tdl v2.5 add-on, pair the Windows Connector, or upload an XML/CSV export to get started."
+                    ? `Tally Prime is open on this PC (Company: ${localPortProbe.activeCompanyName || "Active"} • ${localPortProbe.voucherCount} bill(s)). Click 'Fetch Bills from Tally Now' in the green bar above to pull your saved invoices and native Tally PDFs in 1 click, or load our .tdl v2.6 add-on.`
+                    : "Connect Tally Prime via our 1-click .tdl v2.6 add-on, pair the Windows Connector, or upload an XML/CSV export to get started."
                 }
                 actionLabel={canManageTally ? "Connect Tally Prime" : "View Connection Guide"}
                 actionHref="/tally?tab=connect"
@@ -596,6 +601,24 @@ export default async function TallySyncPage({
                               </span>
                             )}
                           </div>
+                          {v.lineItems && v.lineItems.length > 0 && (
+                            <div className="mt-1 flex flex-wrap items-center gap-1">
+                              {v.lineItems.slice(0, 3).map((li, idx) => (
+                                <span
+                                  key={`${v.id}-li-${idx}`}
+                                  className="inline-flex items-center gap-1 rounded-md border border-emerald-200/80 bg-emerald-50/70 px-1.5 py-0.5 text-[10px] font-medium text-emerald-900"
+                                >
+                                  <Package className="h-2.5 w-2.5 text-emerald-600" />
+                                  {li.itemName} ({li.billedQty} {li.uom})
+                                </span>
+                              ))}
+                              {v.lineItems.length > 3 && (
+                                <span className="text-[10px] font-medium text-zinc-500">
+                                  +{v.lineItems.length - 3} more
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-3.5 text-right tabular-nums text-zinc-700">
                           {formatInr(v.amountPaise)}
@@ -1118,17 +1141,19 @@ export default async function TallySyncPage({
           </SectionCard>
 
           <SectionCard
-            title="Add a Single Sales Bill or Payment Receipt"
-            subtitle="If an automatic WhatsApp rule is active, saving a bill with a customer WhatsApp number also sends the message"
+            title="Add a New Bill or Payment Receipt (Overwrite-Safe)"
+            subtitle="Auto-suggests the next unique Bill #, protects previously saved bills from accidental overwrites, and updates live stock if you attach an item"
           >
             <form action={recordTallyVoucherAction} className="space-y-3 text-xs">
+              <input type="hidden" name="preventOverwrite" value="true" />
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div>
                   <label className="mb-1 block font-semibold text-zinc-700">Bill Type</label>
                   <select name="voucherType" defaultValue="Sales" className="rsl-input">
-                    <option value="Sales">Sales Bill</option>
+                    <option value="Sales">Sales Bill (Deducts Stock)</option>
                     <option value="Receipt">Payment Receipt</option>
-                    <option value="CreditNote">Credit Note</option>
+                    <option value="Purchase">Purchase Bill (Adds Stock)</option>
+                    <option value="CreditNote">Credit Note (Sales Return)</option>
                   </select>
                 </div>
                 <div>
@@ -1136,6 +1161,7 @@ export default async function TallySyncPage({
                   <input
                     name="voucherNumber"
                     required
+                    defaultValue={tally.nextSuggestedBillNumber}
                     placeholder="GST/26-27/001"
                     className="rsl-input font-mono"
                   />
@@ -1208,8 +1234,56 @@ export default async function TallySyncPage({
                 </div>
               </div>
 
+              <div className="rounded-xl border border-zinc-200/80 bg-zinc-50/60 p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="font-semibold text-slate-800">
+                    Optional Stock Item Line (Auto-Updates Inventory &amp; Godown Balance)
+                  </span>
+                  <ActionLink href="/inventory" spinnerSize="xs" className="text-[11px] font-semibold text-emerald-700 underline">
+                    View Inventory Register
+                  </ActionLink>
+                </div>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-5">
+                  <div className="sm:col-span-2">
+                    <input
+                      name="lineItemName"
+                      placeholder="Stock Item Name (e.g. Copper Wire)"
+                      className="rsl-input bg-white text-xs"
+                    />
+                  </div>
+                  <div>
+                    <input
+                      name="lineItemQty"
+                      type="number"
+                      step="0.001"
+                      min="0"
+                      placeholder="Qty"
+                      className="rsl-input bg-white text-xs tabular-nums"
+                    />
+                  </div>
+                  <div>
+                    <input
+                      name="lineItemUom"
+                      defaultValue="PCS"
+                      placeholder="UOM"
+                      className="rsl-input bg-white font-mono text-xs uppercase"
+                    />
+                  </div>
+                  <div>
+                    <input
+                      name="lineItemRate"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="Rate (₹)"
+                      className="rsl-input bg-white text-xs tabular-nums"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <SubmitButton pendingText="Saving Bill..." className="rsl-btn-primary">
-                Save Bill / Receipt
+                Save New Bill / Receipt
               </SubmitButton>
             </form>
           </SectionCard>

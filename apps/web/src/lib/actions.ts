@@ -105,10 +105,12 @@ import {
 import { configureAndMigrateStorage, putWorkspaceObject } from "@rsl/storage";
 import {
   bulkImportTallyData,
+  bulkImportTallyInventory,
   computeTallyWebhookLiveStatus,
   createTallyAutomationRule,
   deleteTallyAutomationRule,
   deleteTallyReminderRule,
+  deleteTallyStockItem,
   fetchAndSyncLocalTallyPort9000,
   generateTallyPairingCode,
   getOrCreateTallyWebhookEndpoint,
@@ -122,6 +124,7 @@ import {
   sendTallyBillOnWhatsApp,
   toggleTallyAutomationRule,
   toggleTallyWebhookEndpoint,
+  upsertTallyStockItem,
 } from "@rsl/tally";
 import { controlDb } from "@rsl/tenancy";
 import {
@@ -1078,24 +1081,68 @@ export async function sendTestTallyBillWebhookAction(formData: FormData) {
 export async function recordTallyVoucherAction(formData: FormData) {
   const session = await requireWebSession();
   await enforceFeaturePaidEntitlement(session.workspace.id, "tally.sync", "/tally");
+
+  const lineItemName = String(formData.get("lineItemName") || "").trim();
+  const lineItemQty = Number(formData.get("lineItemQty") || 0);
+  const lineItemRate = Number(formData.get("lineItemRate") || 0);
+  const lineItemUom = String(formData.get("lineItemUom") || "PCS").trim().toUpperCase();
+  const lineItemGstPct = Number(formData.get("lineItemGstPct") || 18);
+  const lineItemGodown = String(formData.get("lineItemGodown") || "Main Location").trim();
+
+  const lineItems =
+    lineItemName && Number.isFinite(lineItemQty) && lineItemQty > 0
+      ? [
+          {
+            itemName: lineItemName,
+            billedQty: lineItemQty,
+            uom: lineItemUom || "PCS",
+            rateRupees: Number.isFinite(lineItemRate) && lineItemRate >= 0 ? lineItemRate : 0,
+            gstRatePct: Number.isFinite(lineItemGstPct) ? lineItemGstPct : 18,
+            godownName: lineItemGodown || "Main Location",
+          },
+        ]
+      : undefined;
+
+  const explicitAmount = Number(formData.get("amountRupees") || 0);
+  const computedLineTotal =
+    lineItems && lineItems[0]
+      ? Math.round(
+          lineItems[0].billedQty *
+            lineItems[0].rateRupees *
+            (1 + (lineItems[0].gstRatePct ?? 0) / 100) *
+            100
+        ) / 100
+      : 0;
+  const effectiveAmountRupees = explicitAmount > 0 ? explicitAmount : computedLineTotal;
+
   const res = await recordTallyVoucher(session.ctx, {
+    voucherId: String(formData.get("voucherId") || "").trim() || undefined,
+    preventOverwrite: formData.get("preventOverwrite") === "true",
     companyName: String(formData.get("companyName") || session.workspace.name),
     voucherNumber: String(formData.get("voucherNumber") || ""),
-    voucherType: String(formData.get("voucherType") || "Sales") as "Sales" | "Receipt" | "CreditNote" | "Purchase",
+    voucherType: String(formData.get("voucherType") || "Sales") as
+      | "Sales"
+      | "Receipt"
+      | "CreditNote"
+      | "Purchase",
     partyName: String(formData.get("partyName") || ""),
     partyPhoneE164: String(formData.get("partyPhoneE164") || "") || undefined,
-    amountRupees: Number(formData.get("amountRupees") || 0),
+    amountRupees: effectiveAmountRupees,
     paidAmountRupees: Number(formData.get("paidAmountRupees") || 0),
-    voucherDateIso: String(formData.get("voucherDateIso") || new Date().toISOString().slice(0, 10)),
+    voucherDateIso: String(
+      formData.get("voucherDateIso") || new Date().toISOString().slice(0, 10)
+    ),
     dueDateIso: String(formData.get("dueDateIso") || "") || undefined,
+    lineItems,
   });
-  if (!res.ok) return goWithError("/tally", res.error.message);
+  if (!res.ok) return goWithError("/tally?tab=import", res.error.message);
   await flushInlineTallyOutboxIfNoRedis(session.workspace.id);
+  const stockSuffix = lineItems ? ` Stock updated for '${lineItems[0]!.itemName}'.` : "";
   return goWithNotice(
     "/tally",
     res.data.queuedJobs && res.data.queuedJobs > 0
-      ? `Bill saved and ${res.data.queuedJobs} automated WhatsApp message(s) queued for delivery.`
-      : "Bill saved to your Tally register."
+      ? `Bill saved${stockSuffix} ${res.data.queuedJobs} automated WhatsApp message(s) queued for delivery.`
+      : `Bill saved to your Tally register.${stockSuffix}`
   );
 }
 
@@ -1116,8 +1163,86 @@ export async function importTallyFileAction(formData: FormData) {
     format,
     rawContent,
   });
-  if (!res.ok) return goWithError("/tally", res.error.message);
-  return goWithNotice("/tally", `Imported ${res.data.importedCount} bills & receipts.`);
+  if (!res.ok) return goWithError("/tally?tab=import", res.error.message);
+  const stockNote =
+    res.data.stockItemsUpserted && res.data.stockItemsUpserted > 0
+      ? ` & ${res.data.stockItemsUpserted} stock item(s)`
+      : "";
+  return goWithNotice("/tally", `Imported ${res.data.importedCount} bills/receipts${stockNote}.`);
+}
+
+export async function upsertStockItemAction(formData: FormData) {
+  const session = await requireWebSession();
+  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.sync", "/inventory");
+  const res = await upsertTallyStockItem(session.ctx, {
+    itemId: String(formData.get("itemId") || "").trim() || undefined,
+    companyName: String(formData.get("companyName") || session.workspace.name),
+    name: String(formData.get("name") || "").trim(),
+    skuCode: String(formData.get("skuCode") || "").trim() || undefined,
+    partNumber: String(formData.get("partNumber") || "").trim() || undefined,
+    stockGroup: String(formData.get("stockGroup") || "Primary").trim() || "Primary",
+    stockCategory: String(formData.get("stockCategory") || "").trim() || undefined,
+    uom: String(formData.get("uom") || "PCS").trim().toUpperCase() || "PCS",
+    hsnCode: String(formData.get("hsnCode") || "").trim() || undefined,
+    gstRatePct: Number(formData.get("gstRatePct") || 18),
+    sellingPriceRupees: Number(formData.get("sellingPriceRupees") || 0),
+    costPriceRupees: Number(formData.get("costPriceRupees") || 0),
+    openingQty: Number(formData.get("openingQty") || 0),
+    reorderLevelQty: Number(formData.get("reorderLevelQty") || 0),
+    minOrderQty: Number(formData.get("minOrderQty") || 0),
+    godownName: String(formData.get("godownName") || "Main Location").trim() || "Main Location",
+    batchName: String(formData.get("batchName") || "Primary Batch").trim() || "Primary Batch",
+    expiryDateIso: String(formData.get("expiryDateIso") || "").trim() || undefined,
+  });
+  if (!res.ok) return goWithError("/inventory?tab=manage", res.error.message);
+  return goWithNotice("/inventory", `Saved stock item '${String(formData.get("name") || "").trim()}'.`);
+}
+
+export async function deleteStockItemAction(formData: FormData) {
+  const session = await requireWebSession();
+  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.sync", "/inventory");
+  const res = await deleteTallyStockItem(session.ctx, {
+    itemId: String(formData.get("itemId") || ""),
+  });
+  if (!res.ok) return goWithError("/inventory", res.error.message);
+  return goWithNotice("/inventory", `Removed stock item '${res.data.name}'.`);
+}
+
+export async function importTallyInventoryFileAction(formData: FormData) {
+  const session = await requireWebSession();
+  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.sync", "/inventory");
+  const format = String(formData.get("format") || "tally_xml") as "tally_xml" | "csv";
+  const companyName = String(formData.get("companyName") || session.workspace.name);
+  let rawContent = String(formData.get("rawContent") || "").trim();
+
+  const uploaded = formData.get("uploadFile");
+  if (uploaded instanceof File && uploaded.size > 0) {
+    rawContent = await uploaded.text();
+  }
+
+  const res = await bulkImportTallyInventory(session.ctx, {
+    companyName,
+    format,
+    rawContent,
+  });
+  if (!res.ok) return goWithError("/inventory?tab=manage", res.error.message);
+  return goWithNotice(
+    "/inventory",
+    `Imported ${res.data.stockItemsUpserted} stock item(s)${res.data.godownsUpserted ? ` & ${res.data.godownsUpserted} godown(s)` : ""} into your live inventory register.`
+  );
+}
+
+export async function syncLocalTallyInventoryAction(formData: FormData) {
+  const session = await requireWebSession();
+  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.sync", "/inventory");
+  const port = Number(formData.get("port") || 9000);
+  const res = await fetchAndSyncLocalTallyPort9000(session.ctx, { port });
+  if (!res.ok) return goWithError("/inventory?tab=manage", res.error.message);
+  await flushInlineTallyOutboxIfNoRedis(session.workspace.id);
+  return goWithNotice(
+    "/inventory",
+    `Synced ${res.data.upserted} voucher(s) & stock masters from Tally Prime Port ${port}.`
+  );
 }
 
 export async function sendBillWhatsAppAction(formData: FormData) {

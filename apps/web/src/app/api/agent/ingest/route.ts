@@ -6,6 +6,8 @@ import {
   getTallyCompanyRoutingConfig,
   getTallyWorkspaceSummary,
   ingestTallyBillEventAndEnqueueAutomation,
+  ingestTallyMastersXmlForWorkspace,
+  isTallyCompanyAllowed,
   LATEST_TALLY_TDL_VERSION,
   recordAgentSyncSuccess,
   saveNativeTallyVoucherPdf,
@@ -32,8 +34,10 @@ export async function POST(req: NextRequest) {
     const parsed = JSON.parse(rawBody) as {
       rawContent?: string;
       rawXml?: string;
+      mastersXml?: string;
       companyName?: string;
       fullSnapshot?: boolean;
+      hasExplicitDateSpan?: boolean;
       voucherPdfs?: Array<{
         guid?: string;
         voucherNumber?: string;
@@ -71,6 +75,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    let extraStockItemsUpserted = 0;
+    const hasExplicitVoucherXml = Boolean(parsed.rawXml?.trim() || parsed.rawContent?.trim());
+    if (parsed.mastersXml?.trim() && hasExplicitVoucherXml) {
+      const routing = getTallyCompanyRoutingConfig(verified.workspaceId);
+      const mOut = ingestTallyMastersXmlForWorkspace({
+        workspaceId: verified.workspaceId,
+        rawXml: parsed.mastersXml,
+        fallbackCompanyName: parsed.companyName?.trim() || undefined,
+        isCompanyAllowed: (c) => isTallyCompanyAllowed(c, routing),
+      });
+      extraStockItemsUpserted += mOut.stockItemsUpserted;
+    }
+
     const payloadToIngest = parsed.rawXml || parsed.rawContent || rawBody;
     const out = await ingestTallyBillEventAndEnqueueAutomation({
       workspaceId: verified.workspaceId,
@@ -80,7 +97,10 @@ export async function POST(req: NextRequest) {
       sourceLabel: "agent",
       fullCompanySnapshot:
         parsed.fullSnapshot && parsed.companyName?.trim()
-          ? { companyName: parsed.companyName.trim() }
+          ? {
+              companyName: parsed.companyName.trim(),
+              hasExplicitDateSpan: parsed.hasExplicitDateSpan,
+            }
           : undefined,
     });
 
@@ -95,6 +115,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       upserted: out.upserted,
+      stockItemsUpserted: out.stockItemsUpserted + extraStockItemsUpserted,
       deletedCount: out.deletedCount,
       ignoredCompanyCount: out.ignoredCompanyCount,
       skippedOptionalCount: out.skippedOptionalCount,

@@ -794,7 +794,7 @@ export function TallyConnectStudio({
                   outdatedTdl?.isOutdated ? "font-bold text-amber-700" : "text-zinc-500"
                 }`}
               >
-                {webhookEndpoint.lastUserAgent || "TallyPrime-RSL-TDL/2.5"}
+                {webhookEndpoint.lastUserAgent || "TallyPrime-RSL-TDL/2.6"}
                 {outdatedTdl?.isOutdated ? ` (Update to v${outdatedTdl.latestVersion})` : ""}
               </div>
             </div>
@@ -1132,17 +1132,17 @@ export function TallyConnectStudio({
 
       {/* 4. DETAILED SETUP GUIDE — TWO CONNECTION METHODS SIDE-BY-SIDE */}
       <div id="setup-guide" className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        {/* METHOD A: TALLY PRIME .TDL ADD-ON (v2.5) */}
+        {/* METHOD A: TALLY PRIME .TDL ADD-ON (v2.6) */}
         <SectionCard
-          title="Method A — Tally Prime Cloud Add-On (.tdl v2.5)"
-          subtitle="Instant live push on Create, Update, Cancel (Alt+X), Delete (Alt+D) & 1-click full reconcile"
-          action={<StatusPill label="v2.5 • Bad-Formula Fixed" tone="emerald" showDot={false} />}
+          title="Method A — Tally Prime Cloud Add-On (.tdl v2.6)"
+          subtitle="Instant post-commit push on Create, Update, Cancel (Alt+X), Delete (Alt+D) & full multi-date reconcile"
+          action={<StatusPill label="v2.6 • Post-Commit GUID Safe" tone="emerald" showDot={false} />}
         >
           <div className="space-y-4 text-xs">
             {canManageTally && (
               <div className="flex flex-wrap items-center gap-2">
                 <a href={tdlDownloadHref} className="rsl-btn-primary text-xs">
-                  Download Pre-Configured .tdl v2.5 (
+                  Download Pre-Configured .tdl v2.6 (
                   {targetMode === "local" ? "127.0.0.1:4500" : `${workspaceSlug}.tally.${primaryDomain}`}
                   )
                 </a>
@@ -1363,8 +1363,8 @@ export function TallyConnectStudio({
               </div>
               {devices.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/50 p-4 text-zinc-500">
-                  No Windows PC paired yet. Use Method A (.tdl v2.5) for instant voucher push, or
-                  pair an office PC above for continuous Port 9000 + native Tally PDF cloud sync.
+                  No Windows PC paired yet. Use Method A (.tdl v2.6) for instant voucher push, or
+                  pair an office PC above for continuous Port 9000 + Inventory + native Tally PDF cloud sync.
                 </div>
               ) : (
                 <div className="divide-y divide-zinc-200/80 rounded-xl border border-zinc-200/90 bg-white">
@@ -1421,11 +1421,11 @@ export function TallyConnectStudio({
           <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/60 p-3.5">
             <div className="flex items-center gap-2 font-semibold text-slate-900">
               <HelpCircle className="h-4 w-4 shrink-0 text-emerald-600" />
-              <span>1. Reload .tdl v2.5 in Tally Memory</span>
+              <span>1. Reload .tdl v2.6 in Tally Memory</span>
             </div>
             <p className="mt-1.5 leading-relaxed text-zinc-600">
               Check <strong>Last Client Source</strong> above — it must show{" "}
-              <code className="font-mono text-slate-900">TallyPrime-RSL-TDL/2.5</code>. Overwrite
+              <code className="font-mono text-slate-900">TallyPrime-RSL-TDL/2.6</code>. Overwrite
               your exact TDL file path and press{" "}
               <strong>F1 → TDLs &amp; Add-Ons → F4 → Ctrl + A</strong> (press <code className="font-mono">Esc</code>{" "}
               if any old dialog is open).

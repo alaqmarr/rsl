@@ -91,8 +91,8 @@ export default async function PlatformSetupPage({
   ];
 
   return (
-    <div className="min-h-screen bg-[#F8F9FB] px-4 py-10 text-slate-900 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-4xl">
+    <div className="min-h-screen bg-[#F8F9FB] px-5 py-10 text-slate-900 sm:px-8 lg:px-10 xl:px-14">
+      <div className="w-full">
         {/* Header Bar */}
         <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-zinc-200/90 bg-white px-6 py-4 shadow-[0_4px_20px_rgba(15,23,42,0.04)]">
           <BrandLogo
