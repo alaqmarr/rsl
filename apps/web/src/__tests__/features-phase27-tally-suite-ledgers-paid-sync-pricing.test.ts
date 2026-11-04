@@ -50,7 +50,7 @@ function createTestWorkspace(tag: string, businessName?: string) {
 
 describe("Phase 27 — All-in-One Tally Suite, Business-Named .TDL & Menu, Live Paid-in-Tally Sync, Client Ledgers, and Indian SMB Pricing", () => {
   it("names .tdl & .bat installers with client business name and displays '<Business Name> & RSL Sync' safely inside Tally Prime", () => {
-    expect(LATEST_TALLY_TDL_VERSION).toBe("2.8");
+    expect(LATEST_TALLY_TDL_VERSION).toBe("2.9");
 
     expect(buildWorkspaceTdlFilename("Sharma Hardware & Steels")).toBe(
       "sharma-hardware-and-steels-rsl-sync.tdl"
@@ -75,7 +75,7 @@ describe("Phase 27 — All-in-One Tally Suite, Business-Named .TDL & Menu, Live 
 
     expect(trickyTdl).toContain("Kothari Exports Unit-2 & RSL Sync - Connection Test");
     expect(trickyTdl).toContain("Kothari Exports Unit-2 & RSL Sync - Sync All Now");
-    expect(trickyTdl).toContain('Header          : "User-Agent: TallyPrime-RSL-TDL/2.8"');
+    expect(trickyTdl).toContain('Header          : "User-Agent: TallyPrime-RSL-TDL/2.9"');
     expect(trickyTdl).toContain('"Payment"');
     expect(trickyTdl).toContain('"Purchase"');
     expect(trickyTdl).toContain('"Debit Note"');

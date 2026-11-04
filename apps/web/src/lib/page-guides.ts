@@ -152,7 +152,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
     guideSlug: "tally-sync-and-import",
     prerequisites: [
       "Unlock 'All-in-One Tally Prime Sync' in Plans & Wallet.",
-      "Sync vouchers & party masters via your personalized <business>-rsl-sync.tdl v2.8 add-on, Windows Connector v2.6, or Tally XML/CSV import.",
+      "Sync vouchers & party masters via your personalized <business>-rsl-sync.tdl v2.9 add-on, Windows Connector v2.6, or Tally XML/CSV import.",
     ],
     steps: [
       {
@@ -163,7 +163,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       {
         title: "Real-Time Ledger Sync on Ctrl + A in Tally Prime",
         detail:
-          "With <business>-rsl-sync.tdl v2.8 loaded, creating or altering any Customer/Supplier Ledger in Tally Prime (including pressing Alt + C inside a voucher) pushes their GSTIN, PAN, +91 mobile number, Credit Days, Credit Limit, and Opening Balance live.",
+          "With <business>-rsl-sync.tdl v2.9 loaded, creating or altering any Customer/Supplier Ledger in Tally Prime (including pressing Alt + C inside a voucher) pushes their GSTIN, PAN, +91 mobile number, Credit Days, Credit Limit, and Opening Balance live.",
       },
       {
         title: "Open Any Client for T-Account Running Balance & Bill-Wise Trail",
@@ -182,7 +182,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
   },
   {
     routePrefix: "/tally",
-    title: "Connecting Tally Prime (.tdl v2.8 + Port 9000), Products, Multi-Company & Paid Sync",
+    title: "Connecting Tally Prime (.tdl v2.9 + Port 9000), Products, Multi-Company & Paid Sync",
     summary:
       "Sync Tally Prime Bills, Products (Stock Items), Client Ledgers, and Multiple Companies live — with zero bill overwrites, automatic Paid-in-Tally settlements, and 100% untouched Tally-printed PDF invoices.",
     estimatedTime: "8 min setup",
@@ -209,7 +209,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
         tip: "Port 9000 lets RapidShift export Tally Prime's exact native printed Voucher PDF (%PDF-1.x) AND sync multi-company masters continuously via Windows Connector v2.6.",
       },
       {
-        title: "Step 4 — Download & Load '<business>-rsl-sync.tdl' (v2.8) via F1 -> TDLs -> F4",
+        title: "Step 4 — Download & Load '<business>-rsl-sync.tdl' (v2.9) via F1 -> TDLs -> F4",
         detail:
           "Save C:\\TallyPrime\\<your-business>-rsl-sync.tdl (overwriting any older copy without ' (1)'). In Tally Prime, press F1 -> TDLs & Add-Ons -> F4 (Manage Local TDLs), set 'Load selected TDL files on startup' = Yes, enter the path, set 'Load TDL' = Yes, and press Ctrl + A.",
       },
@@ -225,7 +225,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       },
     ],
     commonMistakes: [
-      "Leaving an older .tdl (v2.7 or earlier) loaded in Tally Prime RAM — always press F1 -> TDLs & Add-Ons -> F4 -> Ctrl + A after overwriting <business>-rsl-sync.tdl so v2.8 loads.",
+      "Leaving an older .tdl (v2.8 or earlier) loaded in Tally Prime RAM — always press F1 -> TDLs & Add-Ons -> F4 -> Ctrl + A after overwriting <business>-rsl-sync.tdl so v2.9 loads.",
       "Expecting closed Tally companies to sync — press F3 -> Select Company in Tally Prime so every active company is open in memory before clicking Sync All Now.",
       "Leaving 'Mobile no.' blank inside the customer's Party Ledger in Tally Prime — without a mobile number on the party ledger, WhatsApp has no phone number to message.",
     ],
@@ -239,13 +239,13 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
     guideSlug: "tally-sync-and-import",
     prerequisites: [
       "Unlock 'All-in-One Tally Prime Sync' in Plans & Wallet.",
-      "Load <business>-rsl-sync.tdl v2.8 in Tally Prime (or pair Windows Connector v2.6) and enable F11 -> Maintain Inventory = Yes.",
+      "Load <business>-rsl-sync.tdl v2.9 in Tally Prime (or pair Windows Connector v2.6) and enable F11 -> Maintain Inventory = Yes.",
     ],
     steps: [
       {
         title: "Direct Real-Time Product Sync from Tally Prime (Ctrl + A or Alt + C)",
         detail:
-          "With .tdl v2.8 loaded, creating or editing any Stock Item in Tally Prime (Gateway of Tally -> Create/Alter -> Stock Item, or pressing Alt + C right inside a Sales/Purchase bill) pushes the Product, UOM, Stock Group, HSN, GST %, Standard Selling/Cost Rate, and Opening Qty directly here.",
+          "With .tdl v2.9 loaded, creating or editing any Stock Item in Tally Prime (Gateway of Tally -> Create/Alter -> Stock Item, or pressing Alt + C right inside a Sales/Purchase bill) pushes the Product, UOM, Stock Group, HSN, GST %, Standard Selling/Cost Rate, and Opening Qty directly here.",
         tip: "Inside Tally's Stock Item screen, press F12 -> set 'Provide Standard Buying and Selling Rates' = Yes so your default Selling Price syncs automatically.",
       },
       {
@@ -448,7 +448,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       {
         title: "Inspect or Rotate Your Workspace Tally Webhook Token (tlwh_...)",
         detail:
-          "View live Tally event/ping counters. Only rotate the Tally token if compromised — after rotating, re-download .tdl v2.8 in Tally Prime -> F4 so Tally uses the new token.",
+          "View live Tally event/ping counters. Only rotate the Tally token if compromised — after rotating, re-download .tdl v2.9 in Tally Prime -> F4 so Tally uses the new token.",
       },
       {
         title: "Issue Scoped Live (rsl_live_) or Test (rsl_test_) REST API Keys",

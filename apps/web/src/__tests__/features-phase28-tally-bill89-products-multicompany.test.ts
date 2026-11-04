@@ -33,8 +33,8 @@ function createTestWorkspace(tag: string, businessName?: string) {
 }
 
 describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product Import, Multi-Company Detection & Isolation, and Step-by-Step Tally Guide", () => {
-  it("generates compiler-safe .tdl v2.8 with max-MasterID voucher lookup, real-time StockItem & Ledger hooks, bulk masters sync, and multi-company iteration", () => {
-    expect(LATEST_TALLY_TDL_VERSION).toBe("2.8");
+  it("generates compiler-safe .tdl v2.9 with strict 1-Part-per-Form JSON reports, 3-step Form Accept hooks, max-MasterID voucher lookup, real-time StockItem & Ledger hooks, and multi-company iteration", () => {
+    expect(LATEST_TALLY_TDL_VERSION).toBe("2.9");
 
     const variants = [
       generateTallyPrimeTdlAddOn({
@@ -51,32 +51,60 @@ describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product 
     ];
 
     for (const tdl of variants) {
-      expect(tdl).toContain('Header          : "User-Agent: TallyPrime-RSL-TDL/2.8"');
-      // 1. Built-in Tally forms hooked for instant Ctrl+A / Alt+C sync
+      expect(tdl).toContain('Header          : "User-Agent: TallyPrime-RSL-TDL/2.9"');
+      // 1. Built-in Tally forms hooked for instant Ctrl+A / Alt+C sync with mandatory 3-step Form Accept
       expect(tdl).toContain("[#Form: Voucher]");
       expect(tdl).toContain("[#Form: Stock Item]");
       expect(tdl).toContain("[#Form: Ledger]");
+      const yesFormAcceptMatches = tdl.match(/Add\s*:\s*On\s*:\s*Form Accept\s*:\s*Yes\s*:\s*Form Accept/g) ?? [];
+      expect(yesFormAcceptMatches).toHaveLength(3);
+      expect(tdl).not.toMatch(/On\s*:\s*Form Accept\s*:\s*(First|Last)\s*:/i);
 
       // 2. Maximum $$Number:$MasterID selection (prevents stopping at oldest bill #8)
       expect(tdl).toContain("RSLBestMasterNum");
       expect(tdl).toContain("##RSLCurMasterNum > ##RSLBestMasterNum");
       expect(tdl).toContain('JSONTag     : "inAlterMode"');
 
-      // 3. Direct line items & bill allocations inside VoucherJsonReport
-      expect(tdl).toContain('JSONTag     : "lineItems"');
-      expect(tdl).toContain('JSONTag     : "billAllocations"');
+      // 3. Flat single-part packed line items, bill allocations & open companies
+      expect(tdl).toContain('JSONTag     : "lineItemsPacked"');
+      expect(tdl).toContain('JSONTag     : "billAllocationsPacked"');
+      expect(tdl).toContain('JSONTag     : "openCompaniesPipe"');
 
-      // 4. Bulk masters & multi-company openCompanies support
-      expect(tdl).toContain("BulkCompanyMastersJson");
-      expect(tdl).toContain('JSONTag     : "openCompanies"');
+      // 4. Single-part bulk masters & single-master JSON reports
+      expect(tdl).toContain("BulkGodownsJsonReport");
+      expect(tdl).toContain("BulkStockItemsJsonReport");
+      expect(tdl).toContain("BulkPartyLedgersJsonReport");
+      expect(tdl).toContain("SingleStockJsonReport");
+      expect(tdl).toContain("SingleLedgerJsonReport");
       expect(tdl).toContain("Parm Var    : SVCurrentCompany : String :");
       expect(tdl).toContain('$$Date:"1-Apr-2000"');
 
-      // 5. Never use C-style != operator or duplicate Form Accept inside On: Form Accept
-      expect(tdl).not.toContain("!=");
-      expect(tdl).not.toContain("Add : On : Form Accept : Yes : Form Accept");
+      // 5. STRICT 1-Part-per-Form invariant (prevents Plain JSON multi-part array/object mangling!)
+      const partsLines = tdl
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => /^Parts\s*:/i.test(l));
+      expect(partsLines.length).toBeGreaterThanOrEqual(8);
+      for (const pLine of partsLines) {
+        expect(pLine).not.toContain(",");
+      }
 
-      // 6. Strict zero-colon procedural safety across every [Function: ...] line
+      // 6. Every global [Variable: X] MUST be registered inside [System: Variable] (zero orphan variables)
+      const declaredGlobalVars = Array.from(tdl.matchAll(/^\[Variable:\s*([A-Za-z0-9_]+)\]/gm)).map(
+        (m) => m[1]!
+      );
+      expect(declaredGlobalVars.length).toBeGreaterThan(30);
+      const sysVarBlockMatch = tdl.match(/\[System:\s*Variable\]([\s\S]*?)\n\[/);
+      expect(sysVarBlockMatch).not.toBeNull();
+      const sysVarBlock = sysVarBlockMatch![1]!;
+      for (const vName of declaredGlobalVars) {
+        expect(sysVarBlock).toMatch(new RegExp(`\\b${vName}\\s*:`));
+      }
+
+      // 7. Never use C-style != operator
+      expect(tdl).not.toContain("!=");
+
+      // 8. Strict zero-colon procedural safety across every [Function: ...] line
       const fnStepLines = tdl
         .split(/\r?\n/)
         .map((l) => l.trim())
@@ -270,7 +298,7 @@ describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product 
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "user-agent": "TallyPrime-RSL-TDL/2.8",
+          "user-agent": "TallyPrime-RSL-TDL/2.9",
         },
         body: JSON.stringify({
           mode: "masters",
@@ -308,7 +336,7 @@ describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product 
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "user-agent": "TallyPrime-RSL-TDL/2.8",
+          "user-agent": "TallyPrime-RSL-TDL/2.9",
         },
         body: JSON.stringify({
           mode: "masters",
@@ -453,7 +481,7 @@ describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product 
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "user-agent": "TallyPrime-RSL-TDL/2.8",
+          "user-agent": "TallyPrime-RSL-TDL/2.9",
         },
         body: JSON.stringify({
           companyName: "Vardhman Textiles Mumbai",
@@ -605,7 +633,7 @@ describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product 
       "utf8"
     );
 
-    expect(guideDoc).toContain("v2.8");
+    expect(guideDoc).toContain("v2.9");
     expect(guideDoc).toContain("F11");
     expect(guideDoc).toContain("F12");
     expect(guideDoc).toContain("Enable Bill-wise entry");
@@ -632,5 +660,355 @@ describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product 
       const content = fs.readFileSync(path.join(repoRoot, relPath), "utf8");
       expect(content).not.toMatch(/\bmax-w-[4567]xl\b/);
     }
+  });
+
+  it("resolves the 04 Nov 09:38 am 'No valid Tally bill or receipt found' error across .tdl v2.8 multi-part arrays/1-item objects, ?mode=masters empty/single-item posts, .tdl v2.9 packed flat reports, and zero-value vouchers", async () => {
+    const { session } = createTestWorkspace("HotfixV29Live", "RapidShift Demo Traders");
+    const wsId = session.workspace.id;
+    staffGrantFreeAllToolsAccess({ workspaceId: wsId, durationDays: 30, staffId: "stf_p28_v29" });
+    const ep = getOrCreateTallyWebhookEndpoint(wsId);
+
+    // 1. Backwards-compatibility: already-loaded .tdl v2.8 multi-part VoucherJsonForm ("bill": [ headerPart, itemsPart, billsPart ])
+    //    where Repeat with 1 item emitted a single JSON object instead of an array!
+    const v28MultiPartBillReq = new NextRequest(
+      `https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?token=${encodeURIComponent(ep.webhookToken)}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "user-agent": "TallyPrime-RSL-TDL/2.8",
+        },
+        body: JSON.stringify({
+          bill: [
+            {
+              guid: "v28-multipart-guid-88",
+              masterId: "880",
+              alterId: "881",
+              companyName: "RapidShift Demo Traders",
+              voucherNumber: "88",
+              voucherType: "Sales",
+              baseVoucherType: "Sales",
+              partyName: "Mehta Industrial Supplies",
+              partyParentGroup: "Sundry Debtors",
+              partyPhone: "9820112233",
+              amountRupees: "14,200.00",
+              voucherDate: "2026-11-04",
+              inAlterMode: "No",
+            },
+            {
+              lineItems: {
+                itemName: "Bosch Angle Grinder GWS 600",
+                billedQty: "2 PCS",
+                actualQty: "2 PCS",
+                rate: "7,100.00/PCS",
+                discount: "0",
+                amount: "14,200.00",
+                godownName: "Main Location",
+                batchName: "Primary Batch",
+              },
+            },
+            {},
+          ],
+        }),
+      }
+    );
+    const v28MultiPartBillRes = await tallyWebhookPost(v28MultiPartBillReq);
+    expect(v28MultiPartBillRes.status).toBe(200);
+    const v28MultiPartBillJson = (await v28MultiPartBillRes.json()) as {
+      ok: boolean;
+      upsertedBills: number;
+    };
+    expect(v28MultiPartBillJson.ok).toBe(true);
+    expect(v28MultiPartBillJson.upsertedBills).toBe(1);
+
+    // 2. Backwards-compatibility: .tdl v2.8 part-keyed BulkCompanyMastersJsonForm AND empty ?mode=masters payload
+    const v28PartKeyedMastersReq = new NextRequest(
+      `https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?mode=masters&token=${encodeURIComponent(ep.webhookToken)}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "user-agent": "TallyPrime-RSL-TDL/2.8",
+        },
+        body: JSON.stringify({
+          rslmastershdrpart: {
+            mode: "masters",
+            companyName: "RapidShift Demo Traders",
+          },
+          rslbulkstockpart: {
+            stockItems: {
+              guid: "v28-single-obj-stock-1",
+              name: "Anchor Roma 16A Socket",
+              stockGroup: "Electricals",
+              uom: "PCS",
+              hsnCode: "8536",
+              gstRatePct: "18",
+              sellingPriceRupees: "120",
+              costPriceRupees: "85",
+              openingQty: "100 PCS",
+              openingValueRupees: "8500",
+              closingQty: "100 PCS",
+              closingRateRupees: "85",
+              closingValueRupees: "8500",
+            },
+          },
+        }),
+      }
+    );
+    const v28PartKeyedMastersRes = await tallyWebhookPost(v28PartKeyedMastersReq);
+    expect(v28PartKeyedMastersRes.status).toBe(200);
+    const v28PartKeyedMastersJson = (await v28PartKeyedMastersRes.json()) as {
+      ok: boolean;
+      stockItemsUpserted: number;
+    };
+    expect(v28PartKeyedMastersJson.ok).toBe(true);
+    expect(v28PartKeyedMastersJson.stockItemsUpserted).toBe(1);
+
+    // Empty ?mode=masters (e.g. brand-new company with 0 stock items / 0 party ledgers) MUST succeed cleanly (never HTTP 400!)
+    const emptyMastersReq = new NextRequest(
+      `https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?mode=masters&token=${encodeURIComponent(ep.webhookToken)}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "user-agent": "TallyPrime-RSL-TDL/2.9",
+        },
+        body: JSON.stringify({}),
+      }
+    );
+    const emptyMastersRes = await tallyWebhookPost(emptyMastersReq);
+    expect(emptyMastersRes.status).toBe(200);
+    const emptyMastersJson = (await emptyMastersRes.json()) as { ok: boolean };
+    expect(emptyMastersJson.ok).toBe(true);
+
+    // 3. .tdl v2.9 flat single-part PingJsonReport (openCompaniesPipe), SingleStockJsonReport, SingleLedgerJsonReport,
+    //    and VoucherJsonReport (lineItemsPacked + billAllocationsPacked)
+    const v29PingReq = new NextRequest(
+      `https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?mode=ping&token=${encodeURIComponent(ep.webhookToken)}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "user-agent": "TallyPrime-RSL-TDL/2.9",
+        },
+        body: JSON.stringify({
+          mode: "ping",
+          companyName: "RapidShift Demo Traders",
+          openCompaniesPipe:
+            "^^RapidShift Demo Traders~~comp-guid-demo1~~2026-04-01^^RapidShift Retail Unit-2~~comp-guid-demo2~~2026-04-01",
+        }),
+      }
+    );
+    const v29PingRes = await tallyWebhookPost(v29PingReq);
+    expect(v29PingRes.status).toBe(200);
+    const v29PingJson = (await v29PingRes.json()) as {
+      ok: boolean;
+      openCompaniesRegistered: number;
+    };
+    expect(v29PingJson.ok).toBe(true);
+    expect(v29PingJson.openCompaniesRegistered).toBe(2);
+
+    // .tdl v2.9 SingleStockJsonReport (flat masterKind = "stockItem")
+    const v29SingleStockRes = await tallyWebhookPost(
+      new NextRequest(
+        `https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?mode=masters&token=${encodeURIComponent(ep.webhookToken)}`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            "user-agent": "TallyPrime-RSL-TDL/2.9",
+          },
+          body: JSON.stringify({
+            mode: "masters",
+            masterKind: "stockItem",
+            companyName: "RapidShift Demo Traders",
+            guid: "v29-stock-polycab-4sq",
+            masterId: "901",
+            alterId: "902",
+            name: "Polycab 4 sqmm Flame Retardant",
+            stockGroup: "Cables",
+            uom: "COIL",
+            hsnCode: "8544",
+            gstRatePct: "18",
+            sellingPriceRupees: "3400",
+            costPriceRupees: "2800",
+            openingQty: "25 COIL",
+            openingValueRupees: "70000",
+            closingQty: "25 COIL",
+            closingRateRupees: "2800",
+            closingValueRupees: "70000",
+          }),
+        }
+      )
+    );
+    expect(((await v29SingleStockRes.json()) as { ok: boolean }).ok).toBe(true);
+
+    // .tdl v2.9 SingleLedgerJsonReport (flat masterKind = "partyLedger")
+    const v29SingleLedRes = await tallyWebhookPost(
+      new NextRequest(
+        `https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?mode=masters&token=${encodeURIComponent(ep.webhookToken)}`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            "user-agent": "TallyPrime-RSL-TDL/2.9",
+          },
+          body: JSON.stringify({
+            mode: "masters",
+            masterKind: "partyLedger",
+            companyName: "RapidShift Demo Traders",
+            guid: "v29-led-mehta",
+            name: "Mehta Industrial Supplies",
+            parentGroup: "Sundry Debtors",
+            phone: "9820112233",
+            gstin: "27AAACM1234F1Z9",
+            creditLimitRupees: "250000",
+            creditDays: "15 Days",
+            openingBalanceRupees: "10000",
+            closingBalanceRupees: "10000",
+          }),
+        }
+      )
+    );
+    expect(((await v29SingleLedRes.json()) as { ok: boolean }).ok).toBe(true);
+
+    // .tdl v2.9 VoucherJsonReport Sales with lineItemsPacked ("^^" rows, "~~" cols)
+    const v29SalesRes = await tallyWebhookPost(
+      new NextRequest(
+        `https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?token=${encodeURIComponent(ep.webhookToken)}`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            "user-agent": "TallyPrime-RSL-TDL/2.9",
+          },
+          body: JSON.stringify({
+            bill: {
+              guid: "v29-sales-guid-89",
+              masterId: "889",
+              alterId: "890",
+              companyName: "RapidShift Demo Traders",
+              voucherNumber: "89",
+              voucherType: "Sales",
+              baseVoucherType: "Sales",
+              partyName: "Mehta Industrial Supplies",
+              partyParentGroup: "Sundry Debtors",
+              partyPhone: "9820112233",
+              amountRupees: "7660",
+              voucherDate: "2026-11-04",
+              inAlterMode: "No",
+              lineItemsPacked:
+                "^^Anchor Roma 16A Socket~~10 PCS~~10 PCS~~120.00/PCS~~0~~1200.00~~Main Location~~Primary Batch^^Polycab 4 sqmm Flame Retardant~~2 COIL~~2 COIL~~3400.00/COIL~~5~~6460.00~~Main Location~~Primary Batch",
+              billAllocationsPacked: "",
+            },
+          }),
+        }
+      )
+    );
+    const v29SalesJson = (await v29SalesRes.json()) as { ok: boolean; upsertedBills: number };
+    expect(v29SalesJson.ok).toBe(true);
+    expect(v29SalesJson.upsertedBills).toBe(1);
+
+    // .tdl v2.9 VoucherJsonReport Receipt with billAllocationsPacked settling Sales #89 -> marks #89 PAID!
+    const v29RcptRes = await tallyWebhookPost(
+      new NextRequest(
+        `https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?token=${encodeURIComponent(ep.webhookToken)}`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            "user-agent": "TallyPrime-RSL-TDL/2.9",
+          },
+          body: JSON.stringify({
+            bill: {
+              guid: "v29-rcpt-guid-501",
+              masterId: "910",
+              alterId: "911",
+              companyName: "RapidShift Demo Traders",
+              voucherNumber: "RCPT-501",
+              voucherType: "Receipt",
+              baseVoucherType: "Receipt",
+              partyName: "Mehta Industrial Supplies",
+              amountRupees: "7660",
+              voucherDate: "2026-11-04",
+              lineItemsPacked: "",
+              billAllocationsPacked: "^^89~~Agst Ref~~7,660.00",
+            },
+          }),
+        }
+      )
+    );
+    expect(((await v29RcptRes.json()) as { ok: boolean }).ok).toBe(true);
+
+    // 4. Genuine ₹0.00 sample voucher during Sync All Now skips cleanly without poisoning lastErrorMessage!
+    const zeroValSampleRes = await tallyWebhookPost(
+      new NextRequest(
+        `https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?token=${encodeURIComponent(ep.webhookToken)}`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            "user-agent": "TallyPrime-RSL-TDL/2.9",
+          },
+          body: JSON.stringify({
+            bill: {
+              guid: "v29-zero-sample-guid",
+              masterId: "915",
+              companyName: "RapidShift Demo Traders",
+              voucherNumber: "SAMPLE-01",
+              voucherType: "Sales",
+              partyName: "Mehta Industrial Supplies",
+              amountRupees: "0",
+              voucherDate: "2026-11-04",
+            },
+          }),
+        }
+      )
+    );
+    const zeroValSampleJson = (await zeroValSampleRes.json()) as {
+      ok: boolean;
+      upsertedBills: number;
+    };
+    expect(zeroValSampleJson.ok).toBe(true);
+    expect(zeroValSampleJson.upsertedBills).toBe(0);
+
+    // Verify workspace state: both #88 and #89 exist, #89 is PAID, stock quantities deducted, and lastErrorMessage is NULL!
+    const finalSummary = getTallyWorkspaceSummary(wsId);
+    expect(finalSummary.webhookEndpoint.lastErrorMessage).toBeNull();
+    expect(finalSummary.webhookLiveStatus.state).toBe("receiving_live");
+    expect(finalSummary.vouchers.find((v) => v.voucherNumber === "88")?.amountPaise).toBe(
+      1_420_000
+    );
+    const bill89 = finalSummary.vouchers.find((v) => v.voucherNumber === "89")!;
+    expect(bill89.paymentStatus).toBe("paid");
+    expect(bill89.paidAmountPaise).toBe(766_000);
+
+    const finalInv = getWorkspaceInventorySummary(wsId);
+    const socket = finalInv.items.find((i) => i.name === "Anchor Roma 16A Socket")!;
+    const cable = finalInv.items.find((i) => i.name === "Polycab 4 sqmm Flame Retardant")!;
+    expect(socket.closingQty).toBe(90); // 100 opening - 10 sold on #89
+    expect(cable.closingQty).toBe(23); // 25 opening - 2 sold on #89
+
+    // 5. Meanwhile, genuinely empty REST API "{}" still throws RSL-VAL-1001, and outdated TDL v2.5 blank fields still prompt upgrade
+    await expect(
+      ingestTallyBillEventAndEnqueueAutomation({
+        workspaceId: wsId,
+        actorType: "api_key",
+        actorId: "rest_test",
+        rawPayload: {},
+      })
+    ).rejects.toThrow(/No valid Tally bill or receipt found/);
+
+    await expect(
+      ingestTallyBillEventAndEnqueueAutomation({
+        workspaceId: wsId,
+        actorType: "webhook",
+        actorId: "tdl",
+        userAgent: "TallyPrime-RSL-TDL/2.5",
+        rawPayload: {
+          bill: { guid: "", voucherNumber: "", partyName: "", amountRupees: "0" },
+        },
+      })
+    ).rejects.toThrow(/older \.tdl add-on \(v2\.5\)/);
   });
 });

@@ -745,7 +745,7 @@ export function TallyConnectStudio({
           {isLocalDev && normalizedLocalBase && (
             <div className="rounded-xl border border-sky-200/90 bg-sky-50/75 px-3.5 py-2.5 text-[11px] leading-relaxed text-sky-950">
               <strong>Local Environment Notice:</strong> You are running locally. The{" "}
-              <code className="font-mono">.tdl v2.8</code> add-on automatically uses{" "}
+              <code className="font-mono">.tdl v2.9</code> add-on automatically uses{" "}
               <code className="font-mono font-semibold">{normalizedLocalBase}</code> (IPv4{" "}
               <code className="font-mono">127.0.0.1</code>) when{" "}
               <strong>This PC (127.0.0.1:4500)</strong> is selected so Tally Prime&rsquo;s Windows
@@ -837,7 +837,7 @@ export function TallyConnectStudio({
                   outdatedTdl?.isOutdated ? "font-bold text-amber-700" : "text-zinc-500"
                 }`}
               >
-                {webhookEndpoint.lastUserAgent || "TallyPrime-RSL-TDL/2.8"}
+                {webhookEndpoint.lastUserAgent || "TallyPrime-RSL-TDL/2.9"}
                 {outdatedTdl?.isOutdated ? ` (Update to v${outdatedTdl.latestVersion})` : ""}
               </div>
             </div>
@@ -1175,17 +1175,17 @@ export function TallyConnectStudio({
 
       {/* 4. DETAILED SETUP GUIDE — TWO CONNECTION METHODS SIDE-BY-SIDE */}
       <div id="setup-guide" className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        {/* METHOD A: PERSONALIZED TALLY PRIME .TDL ADD-ON (v2.8) */}
+        {/* METHOD A: PERSONALIZED TALLY PRIME .TDL ADD-ON (v2.9) */}
         <SectionCard
           title={`Method A — ${personalBrandTitle} Add-On (${personalTdlFilename})`}
           subtitle="Instant real-time sync on Bills, Receipts, Products (Stock Items), Client Ledgers, Multi-Company & Paid-in-Tally"
-          action={<StatusPill label="v2.8 • Bills + Products + Multi-Company" tone="emerald" showDot={false} />}
+          action={<StatusPill label="v2.9 • Bills + Products + Multi-Company" tone="emerald" showDot={false} />}
         >
           <div className="space-y-4 text-xs">
             {canManageTally && (
               <div className="flex flex-wrap items-center gap-2">
                 <a href={tdlDownloadHref} className="rsl-btn-primary text-xs">
-                  Download {personalTdlFilename} (v2.8 •{" "}
+                  Download {personalTdlFilename} (v2.9 •{" "}
                   {targetMode === "local" ? "127.0.0.1:4500" : `${workspaceSlug}.tally.${primaryDomain}`}
                   )
                 </a>
@@ -1409,7 +1409,7 @@ export function TallyConnectStudio({
               </div>
               {devices.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/50 p-4 text-zinc-500">
-                  No Windows PC paired yet. Use Method A (.tdl v2.8) for instant voucher, product &amp; ledger push, or
+                  No Windows PC paired yet. Use Method A (.tdl v2.9) for instant voucher, product &amp; ledger push, or
                   pair an office PC above for continuous Port 9000 + Multi-Company + native Tally PDF cloud sync.
                 </div>
               ) : (
@@ -1477,13 +1477,13 @@ export function TallyConnectStudio({
           <div className="grid grid-cols-1 gap-3.5 text-xs md:grid-cols-2 xl:grid-cols-3">
             <div className="rounded-xl border border-emerald-200/85 bg-emerald-50/55 p-4">
               <div className="font-bold text-slate-900">
-                1. Reload {personalTdlFilename} (v2.8) — Zero Bill Overwrite
+                1. Reload {personalTdlFilename} (v2.9) — Zero Bill Overwrite
               </div>
               <p className="mt-1.5 leading-relaxed text-zinc-700">
-                Download <strong>{personalTdlFilename} (v2.8)</strong> above and overwrite your
+                Download <strong>{personalTdlFilename} (v2.9)</strong> above and overwrite your
                 existing <code className="font-mono">.tdl</code> file. In Tally Prime, press{" "}
                 <strong>F1 (Help) → TDLs &amp; Add-Ons → F4 (Manage Local TDLs) → Ctrl + A</strong>.
-                Version 2.8 guarantees sequential bills (e.g. Bill #8 then Bill #9) always capture
+                Version 2.9 guarantees sequential bills (e.g. Bill #8 then Bill #9) always capture
                 their own unique Tally MasterID &amp; GUID and never overwrite earlier bills.
               </p>
             </div>
@@ -1541,8 +1541,8 @@ export function TallyConnectStudio({
               </div>
               <p className="mt-1.5 leading-relaxed text-zinc-700">
                 Already created hundreds of Stock Items, Godowns, and Party Ledgers in Tally before
-                installing <code className="font-mono">.tdl v2.8</code>? Just click{" "}
-                <strong>&ldquo;{menuSyncLabel}&rdquo;</strong> on Gateway of Tally once — v2.8
+                installing <code className="font-mono">.tdl v2.9</code>? Just click{" "}
+                <strong>&ldquo;{menuSyncLabel}&rdquo;</strong> on Gateway of Tally once — v2.9
                 uploads all existing Godowns, Products, Party Ledgers, and Bills per open company in
                 seconds!
               </p>
@@ -1573,11 +1573,11 @@ export function TallyConnectStudio({
           <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/60 p-3.5">
             <div className="flex items-center gap-2 font-semibold text-slate-900">
               <HelpCircle className="h-4 w-4 shrink-0 text-emerald-600" />
-              <span>1. Reload .tdl v2.8 in Tally Memory</span>
+              <span>1. Reload .tdl v2.9 in Tally Memory</span>
             </div>
             <p className="mt-1.5 leading-relaxed text-zinc-600">
               Check <strong>Last Client Source</strong> above — it must show{" "}
-              <code className="font-mono text-slate-900">TallyPrime-RSL-TDL/2.8</code>. Overwrite{" "}
+              <code className="font-mono text-slate-900">TallyPrime-RSL-TDL/2.9</code>. Overwrite{" "}
               <code className="font-mono text-slate-900">{personalTdlFilename}</code> and press{" "}
               <strong>F1 → TDLs &amp; Add-Ons → F4 → Ctrl + A</strong> (press <code className="font-mono">Esc</code>{" "}
               if any old dialog is open).
@@ -1735,7 +1735,7 @@ export function TallyConnectStudio({
               <Activity className="h-4 w-4 shrink-0 text-zinc-400" />
               <span>
                 No voucher sync batches recorded yet. Load{" "}
-                <code className="font-mono text-slate-800">{personalTdlFilename}</code> (v2.8) in
+                <code className="font-mono text-slate-800">{personalTdlFilename}</code> (v2.9) in
                 Tally Prime and click <strong>&ldquo;{menuSyncLabel}&rdquo;</strong> on
                 Gateway of Tally, or save a new Sales bill or Stock Item with{" "}
                 <code className="font-mono">Ctrl + A</code>.

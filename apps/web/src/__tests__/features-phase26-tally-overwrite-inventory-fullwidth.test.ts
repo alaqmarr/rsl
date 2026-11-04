@@ -41,8 +41,8 @@ describe("Phase 26 — Tally Overwrite Prevention, Live Inventory & Masters Engi
     const wsId = session.workspace.id;
     staffGrantFreeAllToolsAccess({ workspaceId: wsId, durationDays: 30, staffId: "stf_p26" });
 
-    // 1. TDL v2.8 Post-Commit Hook + SVFromDate/SVToDate verification
-    expect(LATEST_TALLY_TDL_VERSION).toBe("2.8");
+    // 1. TDL v2.9 Post-Commit Hook + SVFromDate/SVToDate verification
+    expect(LATEST_TALLY_TDL_VERSION).toBe("2.9");
     const tdl = generateTallyPrimeTdlAddOn({
       workspaceName: "NoOverwriteP26 Enterprises",
       webhookUrl: "https://nooverwrite.tally.rapidshiftlabs.in/api/webhooks/tally",
@@ -50,8 +50,9 @@ describe("Phase 26 — Tally Overwrite Prevention, Live Inventory & Masters Engi
     });
     expect(tdl).toContain("CaptureVoucherBeforeAccept");
     expect(tdl).toContain(
-      "Add : On : Form Accept : First : @@RSLShouldPostOnSave : Call : RSLCaptureVoucherBeforeAccept"
+      "Add : On : Form Accept : @@RSLShouldPostOnSave : Call : RSLCaptureVoucherBeforeAccept"
     );
+    expect(tdl).toContain("Add : On : Form Accept : Yes : Form Accept");
     expect(tdl).toContain("PostCapturedVoucherAfterAccept");
     expect(tdl).toContain("JustSavedVoucherColl");
     expect(tdl).toContain('$$Date:"1-Apr-2000"');

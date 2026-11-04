@@ -390,17 +390,211 @@ function cleanTallySystemString(raw?: unknown): string {
   return cleaned;
 }
 
+const TALLY_MULTI_PART_ARRAY_KEYS = new Set([
+  "stockItems",
+  "godowns",
+  "partyLedgers",
+  "billClearances",
+  "lineItems",
+  "billAllocations",
+  "openCompanies",
+  "bills",
+  "vouchers",
+]);
+
 /**
- * Parses voucher `lineItems` from JSON payloads (including `.tdl v2.8` strings such as
- * `"10 PCS"`, `"1850.00/PCS"`, `"-18500.00"` as well as plain JSON numbers).
+ * Normalizes a Tally JSON collection value that may be serialized by Tally Prime `Plain JSON : Yes`
+ * as either a JSON Array (`2+` items) OR a single JSON Object (`1` item) OR `undefined` (`0` items).
  */
-export function parseJsonVoucherLineItems(rawList: unknown): ParsedTallyVoucherLineItem[] {
-  if (!Array.isArray(rawList)) return [];
+export function toTallyJsonObjectArray(raw: unknown): Array<Record<string, unknown>> {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    const out: Array<Record<string, unknown>> = [];
+    for (const elem of raw) {
+      if (elem && typeof elem === "object" && !Array.isArray(elem)) {
+        out.push(elem as Record<string, unknown>);
+      }
+    }
+    return out;
+  }
+  if (typeof raw === "object") {
+    return [raw as Record<string, unknown>];
+  }
+  return [];
+}
+
+function mergeTallyPartFragments(
+  fragments: Array<Record<string, unknown>>
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = {};
+  for (const frag of fragments) {
+    for (const [k, v] of Object.entries(frag)) {
+      if (v === undefined || v === null) continue;
+      if (TALLY_MULTI_PART_ARRAY_KEYS.has(k)) {
+        const existingArr = toTallyJsonObjectArray(merged[k]);
+        const incomingArr = toTallyJsonObjectArray(v);
+        merged[k] = [...existingArr, ...incomingArr];
+      } else if (merged[k] === undefined || merged[k] === "") {
+        merged[k] = v;
+      }
+    }
+  }
+  return merged;
+}
+
+/**
+ * Unwraps Tally Prime `Plain JSON : Yes` multi-part Form outputs (such as `.tdl v2.8`
+ * part-keyed objects `rsl...part` or multi-part `"bill": [ headerPart, itemsPart, billsPart ]` arrays)
+ * into a clean, predictable flat JSON object.
+ */
+export function unwrapTallyMultiPartJson(raw: unknown): Record<string, unknown> {
+  if (!raw) return {};
+  if (Array.isArray(raw)) {
+    const objFrags = raw.filter(
+      (x): x is Record<string, unknown> => Boolean(x && typeof x === "object" && !Array.isArray(x))
+    );
+    return unwrapTallyMultiPartJson(mergeTallyPartFragments(objFrags));
+  }
+  if (typeof raw !== "object") return {};
+
+  const src = raw as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  const partFragments: Array<Record<string, unknown>> = [];
+
+  for (const [key, val] of Object.entries(src)) {
+    if (
+      val &&
+      typeof val === "object" &&
+      !TALLY_MULTI_PART_ARRAY_KEYS.has(key) &&
+      key !== "bill" &&
+      key !== "stockItem" &&
+      key !== "partyLedger" &&
+      key !== "godown" &&
+      /(?:part|form|rootline|headerline|bodyline)$/i.test(key)
+    ) {
+      if (Array.isArray(val)) {
+        for (const elem of val) {
+          if (elem && typeof elem === "object" && !Array.isArray(elem)) {
+            partFragments.push(elem as Record<string, unknown>);
+          }
+        }
+      } else {
+        partFragments.push(val as Record<string, unknown>);
+      }
+    } else {
+      out[key] = val;
+    }
+  }
+
+  if (partFragments.length > 0) {
+    const mergedParts = mergeTallyPartFragments(partFragments);
+    for (const [k, v] of Object.entries(mergedParts)) {
+      if (TALLY_MULTI_PART_ARRAY_KEYS.has(k)) {
+        out[k] = [...toTallyJsonObjectArray(out[k]), ...toTallyJsonObjectArray(v)];
+      } else if (out[k] === undefined || out[k] === "") {
+        out[k] = v;
+      }
+    }
+  }
+
+  // Unwrap `.tdl v2.8` multi-part `"bill": [ { guid, voucherNumber, ... }, { lineItems }, { billAllocations } ]`
+  if (Array.isArray(out.bill)) {
+    const billElems = toTallyJsonObjectArray(out.bill).map((b) => unwrapTallyMultiPartJson(b));
+    const headerCount = billElems.filter((b) =>
+      Boolean(b.voucherNumber || b.partyName || b.guid || b.amountRupees !== undefined)
+    ).length;
+    if (billElems.length > 0 && headerCount <= 1) {
+      out.bill = mergeTallyPartFragments(billElems);
+    } else if (billElems.length > 1) {
+      out.bills = billElems;
+      delete out.bill;
+    }
+  } else if (out.bill && typeof out.bill === "object") {
+    out.bill = unwrapTallyMultiPartJson(out.bill);
+  }
+
+  return out;
+}
+
+/**
+ * Parses `openCompaniesPipe` (`"^^Comp A~~guidA~~2026-04-01^^Comp B~~guidB~~2026-04-01"`)
+ * as well as JSON array or single-object `openCompanies`.
+ */
+export function parseTallyOpenCompaniesInput(
+  openCompaniesRaw: unknown,
+  openCompaniesPipeRaw?: unknown
+): Array<string | { name?: string; guid?: string; startingFrom?: string }> {
+  const result: Array<string | { name?: string; guid?: string; startingFrom?: string }> = [];
+
+  if (Array.isArray(openCompaniesRaw)) {
+    for (const entry of openCompaniesRaw) {
+      if (typeof entry === "string" && entry.trim()) {
+        result.push(entry.trim());
+      } else if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+        result.push(entry as { name?: string; guid?: string; startingFrom?: string });
+      }
+    }
+  } else if (openCompaniesRaw && typeof openCompaniesRaw === "object") {
+    result.push(openCompaniesRaw as { name?: string; guid?: string; startingFrom?: string });
+  } else if (typeof openCompaniesRaw === "string" && openCompaniesRaw.trim()) {
+    result.push(openCompaniesRaw.trim());
+  }
+
+  if (typeof openCompaniesPipeRaw === "string" && openCompaniesPipeRaw.trim()) {
+    const chunks = openCompaniesPipeRaw.split("^^").map((s) => s.trim()).filter(Boolean);
+    for (const chunk of chunks) {
+      const [rawName, rawGuid, rawStart] = chunk.split("~~");
+      const name = cleanTallySystemString(rawName);
+      if (!name) continue;
+      result.push({
+        name,
+        guid: cleanTallySystemString(rawGuid) || undefined,
+        startingFrom: cleanTallySystemString(rawStart) || undefined,
+      });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Parses voucher `lineItems` from JSON payloads (including `.tdl v2.9` `lineItemsPacked` strings,
+ * `.tdl v2.8` single-object or array `lineItems` with `"10 PCS"`, `"1850.00/PCS"`, `"-18500.00"`,
+ * as well as plain JSON numbers).
+ */
+export function parseJsonVoucherLineItems(
+  rawList: unknown,
+  packedStr?: unknown
+): ParsedTallyVoucherLineItem[] {
+  const normalizedEntries: Array<Record<string, unknown>> = toTallyJsonObjectArray(rawList);
+
+  if (typeof rawList === "string" && rawList.includes("~~")) {
+    packedStr = rawList;
+  }
+  if (typeof packedStr === "string" && packedStr.trim()) {
+    const rows = packedStr.split("^^").map((s) => s.trim()).filter(Boolean);
+    for (const row of rows) {
+      const [itemName, billedQty, actualQty, rate, discount, amount, godownName, batchName] =
+        row.split("~~");
+      if (cleanTallySystemString(itemName)) {
+        normalizedEntries.push({
+          itemName,
+          billedQty,
+          actualQty,
+          rate,
+          discount,
+          amount,
+          godownName,
+          batchName,
+        });
+      }
+    }
+  }
+
+  if (normalizedEntries.length === 0) return [];
   const parsed: ParsedTallyVoucherLineItem[] = [];
 
-  for (const rawEntry of rawList) {
-    if (!rawEntry || typeof rawEntry !== "object") continue;
-    const li = rawEntry as Record<string, unknown>;
+  for (const li of normalizedEntries) {
     const itemName = cleanTallySystemString(li.itemName ?? li.stockItemName ?? li.name);
     if (!itemName) continue;
 
@@ -1746,36 +1940,55 @@ export function ingestTallyMastersJsonForWorkspace(params: {
   detectedCompanyName: string | null;
 } {
   const db = tenantDataDb({ workspaceId: params.workspaceId });
-  const topCompany = cleanTallySystemString(params.payload.companyName);
+  const normalizedPayload = unwrapTallyMultiPartJson(params.payload);
+  const topCompany = cleanTallySystemString(normalizedPayload.companyName);
   const defaultCompany = resolveMastersDefaultCompanyName(
     db,
     params.workspaceId,
     topCompany || params.fallbackCompanyName
   );
 
-  const rawStockList: Array<Record<string, unknown>> = Array.isArray(params.payload.stockItems)
-    ? (params.payload.stockItems as Array<Record<string, unknown>>)
-    : params.payload.stockItem && typeof params.payload.stockItem === "object"
-      ? [params.payload.stockItem as Record<string, unknown>]
-      : [];
+  const masterKind = cleanTallySystemString(normalizedPayload.masterKind).toLowerCase();
+  const rawStockList: Array<Record<string, unknown>> = [
+    ...toTallyJsonObjectArray(normalizedPayload.stockItems),
+    ...toTallyJsonObjectArray(normalizedPayload.stockItem),
+    ...(masterKind === "stockitem" ||
+    (!masterKind &&
+      normalizedPayload.name &&
+      (normalizedPayload.stockGroup !== undefined ||
+        normalizedPayload.uom !== undefined ||
+        normalizedPayload.baseUnit !== undefined ||
+        normalizedPayload.sellingPriceRupees !== undefined ||
+        normalizedPayload.standardSellingPrice !== undefined))
+      ? [normalizedPayload]
+      : []),
+  ];
 
-  const rawGodownList: Array<Record<string, unknown>> = Array.isArray(params.payload.godowns)
-    ? (params.payload.godowns as Array<Record<string, unknown>>)
-    : params.payload.godown && typeof params.payload.godown === "object"
-      ? [params.payload.godown as Record<string, unknown>]
-      : [];
+  const rawGodownList: Array<Record<string, unknown>> = [
+    ...toTallyJsonObjectArray(normalizedPayload.godowns),
+    ...toTallyJsonObjectArray(normalizedPayload.godown),
+    ...(masterKind === "godown" ? [normalizedPayload] : []),
+  ];
 
-  const rawPartyList: Array<Record<string, unknown>> = Array.isArray(params.payload.partyLedgers)
-    ? (params.payload.partyLedgers as Array<Record<string, unknown>>)
-    : params.payload.partyLedger && typeof params.payload.partyLedger === "object"
-      ? [params.payload.partyLedger as Record<string, unknown>]
-      : [];
+  const rawPartyList: Array<Record<string, unknown>> = [
+    ...toTallyJsonObjectArray(normalizedPayload.partyLedgers),
+    ...toTallyJsonObjectArray(normalizedPayload.partyLedger),
+    ...(masterKind === "partyledger" ||
+    (!masterKind &&
+      normalizedPayload.name &&
+      normalizedPayload.stockGroup === undefined &&
+      normalizedPayload.uom === undefined &&
+      (normalizedPayload.parentGroup !== undefined ||
+        normalizedPayload.gstin !== undefined ||
+        normalizedPayload.openingBalanceRupees !== undefined ||
+        normalizedPayload.closingBalanceRupees !== undefined))
+      ? [normalizedPayload]
+      : []),
+  ];
 
-  const rawClearanceList: Array<Record<string, unknown>> = Array.isArray(
-    params.payload.billClearances
-  )
-    ? (params.payload.billClearances as Array<Record<string, unknown>>)
-    : [];
+  const rawClearanceList: Array<Record<string, unknown>> = toTallyJsonObjectArray(
+    normalizedPayload.billClearances
+  );
 
   let detectedCompanyName: string | null = topCompany || null;
   const stockItems: ParsedTallyStockItemMaster[] = [];

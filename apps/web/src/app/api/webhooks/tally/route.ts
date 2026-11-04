@@ -16,11 +16,13 @@ import {
   ingestTallyBillEventAndEnqueueAutomation,
   LATEST_TALLY_TDL_VERSION,
   lookupTallyWebhookEndpointByToken,
+  parseTallyOpenCompaniesInput,
   reconcileTallySyncBatch,
   recordTallyWebhookError,
   recordTallyWebhookPing,
   registerTallyCompaniesForWorkspace,
   saveNativeTallyVoucherPdf,
+  unwrapTallyMultiPartJson,
 } from "@rsl/tally";
 import { controlDb, ingressDb } from "@rsl/tenancy";
 import {
@@ -494,22 +496,22 @@ export async function POST(req: NextRequest) {
     let pingOpenCompanies: Array<string | { name?: string; guid?: string; startingFrom?: string }> = [];
     let reconcilePayload: { companyName: string; syncBatchId: string } | null = null;
 
-    if (rawBody.trim().startsWith("{")) {
+    const trimmedBody = rawBody.trim();
+    if (trimmedBody.startsWith("{") || trimmedBody.startsWith("[")) {
       try {
-        const parsedProbe = JSON.parse(rawBody) as Record<string, unknown>;
+        const parsedProbe = unwrapTallyMultiPartJson(JSON.parse(trimmedBody));
         if (parsedProbe.mode === "ping" || parsedProbe.type === "ping") {
           isPingPayload = true;
         }
         if (typeof parsedProbe.companyName === "string") {
           pingCompanyName = parsedProbe.companyName.replace(/[\x00-\x1F]+/g, "").trim();
         }
-        if (Array.isArray(parsedProbe.openCompanies)) {
-          pingOpenCompanies = parsedProbe.openCompanies as Array<
-            string | { name?: string; guid?: string; startingFrom?: string }
-          >;
-        }
+        pingOpenCompanies = parseTallyOpenCompaniesInput(
+          parsedProbe.openCompanies,
+          parsedProbe.openCompaniesPipe
+        );
         if (
-          parsedProbe.mode === "reconcile" &&
+          (parsedProbe.mode === "reconcile" || modeParam === "reconcile") &&
           typeof parsedProbe.companyName === "string" &&
           typeof parsedProbe.syncBatchId === "string"
         ) {
@@ -635,6 +637,7 @@ export async function POST(req: NextRequest) {
       actorType: caller.actorType,
       actorId: caller.actorId,
       rawPayload: rawBody,
+      modeHint: modeParam || undefined,
       sourceLabel: "webhook",
       sourceIp,
       userAgent,
