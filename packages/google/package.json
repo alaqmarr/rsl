@@ -12,6 +12,7 @@
   "dependencies": {
     "@rsl/api-keys": "workspace:*",
     "@rsl/billing": "workspace:*",
+    "@rsl/connections": "workspace:*",
     "@rsl/core": "workspace:*",
     "@rsl/database": "workspace:*",
     "@rsl/logging": "workspace:*",

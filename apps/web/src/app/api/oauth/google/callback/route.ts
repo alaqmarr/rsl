@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { completeGoogleOAuthConnection, type GoogleOAuthPurpose } from "@rsl/connections";
 import { getEnv, isTrustedPlatformHost, resolveEndpointsFromHeaders, verifyHmac } from "@rsl/core";
+import { syncGoogleBusinessReviewsForWorkspace } from "@rsl/google";
 import { canRolePerform } from "@rsl/rbac";
 import { getOptionalWebSession } from "@/lib/session";
 
@@ -155,10 +156,29 @@ export async function GET(req: NextRequest) {
       codeVerifier,
     });
 
-    const successMsg =
-      parsedState.purpose === "google_drive"
-        ? `Google Drive (${result.email}) connected! Folder '${result.folderName || "RapidShift Labs Backups"}' was created automatically in your Google Drive.`
-        : `Google Business Profile (${result.email}) connected via Google Sign-In!`;
+    if (parsedState.purpose === "google_drive") {
+      const successMsg = `Google Drive (${result.email}) connected! Folder '${result.folderName || "RapidShift Labs Backups"}' was created automatically in your Google Drive.`;
+      return buildAppRedirect(appBaseUrl, returnTo, "notice", successMsg);
+    }
+
+    let successMsg = result.storeName
+      ? `Google Business Profile '${result.storeName}' (${result.email}) connected!`
+      : `Google Business Profile (${result.email}) connected!`;
+
+    if (result.locationId) {
+      const syncRes = await syncGoogleBusinessReviewsForWorkspace({
+        workspaceId: session.workspace.id,
+        connectionId: result.connectionId,
+        forceDiscovery: false,
+      }).catch(() => null);
+      if (syncRes?.ok) {
+        successMsg = `${successMsg} ${syncRes.message}`;
+      } else if (syncRes?.message) {
+        successMsg = `${successMsg} (${syncRes.message})`;
+      }
+    } else if (result.gbpDiscoveryDetail) {
+      successMsg = `${successMsg} ${result.gbpDiscoveryDetail}`;
+    }
 
     return buildAppRedirect(appBaseUrl, returnTo, "notice", successMsg);
   } catch (err) {

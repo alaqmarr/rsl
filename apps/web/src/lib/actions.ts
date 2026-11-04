@@ -54,6 +54,7 @@ import {
   disconnectExternalConnection,
   linkExternalConnection,
   rotateWorkspaceWebhookVerifyToken,
+  selectGoogleBusinessLocation,
   updateExternalConnection,
   uploadFileToWorkspaceGoogleDrive,
   verifyExternalConnectionHealth,
@@ -68,7 +69,12 @@ import {
 } from "@rsl/core";
 import { controlSchema } from "@rsl/database";
 import { recordDocsFeedback } from "@rsl/docs";
-import { generateSmartReviewDraft, recordGoogleReview, replyToGoogleReview } from "@rsl/google";
+import {
+  generateSmartReviewDraft,
+  recordGoogleReview,
+  replyToGoogleReview,
+  syncGoogleReviews,
+} from "@rsl/google";
 import {
   addConversationInternalNote,
   assignConversationToMember,
@@ -1655,7 +1661,33 @@ export async function replyReviewAction(formData: FormData) {
     replyText: String(formData.get("replyText") || ""),
   });
   if (!res.ok) return goWithError(returnPath, res.error.message);
-  return goWithNotice(returnPath, "Published owner reply to Google review.");
+  return goWithNotice(
+    returnPath,
+    res.data.publishedToGoogleLive
+      ? "Published owner reply live to Google Maps & Search."
+      : "Published owner reply to Google review."
+  );
+}
+
+export async function syncGoogleReviewsAction(formData: FormData) {
+  const session = await requireWebSession();
+  const rawReturn = String(formData.get("returnPath") || "/reviews");
+  const returnPath =
+    rawReturn.startsWith("/reviews") || rawReturn.startsWith("/connections")
+      ? rawReturn
+      : "/reviews";
+  const connectionId = String(formData.get("connectionId") || "").trim() || undefined;
+  const res = await syncGoogleReviews(session.ctx, {
+    connectionId,
+    forceDiscovery: true,
+  });
+  revalidatePath("/reviews");
+  revalidatePath("/connections");
+  if (!res.ok) return goWithError(returnPath, res.error.message);
+  if (!res.data.ok) {
+    return goWithError(returnPath, res.data.message);
+  }
+  return goWithNotice(returnPath, res.data.message);
 }
 
 export async function generateReviewDraftAction(formData: FormData) {
@@ -2913,12 +2945,77 @@ export async function verifyConnectionLiveJsonAction(formData: FormData): Promis
       return { ok: false, message: res.error.message };
     }
     revalidatePath("/connections");
+    revalidatePath("/reviews");
     revalidatePath("/settings/tokens");
     revalidatePath("/developers");
     return {
       ok: res.data.status !== "needs_reauth",
       status: res.data.status,
       message: res.data.liveMessage,
+    };
+  } catch (err) {
+    return { ok: false, message: friendlyMessage(err) };
+  }
+}
+
+export async function syncGoogleBusinessProfileJsonAction(formData: FormData): Promise<{
+  ok: boolean;
+  message: string;
+  storeName?: string;
+  syncedCount?: number;
+}> {
+  try {
+    const session = await requireWebSession();
+    const connectionId = String(formData.get("connectionId") || "").trim() || undefined;
+    const res = await syncGoogleReviews(session.ctx, {
+      connectionId,
+      forceDiscovery: true,
+    });
+    revalidatePath("/connections");
+    revalidatePath("/reviews");
+    revalidatePath("/settings/tokens");
+    if (!res.ok) {
+      return { ok: false, message: res.error.message };
+    }
+    return {
+      ok: res.data.ok,
+      storeName: res.data.storeName,
+      syncedCount: res.data.syncedCount,
+      message: res.data.message,
+    };
+  } catch (err) {
+    return { ok: false, message: friendlyMessage(err) };
+  }
+}
+
+export async function selectGoogleBusinessLocationJsonAction(formData: FormData): Promise<{
+  ok: boolean;
+  message: string;
+}> {
+  try {
+    const session = await requireWebSession();
+    const connectionId = String(formData.get("connectionId") || "").trim();
+    const locationId = String(formData.get("locationId") || "").trim();
+    const selected = await selectGoogleBusinessLocation(session.ctx, {
+      connectionId,
+      locationId,
+    });
+    if (!selected.ok) {
+      return { ok: false, message: selected.error.message };
+    }
+    const synced = await syncGoogleReviews(session.ctx, {
+      connectionId,
+      forceDiscovery: false,
+    });
+    revalidatePath("/connections");
+    revalidatePath("/reviews");
+    revalidatePath("/settings/tokens");
+    return {
+      ok: true,
+      message:
+        synced.ok && synced.data.ok
+          ? `Active location set to '${selected.data.storeName || selected.data.displayName}'. ${synced.data.message}`
+          : `Active location set to '${selected.data.storeName || selected.data.displayName}'.`,
     };
   } catch (err) {
     return { ok: false, message: friendlyMessage(err) };

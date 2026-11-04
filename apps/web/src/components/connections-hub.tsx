@@ -11,6 +11,8 @@ import {
   connectChannelJsonAction,
   disconnectConnectionJsonAction,
   rotateMetaVerifyTokenJsonAction,
+  selectGoogleBusinessLocationJsonAction,
+  syncGoogleBusinessProfileJsonAction,
   updateConnectionJsonAction,
   verifyConnectionLiveJsonAction,
 } from "@/lib/actions";
@@ -40,6 +42,15 @@ export interface GoogleOAuthClientStatus {
   defaultDriveFolderName: string;
 }
 
+export interface WorkspaceBusinessSummary {
+  name: string;
+  industry?: string;
+  phone?: string;
+  website?: string;
+  address?: string;
+  gstin?: string;
+}
+
 export interface ConnectionsHubProps {
   initialKind?: ConnectionChannelKind;
   connections: SerializedConnectionItem[];
@@ -48,6 +59,7 @@ export interface ConnectionsHubProps {
   webhookVerifyToken: string;
   canManage: boolean;
   googleOAuth?: GoogleOAuthClientStatus;
+  workspaceBusiness?: WorkspaceBusinessSummary;
 }
 
 interface WhitelistStep {
@@ -337,6 +349,7 @@ export function ConnectionsHub({
   webhookVerifyToken: initialVerifyToken,
   canManage,
   googleOAuth,
+  workspaceBusiness,
 }: ConnectionsHubProps) {
   const router = useRouter();
   const [selectedKind, setSelectedKind] = useState<ConnectionChannelKind>(
@@ -518,9 +531,62 @@ export function ConnectionsHub({
     });
   }
 
+  function handleSyncGoogleBusiness(connId: string) {
+    setPendingCardAction(`syncgbp:${connId}`);
+    startCardTransition(async () => {
+      const fd = new FormData();
+      fd.set("connectionId", connId);
+      const res = await syncGoogleBusinessProfileJsonAction(fd);
+      setPendingCardAction(null);
+      if (res.ok) {
+        sileo.success({
+          title: res.storeName
+            ? `${res.storeName} — Synced`
+            : "Google Business Profile Synced",
+          description: res.message,
+          duration: 5500,
+        });
+      } else {
+        sileo.error({
+          title: "Google Business Sync Notice",
+          description: res.message,
+          duration: 7000,
+        });
+      }
+      router.refresh();
+    });
+  }
+
+  function handleSelectGbpLocation(connId: string, nextLocId: string) {
+    if (!nextLocId) return;
+    setPendingCardAction(`locgbp:${connId}`);
+    startCardTransition(async () => {
+      const fd = new FormData();
+      fd.set("connectionId", connId);
+      fd.set("locationId", nextLocId);
+      const res = await selectGoogleBusinessLocationJsonAction(fd);
+      setPendingCardAction(null);
+      if (res.ok) {
+        sileo.success({
+          title: "Storefront Location Updated",
+          description: res.message,
+          duration: 5000,
+        });
+      } else {
+        sileo.error({
+          title: "Could Not Switch Location",
+          description: res.message,
+          duration: 5500,
+        });
+      }
+      router.refresh();
+    });
+  }
+
   const activeCallbackUrl =
     activeBlueprint.webhookMode === "whatsapp" ? whatsappWebhookUrl : metaWebhookUrl;
   const activeDriveConn = connections.find((c) => c.channelKind === "google_drive");
+  const activeGbpConn = connections.find((c) => c.channelKind === "google_business");
 
   return (
     <div className="w-full space-y-6">
@@ -627,7 +693,14 @@ export function ConnectionsHub({
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
         {/* Left Column: Tailored Channel Form + Webhook Credentials */}
         <div className="min-w-0 space-y-6 xl:col-span-6">
-          <SectionCard title={`Connect ${activeBlueprint.title}`} subtitle={activeBlueprint.summary}>
+          <SectionCard
+            title={
+              selectedKind === "google_business" && activeGbpConn
+                ? "Connected Google Business Profile"
+                : `Connect ${activeBlueprint.title}`
+            }
+            subtitle={activeBlueprint.summary}
+          >
             {!canManage ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 text-[13px] text-amber-950">
                 Your current team role has view-only access to Connected Channels. Ask a Business
@@ -635,7 +708,270 @@ export function ConnectionsHub({
               </div>
             ) : (
               <div className="space-y-4">
-                {selectedKind.startsWith("google") && (
+                {selectedKind === "google_business" && activeGbpConn && (() => {
+                  const gbpMeta = activeGbpConn.metadata;
+                  const resolvedBizName =
+                    gbpMeta.storeName ||
+                    workspaceBusiness?.name ||
+                    activeGbpConn.displayName;
+                  const resolvedCategory =
+                    gbpMeta.primaryCategory || workspaceBusiness?.industry || undefined;
+                  const resolvedAddress =
+                    gbpMeta.storeAddress || workspaceBusiness?.address || undefined;
+                  const resolvedPhone =
+                    gbpMeta.storePhone || workspaceBusiness?.phone || undefined;
+                  const resolvedWebsite =
+                    gbpMeta.websiteUri || workspaceBusiness?.website || undefined;
+                  const isSyncingGbp = pendingCardAction === `syncgbp:${activeGbpConn.id}`;
+                  const isSwitchingLoc = pendingCardAction === `locgbp:${activeGbpConn.id}`;
+                  const locations = gbpMeta.availableLocations ?? [];
+                  const discoveryStatus = gbpMeta.gbpDiscoveryStatus;
+                  const isVerifiedListing = discoveryStatus === "verified_locations";
+
+                  return (
+                    <div className="space-y-3.5 rounded-2xl border border-emerald-300/90 bg-gradient-to-br from-emerald-50/90 via-white to-emerald-50/40 p-4 text-[13px] shadow-2xs">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <span className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white shadow-2xs ring-1 ring-emerald-200">
+                            <GoogleGLogo className="h-5 w-5" />
+                          </span>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h4 className="text-base font-bold text-slate-900">
+                                {resolvedBizName}
+                              </h4>
+                              <StatusPill
+                                label={
+                                  isVerifiedListing
+                                    ? "GBP Location Active"
+                                    : discoveryStatus === "quota_pending"
+                                      ? "OAuth Active • GBP Quota Pending"
+                                      : discoveryStatus === "api_disabled"
+                                        ? "OAuth Active • Enable GBP API"
+                                        : discoveryStatus === "no_locations_found"
+                                          ? "OAuth Active • 0 Listings Found"
+                                          : "Google Connected"
+                                }
+                                tone={isVerifiedListing ? "emerald" : "amber"}
+                              />
+                            </div>
+                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
+                              {gbpMeta.driveEmail && (
+                                <span>
+                                  Google Account:{" "}
+                                  <strong className="text-slate-900">{gbpMeta.driveEmail}</strong>
+                                  {gbpMeta.googleUserName ? ` (${gbpMeta.googleUserName})` : ""}
+                                </span>
+                              )}
+                              {typeof gbpMeta.averageRating === "number" && (
+                                <span className="font-semibold text-amber-700">
+                                  ★ {gbpMeta.averageRating.toFixed(1)} avg
+                                </span>
+                              )}
+                              {typeof gbpMeta.totalReviewsCount === "number" && (
+                                <span>
+                                  • <strong>{gbpMeta.totalReviewsCount}</strong> Google review
+                                  {gbpMeta.totalReviewsCount === 1 ? "" : "s"}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Rich Business Profile Details Grid */}
+                      <div className="grid grid-cols-1 gap-2.5 rounded-xl border border-zinc-200/80 bg-white/95 p-3.5 text-xs sm:grid-cols-2">
+                        <div>
+                          <div className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
+                            Business Name
+                          </div>
+                          <div className="mt-0.5 font-semibold text-slate-900">
+                            {resolvedBizName}
+                            {!gbpMeta.storeName && workspaceBusiness?.name && (
+                              <span className="ml-1.5 text-[11px] font-normal text-zinc-500">
+                                (Workspace Profile)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
+                            Category / Industry
+                          </div>
+                          <div className="mt-0.5 font-medium text-slate-800">
+                            {resolvedCategory || "—"}
+                          </div>
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <div className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
+                            Storefront Address
+                          </div>
+                          <div className="mt-0.5 font-medium text-slate-800">
+                            {resolvedAddress || "Address will populate automatically from your verified Google Business location"}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
+                            Business Phone
+                          </div>
+                          <div className="mt-0.5 font-medium text-slate-800">
+                            {resolvedPhone || "—"}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
+                            Website
+                          </div>
+                          <div className="mt-0.5 truncate font-medium text-slate-800">
+                            {resolvedWebsite ? (
+                              <a
+                                href={
+                                  resolvedWebsite.startsWith("http")
+                                    ? resolvedWebsite
+                                    : `https://${resolvedWebsite}`
+                                }
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-emerald-700 hover:underline"
+                              >
+                                {resolvedWebsite} ↗
+                              </a>
+                            ) : (
+                              "—"
+                            )}
+                          </div>
+                        </div>
+
+                        {gbpMeta.locationId && (
+                          <div>
+                            <div className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
+                              GBP Location ID
+                            </div>
+                            <div className="mt-0.5 font-mono text-[11px] font-semibold text-slate-800">
+                              {gbpMeta.locationId}
+                            </div>
+                          </div>
+                        )}
+
+                        {gbpMeta.accountId && (
+                          <div>
+                            <div className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
+                              GBP Account
+                            </div>
+                            <div className="mt-0.5 font-mono text-[11px] font-semibold text-slate-800">
+                              {gbpMeta.accountName
+                                ? `${gbpMeta.accountName} (${gbpMeta.accountId})`
+                                : gbpMeta.accountId}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Multi-Location Switcher if 2+ store branches exist */}
+                      {locations.length > 1 && (
+                        <div className="rounded-xl border border-emerald-200/80 bg-white p-3">
+                          <label
+                            htmlFor="gbp-location-select"
+                            className="block text-xs font-semibold text-slate-900"
+                          >
+                            Active Storefront Location ({locations.length} branches discovered)
+                          </label>
+                          <div className="mt-1.5 flex items-center gap-2">
+                            <select
+                              id="gbp-location-select"
+                              disabled={isSwitchingLoc}
+                              value={gbpMeta.locationId || locations[0]?.locationId || ""}
+                              onChange={(e) =>
+                                handleSelectGbpLocation(activeGbpConn.id, e.target.value)
+                              }
+                              className="rsl-input bg-white text-xs"
+                            >
+                              {locations.map((loc) => (
+                                <option key={loc.locationId} value={loc.locationId}>
+                                  {loc.title}
+                                  {loc.storeAddress ? ` — ${loc.storeAddress}` : ""} ({loc.locationId})
+                                </option>
+                              ))}
+                            </select>
+                            {isSwitchingLoc && <IosSpinner size="xs" />}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Actionable Diagnostic Banner if Google Cloud GBP API / Quota / Listing needs attention */}
+                      {gbpMeta.gbpDiscoveryDetail && !isVerifiedListing && (
+                        <div className="rounded-xl border border-amber-200 bg-amber-50/90 p-3 text-xs leading-relaxed text-amber-950">
+                          <div className="font-bold text-amber-950">
+                            Google Business Profile Sync Status
+                          </div>
+                          <p className="mt-0.5">{gbpMeta.gbpDiscoveryDetail}</p>
+                        </div>
+                      )}
+
+                      {/* Direct Actions Row */}
+                      <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                        <button
+                          type="button"
+                          disabled={Boolean(pendingCardAction)}
+                          onClick={() => handleSyncGoogleBusiness(activeGbpConn.id)}
+                          className="rsl-btn-primary inline-flex items-center gap-1.5 py-1.5 text-xs"
+                        >
+                          {isSyncingGbp && <IosSpinner size="xs" className="text-white" />}
+                          <span>
+                            {isSyncingGbp
+                              ? "Syncing Profile & Reviews..."
+                              : "Sync Business Profile & Reviews"}
+                          </span>
+                        </button>
+
+                        <Link href="/reviews" className="rsl-btn-secondary py-1.5 text-xs">
+                          Open Google Reviews →
+                        </Link>
+
+                        {gbpMeta.mapsUri && (
+                          <a
+                            href={gbpMeta.mapsUri}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="rsl-btn-secondary py-1.5 text-xs"
+                          >
+                            View on Google Maps ↗
+                          </a>
+                        )}
+
+                        {gbpMeta.newReviewUri && (
+                          <CopyTextButton
+                            text={gbpMeta.newReviewUri}
+                            label="Copy Customer Review Link"
+                            copiedLabel="Copied Review Link"
+                          />
+                        )}
+
+                        <ConnectToGoogleDriveButton
+                          purpose="google_business"
+                          returnTo="/connections?tab=google_business"
+                          label="Switch Google Account"
+                          variant="white"
+                          size="sm"
+                        />
+                      </div>
+
+                      {gbpMeta.lastReviewsSyncedAt && (
+                        <div className="text-[11px] text-zinc-500">
+                          Last synced from Google:{" "}
+                          {new Date(gbpMeta.lastReviewsSyncedAt).toLocaleString("en-IN")}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {selectedKind.startsWith("google") &&
+                  !(selectedKind === "google_business" && activeGbpConn) && (
                   <div className="rounded-2xl border border-emerald-200 bg-emerald-50/75 p-4 text-[13px]">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200">
@@ -653,7 +989,7 @@ export function ConnectionsHub({
                     <p className="mt-1 text-xs leading-relaxed text-slate-700">
                       {selectedKind === "google_drive"
                         ? `No Google Cloud Console, no Service Account JSONs, and no manual Folder IDs needed. Sign in on Google's official screen — RapidShift Labs automatically creates '${googleOAuth?.defaultDriveFolderName || "RapidShift Labs Backups"}' in your Drive using the privacy-safe drive.file scope.`
-                        : "Sign in with the Google account that manages your verified Google Business Profile listing. Storefront locations and auto-renewing refresh tokens are configured automatically."}
+                        : "Sign in with the Google account that manages your verified Google Business Profile listing. Storefront locations, business details, and customer reviews sync automatically."}
                     </p>
 
                     <div className="mt-3.5 flex flex-wrap items-center gap-3">
@@ -674,7 +1010,7 @@ export function ConnectionsHub({
                     {((selectedKind === "google_drive" && !googleOAuth?.enableDriveOAuth) ||
                       (selectedKind === "google_business" && !googleOAuth?.enableGbpOAuth)) && (
                       <p className="mt-2.5 text-[11px] font-medium text-amber-900">
-                        Note: Platform Google OAuth keys have not been saved yet under Staff Portal → OAuth &amp; API Credentials. Save them once in the Admin Portal so live Google Sign-In activates immediately.
+                        Google 1-click sign-in is being configured on this platform. Please try again shortly or contact support.
                       </p>
                     )}
                   </div>
@@ -1220,10 +1556,60 @@ export function ConnectionsHub({
                       </div>
 
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-600 tabular-nums">
-                        <span>
-                          Primary ID:{" "}
-                          <strong className="font-mono text-slate-800">{c.externalAccountId}</strong>
-                        </span>
+                        {c.channelKind === "google_business" ? (
+                          <>
+                            {c.metadata.locationId ? (
+                              <span>
+                                Location:{" "}
+                                <strong className="font-mono text-slate-800">
+                                  {c.metadata.locationId}
+                                </strong>
+                              </span>
+                            ) : (
+                              <span>
+                                Google Account:{" "}
+                                <strong className="text-slate-800">
+                                  {c.metadata.driveEmail || c.externalAccountId}
+                                </strong>
+                              </span>
+                            )}
+                            {c.metadata.driveEmail && c.metadata.locationId && (
+                              <span>
+                                • Google:{" "}
+                                <strong className="text-slate-800">{c.metadata.driveEmail}</strong>
+                              </span>
+                            )}
+                            {c.metadata.primaryCategory && (
+                              <span>
+                                • Category:{" "}
+                                <strong className="text-slate-800">
+                                  {c.metadata.primaryCategory}
+                                </strong>
+                              </span>
+                            )}
+                            {c.metadata.storeAddress && (
+                              <span>
+                                • Address:{" "}
+                                <strong className="text-slate-800">
+                                  {c.metadata.storeAddress}
+                                </strong>
+                              </span>
+                            )}
+                            {typeof c.metadata.totalReviewsCount === "number" && (
+                              <span>
+                                • Reviews:{" "}
+                                <strong className="text-slate-800">
+                                  {c.metadata.totalReviewsCount}
+                                </strong>
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span>
+                            Primary ID:{" "}
+                            <strong className="font-mono text-slate-800">{c.externalAccountId}</strong>
+                          </span>
+                        )}
                         {c.metadata.wabaId && (
                           <span>
                             • WABA: <strong className="font-mono text-slate-800">{c.metadata.wabaId}</strong>
@@ -1288,6 +1674,28 @@ export function ConnectionsHub({
                           >
                             Open Drive Folder ↗
                           </a>
+                        )}
+                        {c.channelKind === "google_business" && (
+                          <>
+                            <button
+                              type="button"
+                              disabled={Boolean(pendingCardAction)}
+                              onClick={() => handleSyncGoogleBusiness(c.id)}
+                              className="rsl-btn-primary inline-flex items-center gap-1.5 py-1.5 text-xs"
+                            >
+                              {pendingCardAction === `syncgbp:${c.id}` && (
+                                <IosSpinner size="xs" className="text-white" />
+                              )}
+                              <span>
+                                {pendingCardAction === `syncgbp:${c.id}`
+                                  ? "Syncing..."
+                                  : "Sync Profile & Reviews"}
+                              </span>
+                            </button>
+                            <Link href="/reviews" className="rsl-btn-secondary py-1.5 text-xs">
+                              Open Reviews →
+                            </Link>
+                          </>
                         )}
                         {(c.channelKind === "google_drive" ||
                           c.channelKind === "google_business") && (

@@ -552,6 +552,9 @@ importers:
       '@rsl/billing':
         specifier: workspace:*
         version: link:../billing
+      '@rsl/connections':
+        specifier: workspace:*
+        version: link:../connections
       '@rsl/core':
         specifier: workspace:*
         version: link:../core

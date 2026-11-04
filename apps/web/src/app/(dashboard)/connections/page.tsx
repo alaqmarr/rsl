@@ -1,13 +1,16 @@
 import { headers } from "next/headers";
 import Link from "next/link";
+import { eq } from "drizzle-orm";
 import {
   type ConnectionChannelKind,
   getOrCreateWorkspaceWebhookVerifyToken,
   listWorkspaceConnections,
 } from "@rsl/connections";
 import { resolveEndpointsFromHeaders } from "@rsl/core";
+import { controlSchema } from "@rsl/database";
+import { syncGoogleBusinessReviewsForWorkspace } from "@rsl/google";
 import { canRoleAccessWebRoute, canRolePerform, formatRoleLabel } from "@rsl/rbac";
-import { getPublicGoogleOAuthStatus } from "@rsl/tenancy";
+import { controlDb, getPublicGoogleOAuthStatus } from "@rsl/tenancy";
 import { AccessRestrictedState, PageHeader, SectionCard, StatusPill } from "@rsl/ui";
 import { ConnectionsHub } from "@/components/connections-hub";
 import { FlashBanner } from "@/components/flash-banner";
@@ -49,7 +52,34 @@ export default async function ConnectedAccountsPage({
     workspaceSlug: session.workspace.slug,
   });
 
-  const data = listWorkspaceConnections(session.workspace.id);
+  let data = listWorkspaceConnections(session.workspace.id);
+  const unhydratedGbp = data.connections.find(
+    (c) => c.channelKind === "google_business" && !c.metadata.lastGbpDiscoveredAt
+  );
+  if (unhydratedGbp) {
+    await syncGoogleBusinessReviewsForWorkspace({
+      workspaceId: session.workspace.id,
+      connectionId: unhydratedGbp.id,
+      forceDiscovery: true,
+    }).catch(() => null);
+    data = listWorkspaceConnections(session.workspace.id);
+  }
+
+  const wsDetails = controlDb()
+    .select({
+      name: controlSchema.workspaces.name,
+      industry: controlSchema.workspaces.industry,
+      businessPhone: controlSchema.workspaces.businessPhone,
+      website: controlSchema.workspaces.website,
+      addressLine: controlSchema.workspaces.addressLine,
+      city: controlSchema.workspaces.city,
+      pincode: controlSchema.workspaces.pincode,
+      gstin: controlSchema.workspaces.gstin,
+    })
+    .from(controlSchema.workspaces)
+    .where(eq(controlSchema.workspaces.id, session.workspace.id))
+    .get();
+
   const googleOAuth = getPublicGoogleOAuthStatus();
   const canManage = canRolePerform(session.roleSlug, "connections:manage", session.workspace.id);
   const webhookVerifyToken = canManage
@@ -63,9 +93,12 @@ export default async function ConnectedAccountsPage({
   const canAccessTally = canRoleAccessWebRoute(session.roleSlug, "/tally", session.workspace.id);
   const activeDriveConn = data.connections.find((c) => c.channelKind === "google_drive");
   const requestedKind = (sp.tab || sp.kind || "").trim() as ConnectionChannelKind;
+  const firstConnectedChannel = data.connections.find(
+    (c) => c.channelKind !== "google_drive"
+  )?.channelKind;
   const initialKind: ConnectionChannelKind | undefined = VALID_CHANNEL_KINDS.has(requestedKind)
     ? requestedKind
-    : undefined;
+    : firstConnectedChannel;
 
   return (
     <div className="w-full space-y-6">
@@ -129,6 +162,18 @@ export default async function ConnectedAccountsPage({
         webhookVerifyToken={webhookVerifyToken}
         canManage={canManage}
         googleOAuth={googleOAuth}
+        workspaceBusiness={{
+          name: wsDetails?.name || session.workspace.name,
+          industry: wsDetails?.industry || undefined,
+          phone: wsDetails?.businessPhone || undefined,
+          website: wsDetails?.website || undefined,
+          address:
+            [wsDetails?.addressLine, wsDetails?.city, wsDetails?.pincode]
+              .map((s) => (s || "").trim())
+              .filter(Boolean)
+              .join(", ") || undefined,
+          gstin: wsDetails?.gstin || undefined,
+        }}
       />
 
       {data.tallyDevices.length > 0 && (

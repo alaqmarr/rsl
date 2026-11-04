@@ -24,6 +24,31 @@ export type ConnectionChannelKind =
   | "google_business"
   | "google_drive";
 
+export type GoogleBusinessDiscoveryStatus =
+  | "verified_locations"
+  | "account_only"
+  | "no_locations_found"
+  | "api_disabled"
+  | "quota_pending"
+  | "token_error";
+
+export interface GoogleBusinessLocationSummary {
+  locationId: string;
+  accountId?: string;
+  accountName?: string;
+  accountType?: string;
+  title: string;
+  storeCode?: string;
+  primaryCategory?: string;
+  storeAddress?: string;
+  storePhone?: string;
+  websiteUri?: string;
+  mapsUri?: string;
+  newReviewUri?: string;
+  placeId?: string;
+  isVerified?: boolean;
+}
+
 export interface ConnectionMetadata {
   channelKind?: ConnectionChannelKind;
   wabaId?: string;
@@ -39,7 +64,26 @@ export interface ConnectionMetadata {
   pixelId?: string;
   locationId?: string;
   accountId?: string;
+  accountName?: string;
+  accountType?: string;
   storeName?: string;
+  storeCode?: string;
+  primaryCategory?: string;
+  storeAddress?: string;
+  storePhone?: string;
+  websiteUri?: string;
+  mapsUri?: string;
+  newReviewUri?: string;
+  placeId?: string;
+  isVerifiedLocation?: boolean;
+  availableLocations?: GoogleBusinessLocationSummary[];
+  gbpDiscoveryStatus?: GoogleBusinessDiscoveryStatus;
+  gbpDiscoveryDetail?: string;
+  lastGbpDiscoveredAt?: number;
+  lastReviewsSyncedAt?: number;
+  totalReviewsCount?: number;
+  averageRating?: number;
+  googleSub?: string;
   folderId?: string;
   folderName?: string;
   folderWebViewLink?: string;
@@ -341,7 +385,15 @@ const connectionMetadataInputSchema = z
     pixelId: z.string().optional(),
     locationId: z.string().optional(),
     accountId: z.string().optional(),
+    accountName: z.string().optional(),
     storeName: z.string().optional(),
+    storeAddress: z.string().optional(),
+    storePhone: z.string().optional(),
+    primaryCategory: z.string().optional(),
+    websiteUri: z.string().optional(),
+    mapsUri: z.string().optional(),
+    newReviewUri: z.string().optional(),
+    placeId: z.string().optional(),
     folderId: z.string().optional(),
     driveEmail: z.string().optional(),
   })
@@ -704,12 +756,39 @@ export const verifyExternalConnectionHealth = defineAction({
           );
           if (resp.ok) {
             nextStatus = "healthy";
-            liveMessage =
-              "Verified live with Google OAuth2 API (automatic refresh token active).";
+            if (conn.provider === "google") {
+              const gbp = await discoverAndHydrateGoogleBusinessProfile({
+                workspaceId: ctx.workspaceId,
+                connectionId: conn.id,
+                accessToken,
+              });
+              // Re-load upgraded metadata & displayName after GBP discovery
+              const upgradedRow = db
+                .select()
+                .from(controlSchema.connections)
+                .where(eq(controlSchema.connections.id, conn.id))
+                .get();
+              if (upgradedRow) {
+                Object.assign(meta, parseMetadataSafe(upgradedRow.metadataJson));
+              }
+              if (gbp.gbpDiscoveryStatus === "verified_locations" && gbp.storeName) {
+                liveMessage = `Verified live with Google Business Profile API — ${gbp.storeName}${gbp.storeAddress ? ` (${gbp.storeAddress})` : ""}.`;
+              } else if (gbp.gbpDiscoveryDetail) {
+                liveMessage = gbp.gbpDiscoveryDetail;
+              } else {
+                liveMessage =
+                  "Verified live with Google OAuth2 API (automatic refresh token active).";
+              }
+            } else {
+              liveMessage =
+                "Verified live with Google OAuth2 API (automatic refresh token active).";
+            }
           } else {
             nextStatus = "needs_reauth";
             liveMessage =
-              "Google OAuth2 rejected this token. Click 'Connect with Google' to re-authorize your account in one click.";
+              conn.provider === "google"
+                ? "Google OAuth2 rejected this token. Click 'Reconnect Google' to re-authorize your Google Business Profile in one click."
+                : "Google OAuth2 rejected this token. Click 'Reconnect Google Drive' to re-authorize your account in one click.";
           }
         } catch {
           liveMessage = "Vault token intact (Google OAuth API unreachable from current network).";
@@ -723,7 +802,11 @@ export const verifyExternalConnectionHealth = defineAction({
     }
 
     const freshConnRow = db
-      .select({ encryptedTokens: controlSchema.connections.encryptedTokens, expiresAt: controlSchema.connections.expiresAt })
+      .select({
+        displayName: controlSchema.connections.displayName,
+        encryptedTokens: controlSchema.connections.encryptedTokens,
+        expiresAt: controlSchema.connections.expiresAt,
+      })
       .from(controlSchema.connections)
       .where(eq(controlSchema.connections.id, conn.id))
       .get();
@@ -742,7 +825,7 @@ export const verifyExternalConnectionHealth = defineAction({
 
     return {
       connectionId: conn.id,
-      displayName: conn.displayName,
+      displayName: freshConnRow?.displayName ?? conn.displayName,
       status: nextStatus,
       checkedAt: now,
       liveMessage,
@@ -878,13 +961,16 @@ export async function refreshGoogleConnectionIfNeeded(
     signal: AbortSignal.timeout(8000),
   });
 
+  const reconnectCta =
+    conn.provider === "google" ? "Reconnect Google" : "Connect to Google Drive";
+
   if (!resp.ok) {
     const errBody = (await resp.json().catch(() => ({}))) as {
       error?: string;
       error_description?: string;
     };
     const meta = parseMetadataSafe(conn.metadataJson);
-    meta.lastLiveCheckMessage = `Google session expired or was revoked (${errBody.error_description || errBody.error || `HTTP ${resp.status}`}). Click 'Connect to Google Drive' to reconnect in one click.`;
+    meta.lastLiveCheckMessage = `Google session expired or was revoked (${errBody.error_description || errBody.error || `HTTP ${resp.status}`}). Click '${reconnectCta}' to reconnect in one click.`;
     db.update(controlSchema.connections)
       .set({
         status: "needs_reauth",
@@ -904,8 +990,7 @@ export async function refreshGoogleConnectionIfNeeded(
   };
   if (!data.access_token) {
     const meta = parseMetadataSafe(conn.metadataJson);
-    meta.lastLiveCheckMessage =
-      "Google refresh did not return a fresh access token. Click 'Connect to Google Drive' to reconnect.";
+    meta.lastLiveCheckMessage = `Google refresh did not return a fresh access token. Click '${reconnectCta}' to reconnect.`;
     db.update(controlSchema.connections)
       .set({
         status: "needs_reauth",
@@ -1022,6 +1107,9 @@ export async function completeGoogleOAuthConnection(params: {
   displayName: string;
   folderName?: string;
   locationId?: string;
+  storeName?: string;
+  gbpDiscoveryStatus?: GoogleBusinessDiscoveryStatus;
+  gbpDiscoveryDetail?: string;
 }> {
   const cfg = getPlatformGoogleOAuthConfig();
   if (!cfg.isReady) {
@@ -1250,45 +1338,7 @@ export async function completeGoogleOAuthConnection(params: {
     };
   }
 
-  // Google Business Profile (`google_business`) OAuth auto-discovery
-  let accountId = "";
-  let locationId = "";
-  let storeName = "";
-  try {
-    const accResp = await fetch("https://mybusinessaccountmanagement.googleapis.com/v1/accounts", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      signal: AbortSignal.timeout(7000),
-    });
-    if (accResp.ok) {
-      const accBody = (await accResp.json()) as {
-        accounts?: Array<{ name?: string; accountName?: string }>;
-      };
-      const firstAcc = accBody.accounts?.[0];
-      if (firstAcc?.name) {
-        accountId = firstAcc.name;
-        const locResp = await fetch(
-          `https://mybusinessbusinessinformation.googleapis.com/v1/${firstAcc.name}/locations?readMask=name,title&pageSize=10`,
-          {
-            headers: { Authorization: `Bearer ${accessToken}` },
-            signal: AbortSignal.timeout(7000),
-          }
-        );
-        if (locResp.ok) {
-          const locBody = (await locResp.json()) as {
-            locations?: Array<{ name?: string; title?: string }>;
-          };
-          const firstLoc = locBody.locations?.[0];
-          if (firstLoc?.name) {
-            locationId = firstLoc.name;
-            storeName = firstLoc.title || "";
-          }
-        }
-      }
-    }
-  } catch {
-    // Graceful fallback if GBP API quota is pending approval
-  }
-
+  // Google Business Profile (`google_business`) OAuth persistence + full multi-account discovery
   const existingGbp = db
     .select()
     .from(controlSchema.connections)
@@ -1299,6 +1349,8 @@ export async function completeGoogleOAuthConnection(params: {
       )
     )
     .get();
+
+  const existingMeta = parseMetadataSafe(existingGbp?.metadataJson);
 
   let preservedRefresh = refreshToken;
   if (!preservedRefresh && existingGbp) {
@@ -1319,33 +1371,36 @@ export async function completeGoogleOAuthConnection(params: {
     } satisfies StoredTokenPayload)
   );
 
-  const extId = locationId || accountId || googleSub || email;
-  const displayName = storeName ? `${storeName} (${email})` : `Google Business (${email})`;
-  const meta: ConnectionMetadata = {
+  const wsRow = db
+    .select({ name: controlSchema.workspaces.name })
+    .from(controlSchema.workspaces)
+    .where(eq(controlSchema.workspaces.id, params.workspaceId))
+    .get();
+
+  const initialExtId = existingMeta.locationId || existingMeta.accountId || email || googleSub;
+  const initialDisplayName =
+    existingMeta.storeName || wsRow?.name || `Google Business (${email})`;
+
+  const initialMeta: ConnectionMetadata = {
+    ...existingMeta,
     channelKind: "google_business",
-    accountId: accountId || undefined,
-    locationId: locationId || undefined,
-    storeName: storeName || undefined,
     driveEmail: email,
     googleUserName,
+    googleSub: googleSub || existingMeta.googleSub || undefined,
     oauthConnected: true,
     maskedTokenHint: maskSecretToken(accessToken),
     tokenMode: "live",
-    lastLiveCheckMessage: locationId
-      ? `Connected via Google Consent Screen (${storeName || locationId}).`
-      : `Connected Google OAuth (${email}). Enter your store Location ID if you manage multiple branches.`,
-    lastLiveCheckedAccountName: storeName || email,
   };
 
   const connectionId = existingGbp?.id ?? newId();
   if (existingGbp) {
     db.update(controlSchema.connections)
       .set({
-        displayName,
-        externalAccountId: extId,
+        displayName: initialDisplayName,
+        externalAccountId: initialExtId,
         encryptedTokens,
         scopesGrantedJson: JSON.stringify(scopesGranted),
-        metadataJson: JSON.stringify(meta),
+        metadataJson: JSON.stringify(initialMeta),
         status: "healthy",
         lastHealthCheckAt: now,
         expiresAt,
@@ -1359,11 +1414,11 @@ export async function completeGoogleOAuthConnection(params: {
         id: connectionId,
         workspaceId: params.workspaceId,
         provider: "google",
-        displayName,
-        externalAccountId: extId,
+        displayName: initialDisplayName,
+        externalAccountId: initialExtId,
         encryptedTokens,
         scopesGrantedJson: JSON.stringify(scopesGranted),
-        metadataJson: JSON.stringify(meta),
+        metadataJson: JSON.stringify(initialMeta),
         status: "healthy",
         lastHealthCheckAt: now,
         expiresAt,
@@ -1373,7 +1428,12 @@ export async function completeGoogleOAuthConnection(params: {
       .run();
   }
 
-  upsertRoutingEntry("google", extId, params.workspaceId, now);
+  const hydrated = await discoverAndHydrateGoogleBusinessProfile({
+    workspaceId: params.workspaceId,
+    connectionId,
+    accessToken,
+    preferredLocationId: existingMeta.locationId,
+  });
 
   appendActionLog({
     workspaceId: params.workspaceId,
@@ -1385,16 +1445,822 @@ export async function completeGoogleOAuthConnection(params: {
     requestId: newId(),
     correlationId: newId(),
     durationMs: 15,
-    summary: `Connected Google Business Profile (${email}) via OAuth Consent Screen`,
+    summary: hydrated.storeName
+      ? `Connected Google Business Profile '${hydrated.storeName}' (${email})`
+      : `Connected Google Business Profile (${email}) via OAuth Consent Screen`,
   });
 
   return {
     connectionId,
     email,
-    displayName,
-    locationId: locationId || undefined,
+    displayName: hydrated.displayName,
+    locationId: hydrated.locationId,
+    storeName: hydrated.storeName,
+    gbpDiscoveryStatus: hydrated.gbpDiscoveryStatus,
+    gbpDiscoveryDetail: hydrated.gbpDiscoveryDetail,
   };
 }
+
+interface RawGbpPostalAddress {
+  addressLines?: string[];
+  sublocality?: string;
+  locality?: string;
+  administrativeArea?: string;
+  postalCode?: string;
+  regionCode?: string;
+}
+
+interface RawGbpLocationPayload {
+  name?: string;
+  title?: string;
+  locationName?: string;
+  storeCode?: string;
+  websiteUri?: string;
+  websiteUrl?: string;
+  primaryPhone?: string;
+  phoneNumbers?: {
+    primaryPhone?: string;
+    additionalPhones?: string[];
+  };
+  categories?: {
+    primaryCategory?: { displayName?: string; name?: string };
+  };
+  primaryCategory?: { displayName?: string; name?: string };
+  storefrontAddress?: RawGbpPostalAddress;
+  address?: RawGbpPostalAddress;
+  metadata?: {
+    mapsUri?: string;
+    mapsUrl?: string;
+    newReviewUri?: string;
+    newReviewUrl?: string;
+    placeId?: string;
+    hasVoiceOfMerchant?: boolean;
+  };
+  locationState?: {
+    isVerified?: boolean;
+  };
+}
+
+function formatGoogleStorefrontAddress(addr?: RawGbpPostalAddress): string | undefined {
+  if (!addr) return undefined;
+  const parts: string[] = [];
+  if (Array.isArray(addr.addressLines)) {
+    for (const line of addr.addressLines) {
+      const clean = (line || "").trim();
+      if (clean) parts.push(clean);
+    }
+  }
+  for (const field of [addr.sublocality, addr.locality, addr.administrativeArea, addr.postalCode]) {
+    const clean = (field || "").trim();
+    if (clean && !parts.includes(clean)) {
+      parts.push(clean);
+    }
+  }
+  return parts.length > 0 ? parts.join(", ") : undefined;
+}
+
+function normalizeGbpLocationResource(rawName: string | undefined): {
+  locationId: string;
+  embeddedAccountId?: string;
+} {
+  const clean = (rawName || "").trim();
+  if (!clean) return { locationId: "" };
+  const fullMatch = clean.match(/^(accounts\/[^/]+)\/(locations\/[^/]+)$/i);
+  if (fullMatch) {
+    return {
+      embeddedAccountId: fullMatch[1]!,
+      locationId: fullMatch[2]!,
+    };
+  }
+  if (clean.startsWith("locations/")) {
+    return { locationId: clean };
+  }
+  return { locationId: `locations/${clean}` };
+}
+
+function parseGbpLocationObject(
+  raw: RawGbpLocationPayload,
+  parentAccount?: { accountId?: string; accountName?: string; accountType?: string }
+): GoogleBusinessLocationSummary | null {
+  const { locationId, embeddedAccountId } = normalizeGbpLocationResource(raw.name);
+  if (!locationId) return null;
+  const title = (raw.title || raw.locationName || "").trim();
+  if (!title) return null;
+
+  const primaryCategory =
+    raw.categories?.primaryCategory?.displayName?.trim() ||
+    raw.primaryCategory?.displayName?.trim() ||
+    undefined;
+  const storePhone =
+    raw.phoneNumbers?.primaryPhone?.trim() || raw.primaryPhone?.trim() || undefined;
+  const storeAddress = formatGoogleStorefrontAddress(raw.storefrontAddress || raw.address);
+  const websiteUri = (raw.websiteUri || raw.websiteUrl || "").trim() || undefined;
+  const mapsUri = (raw.metadata?.mapsUri || raw.metadata?.mapsUrl || "").trim() || undefined;
+  const newReviewUri =
+    (raw.metadata?.newReviewUri || raw.metadata?.newReviewUrl || "").trim() || undefined;
+  const placeId = (raw.metadata?.placeId || "").trim() || undefined;
+  const isVerified =
+    typeof raw.metadata?.hasVoiceOfMerchant === "boolean"
+      ? raw.metadata.hasVoiceOfMerchant
+      : typeof raw.locationState?.isVerified === "boolean"
+        ? raw.locationState.isVerified
+        : undefined;
+
+  return {
+    locationId,
+    accountId: parentAccount?.accountId || embeddedAccountId,
+    accountName: parentAccount?.accountName,
+    accountType: parentAccount?.accountType,
+    title,
+    storeCode: raw.storeCode?.trim() || undefined,
+    primaryCategory,
+    storeAddress,
+    storePhone,
+    websiteUri,
+    mapsUri,
+    newReviewUri:
+      newReviewUri ||
+      (placeId ? `https://search.google.com/local/writereview?placeid=${encodeURIComponent(placeId)}` : undefined),
+    placeId,
+    isVerified,
+  };
+}
+
+function classifyGoogleGbpErrorResponse(
+  httpStatus: number,
+  bodyText: string,
+  apiLabel: string,
+  emailHint: string
+): {
+  status: GoogleBusinessDiscoveryStatus;
+  detail: string;
+} {
+  let errMessage = "";
+  let errStatus = "";
+  try {
+    const parsed = JSON.parse(bodyText) as {
+      error?: { message?: string; status?: string; code?: number };
+    };
+    errMessage = parsed.error?.message || "";
+    errStatus = parsed.error?.status || "";
+  } catch {
+    errMessage = bodyText.slice(0, 200);
+  }
+
+  const combined = `${errStatus} ${errMessage}`.toLowerCase();
+  if (httpStatus === 401 || combined.includes("unauthenticated") || combined.includes("invalid credentials")) {
+    return {
+      status: "token_error",
+      detail: `Google rejected the OAuth access token for ${emailHint || "this account"}. Click 'Reconnect Google' to re-authorize your Google Business Profile.`,
+    };
+  }
+
+  if (
+    httpStatus === 429 ||
+    combined.includes("resource_exhausted") ||
+    combined.includes("rate_limit_exceeded") ||
+    combined.includes("quota exceeded") ||
+    combined.includes("requests per minute")
+  ) {
+    return {
+      status: "quota_pending",
+      detail: `Google Sign-In (${emailHint || "connected"}) is active, but Google Cloud returned 0 QPM quota on ${apiLabel}. Request free GBP API quota activation at developers.google.com/my-business/content/prereqs, then click 'Sync Business Profile'.`,
+    };
+  }
+
+  if (
+    httpStatus === 403 &&
+    (combined.includes("has not been used in project") ||
+      combined.includes("is disabled") ||
+      combined.includes("accessnotconfigured") ||
+      combined.includes("service_disabled"))
+  ) {
+    return {
+      status: "api_disabled",
+      detail: `Google Sign-In (${emailHint || "connected"}) succeeded, but '${apiLabel}' is not enabled yet in Google Cloud Console. Enable 'My Business Account Management API', 'My Business Business Information API', and 'Google My Business API', then click 'Sync Business Profile'.`,
+    };
+  }
+
+  return {
+    status: httpStatus === 403 ? "api_disabled" : "token_error",
+    detail: `Google Business API (${apiLabel}) returned HTTP ${httpStatus}${errMessage ? `: ${errMessage.slice(0, 180)}` : ""}.`,
+  };
+}
+
+const GBP_LOCATIONS_READ_MASK_FULL =
+  "name,title,storeCode,categories,phoneNumbers,storefrontAddress,websiteUri,metadata";
+const GBP_LOCATIONS_READ_MASK_MINIMAL =
+  "name,title,storefrontAddress,phoneNumbers,websiteUri,metadata";
+
+async function fetchGbpV1LocationsForParent(
+  accessToken: string,
+  parentResource: string
+): Promise<{
+  ok: boolean;
+  httpStatus: number;
+  bodyText: string;
+  locations: RawGbpLocationPayload[];
+}> {
+  const tryMask = async (mask: string) => {
+    const resp = await fetch(
+      `https://mybusinessbusinessinformation.googleapis.com/v1/${parentResource}/locations?readMask=${encodeURIComponent(mask)}&pageSize=50`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: AbortSignal.timeout(6500),
+      }
+    );
+    const txt = await resp.text().catch(() => "");
+    return { resp, txt };
+  };
+
+  let { resp, txt } = await tryMask(GBP_LOCATIONS_READ_MASK_FULL);
+  if (resp.status === 400) {
+    ({ resp, txt } = await tryMask(GBP_LOCATIONS_READ_MASK_MINIMAL));
+  }
+
+  if (!resp.ok) {
+    return { ok: false, httpStatus: resp.status, bodyText: txt, locations: [] };
+  }
+
+  try {
+    const parsed = JSON.parse(txt) as { locations?: RawGbpLocationPayload[] };
+    return {
+      ok: true,
+      httpStatus: resp.status,
+      bodyText: txt,
+      locations: Array.isArray(parsed.locations) ? parsed.locations : [],
+    };
+  } catch {
+    return { ok: true, httpStatus: resp.status, bodyText: txt, locations: [] };
+  }
+}
+
+export async function discoverAndHydrateGoogleBusinessProfile(params: {
+  workspaceId: string;
+  connectionId?: string;
+  accessToken?: string;
+  preferredLocationId?: string;
+}): Promise<{
+  connected: boolean;
+  connectionId?: string;
+  displayName: string;
+  storeName?: string;
+  accountId?: string;
+  accountName?: string;
+  locationId?: string;
+  storeAddress?: string;
+  storePhone?: string;
+  primaryCategory?: string;
+  websiteUri?: string;
+  mapsUri?: string;
+  newReviewUri?: string;
+  availableLocations: GoogleBusinessLocationSummary[];
+  gbpDiscoveryStatus: GoogleBusinessDiscoveryStatus;
+  gbpDiscoveryDetail?: string;
+}> {
+  const db = controlDb();
+  const ws = db
+    .select({
+      id: controlSchema.workspaces.id,
+      name: controlSchema.workspaces.name,
+      addressLine: controlSchema.workspaces.addressLine,
+      city: controlSchema.workspaces.city,
+      pincode: controlSchema.workspaces.pincode,
+      businessPhone: controlSchema.workspaces.businessPhone,
+      website: controlSchema.workspaces.website,
+      industry: controlSchema.workspaces.industry,
+    })
+    .from(controlSchema.workspaces)
+    .where(eq(controlSchema.workspaces.id, params.workspaceId))
+    .get();
+
+  const conn = params.connectionId
+    ? db
+        .select()
+        .from(controlSchema.connections)
+        .where(
+          and(
+            eq(controlSchema.connections.id, params.connectionId),
+            eq(controlSchema.connections.workspaceId, params.workspaceId)
+          )
+        )
+        .get()
+    : db
+        .select()
+        .from(controlSchema.connections)
+        .where(
+          and(
+            eq(controlSchema.connections.workspaceId, params.workspaceId),
+            eq(controlSchema.connections.provider, "google")
+          )
+        )
+        .get();
+
+  if (!conn) {
+    return {
+      connected: false,
+      displayName: ws?.name || "Google Business",
+      availableLocations: [],
+      gbpDiscoveryStatus: "no_locations_found",
+      gbpDiscoveryDetail: "Google Business Profile is not connected yet.",
+    };
+  }
+
+  const meta = parseMetadataSafe(conn.metadataJson);
+  const emailHint = meta.driveEmail || "";
+
+  let token = params.accessToken || "";
+  if (!token) {
+    token = (await refreshGoogleConnectionIfNeeded(params.workspaceId, conn.id)) || "";
+  }
+
+  if (!token) {
+    return {
+      connected: true,
+      connectionId: conn.id,
+      displayName: conn.displayName,
+      availableLocations: meta.availableLocations ?? [],
+      gbpDiscoveryStatus: "token_error",
+      gbpDiscoveryDetail:
+        "Google OAuth session expired or could not be refreshed. Click 'Reconnect Google' to sign in again.",
+    };
+  }
+
+  // Sandbox tokens bypass external HTTP calls cleanly
+  if (/^(rsl_sandbox_|sandbox_|test_)/i.test(token)) {
+    const sandboxTitle = meta.storeName || ws?.name || conn.displayName;
+    const sandboxLocId =
+      meta.locationId ||
+      (conn.externalAccountId.startsWith("locations/")
+        ? conn.externalAccountId
+        : "locations/sandbox_primary");
+    const now = Date.now();
+    meta.storeName = sandboxTitle;
+    meta.locationId = sandboxLocId;
+    meta.gbpDiscoveryStatus = "verified_locations";
+    meta.lastGbpDiscoveredAt = now;
+    db.update(controlSchema.connections)
+      .set({
+        displayName: sandboxTitle,
+        externalAccountId: sandboxLocId,
+        metadataJson: JSON.stringify(meta),
+        updatedAt: now,
+      })
+      .where(eq(controlSchema.connections.id, conn.id))
+      .run();
+    return {
+      connected: true,
+      connectionId: conn.id,
+      displayName: sandboxTitle,
+      storeName: sandboxTitle,
+      locationId: sandboxLocId,
+      availableLocations: [
+        {
+          locationId: sandboxLocId,
+          accountId: meta.accountId,
+          title: sandboxTitle,
+        },
+      ],
+      gbpDiscoveryStatus: "verified_locations",
+    };
+  }
+
+  const locationMap = new Map<string, GoogleBusinessLocationSummary>();
+  const mergeLocation = (loc: GoogleBusinessLocationSummary | null) => {
+    if (!loc) return;
+    const prev = locationMap.get(loc.locationId);
+    if (!prev) {
+      locationMap.set(loc.locationId, loc);
+      return;
+    }
+    locationMap.set(loc.locationId, {
+      ...prev,
+      ...Object.fromEntries(
+        Object.entries(loc).filter(([, v]) => v !== undefined && v !== "")
+      ),
+    } as GoogleBusinessLocationSummary);
+  };
+
+  interface DiscoveredGbpAccount {
+    name: string;
+    accountName?: string;
+    type?: string;
+  }
+  const discoveredAccounts: DiscoveredGbpAccount[] = [];
+  let diagnosticFailure: { status: GoogleBusinessDiscoveryStatus; detail: string } | null = null;
+  let anyGbpApiSucceeded = false;
+
+  // 1. Account Management API v1 — iterate ALL accounts (PERSONAL, LOCATION_GROUP, ORGANIZATION)
+  try {
+    const accResp = await fetch(
+      "https://mybusinessaccountmanagement.googleapis.com/v1/accounts?pageSize=20",
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(6500),
+      }
+    );
+    const accTxt = await accResp.text().catch(() => "");
+    if (accResp.ok) {
+      anyGbpApiSucceeded = true;
+      const accBody = JSON.parse(accTxt || "{}") as {
+        accounts?: Array<{ name?: string; accountName?: string; type?: string }>;
+      };
+      for (const acc of accBody.accounts ?? []) {
+        if (acc.name) {
+          discoveredAccounts.push({
+            name: acc.name,
+            accountName: acc.accountName?.trim() || undefined,
+            type: acc.type?.trim() || undefined,
+          });
+        }
+      }
+    } else {
+      diagnosticFailure = classifyGoogleGbpErrorResponse(
+        accResp.status,
+        accTxt,
+        "My Business Account Management API",
+        emailHint
+      );
+    }
+  } catch {
+    // Network timeout on v1 accounts; continue to wildcard locations & v4 fallback
+  }
+
+  // 2. Wildcard Business Information API v1 (`accounts/-/locations`) — finds locations across ALL account groups
+  try {
+    const wildcardRes = await fetchGbpV1LocationsForParent(token, "accounts/-");
+    if (wildcardRes.ok) {
+      anyGbpApiSucceeded = true;
+      for (const rawLoc of wildcardRes.locations) {
+        mergeLocation(parseGbpLocationObject(rawLoc));
+      }
+    } else if (!diagnosticFailure) {
+      diagnosticFailure = classifyGoogleGbpErrorResponse(
+        wildcardRes.httpStatus,
+        wildcardRes.bodyText,
+        "My Business Business Information API",
+        emailHint
+      );
+    }
+  } catch {
+    // Continue to per-account discovery
+  }
+
+  // 3. Per-Account Business Information API v1 — binds exact `accounts/{id}` + `accountName` & discovers Location Groups
+  // Prioritize non-PERSONAL business/location-group accounts first, then PERSONAL
+  const orderedAccounts = [...discoveredAccounts].sort((a, b) => {
+    const aIsBiz = a.type && a.type !== "PERSONAL" ? 0 : 1;
+    const bIsBiz = b.type && b.type !== "PERSONAL" ? 0 : 1;
+    return aIsBiz - bIsBiz;
+  });
+
+  for (const acc of orderedAccounts.slice(0, 8)) {
+    try {
+      const perAcc = await fetchGbpV1LocationsForParent(token, acc.name);
+      if (perAcc.ok) {
+        anyGbpApiSucceeded = true;
+        for (const rawLoc of perAcc.locations) {
+          mergeLocation(
+            parseGbpLocationObject(rawLoc, {
+              accountId: acc.name,
+              accountName: acc.accountName,
+              accountType: acc.type,
+            })
+          );
+        }
+      } else if (!diagnosticFailure) {
+        diagnosticFailure = classifyGoogleGbpErrorResponse(
+          perAcc.httpStatus,
+          perAcc.bodyText,
+          "My Business Business Information API",
+          emailHint
+        );
+      }
+    } catch {
+      // Continue checking remaining accounts
+    }
+  }
+
+  // 4. Unified v4 Fallback (`mybusiness.googleapis.com/v4/accounts`) if v1 returned 0 locations
+  if (locationMap.size === 0) {
+    try {
+      const v4AccResp = await fetch("https://mybusiness.googleapis.com/v4/accounts", {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(6500),
+      });
+      const v4AccTxt = await v4AccResp.text().catch(() => "");
+      if (v4AccResp.ok) {
+        anyGbpApiSucceeded = true;
+        const v4AccBody = JSON.parse(v4AccTxt || "{}") as {
+          accounts?: Array<{ name?: string; accountName?: string; type?: string }>;
+        };
+        for (const acc of (v4AccBody.accounts ?? []).slice(0, 6)) {
+          if (!acc.name) continue;
+          if (!discoveredAccounts.some((d) => d.name === acc.name)) {
+            discoveredAccounts.push({
+              name: acc.name,
+              accountName: acc.accountName?.trim() || undefined,
+              type: acc.type?.trim() || undefined,
+            });
+          }
+          const v4LocResp = await fetch(
+            `https://mybusiness.googleapis.com/v4/${acc.name}/locations?pageSize=50`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+              signal: AbortSignal.timeout(6500),
+            }
+          );
+          if (v4LocResp.ok) {
+            const v4LocBody = (await v4LocResp.json().catch(() => ({}))) as {
+              locations?: RawGbpLocationPayload[];
+            };
+            for (const rawLoc of v4LocBody.locations ?? []) {
+              mergeLocation(
+                parseGbpLocationObject(rawLoc, {
+                  accountId: acc.name,
+                  accountName: acc.accountName?.trim() || undefined,
+                  accountType: acc.type?.trim() || undefined,
+                })
+              );
+            }
+          }
+        }
+      }
+    } catch {
+      // Non-fatal fallback
+    }
+  }
+
+  const availableLocations = Array.from(locationMap.values());
+  const preferredId = (
+    params.preferredLocationId ||
+    (meta.locationId?.startsWith("locations/") ? meta.locationId : "")
+  ).trim();
+  const wsNameLower = (ws?.name || "").trim().toLowerCase();
+
+  let selectedLoc: GoogleBusinessLocationSummary | undefined;
+  if (preferredId) {
+    selectedLoc = availableLocations.find((l) => l.locationId === preferredId);
+  }
+  if (!selectedLoc && wsNameLower) {
+    selectedLoc =
+      availableLocations.find((l) => l.title.toLowerCase() === wsNameLower) ||
+      availableLocations.find(
+        (l) =>
+          l.title.toLowerCase().includes(wsNameLower) ||
+          wsNameLower.includes(l.title.toLowerCase())
+      );
+  }
+  if (!selectedLoc) {
+    selectedLoc =
+      availableLocations.find((l) => l.isVerified === true) || availableLocations[0];
+  }
+
+  // If location was discovered via wildcard without accountId and exactly 1 business account exists, bind it
+  const primaryAccount =
+    orderedAccounts.find((a) => a.type && a.type !== "PERSONAL") || orderedAccounts[0];
+  if (selectedLoc && !selectedLoc.accountId && primaryAccount?.name) {
+    selectedLoc.accountId = primaryAccount.name;
+    selectedLoc.accountName = selectedLoc.accountName || primaryAccount.accountName;
+    selectedLoc.accountType = selectedLoc.accountType || primaryAccount.type;
+  }
+
+  const nonPersonalAccount = orderedAccounts.find(
+    (a) => a.accountName && a.type && a.type !== "PERSONAL"
+  );
+
+  let gbpDiscoveryStatus: GoogleBusinessDiscoveryStatus;
+  let gbpDiscoveryDetail: string | undefined;
+
+  if (selectedLoc) {
+    gbpDiscoveryStatus = "verified_locations";
+    gbpDiscoveryDetail =
+      availableLocations.length > 1
+        ? `Discovered ${availableLocations.length} Google Business locations under ${emailHint || "your Google account"} — active location: ${selectedLoc.title}.`
+        : `Verified Google Business Profile connected: ${selectedLoc.title}${selectedLoc.storeAddress ? ` (${selectedLoc.storeAddress})` : ""}.`;
+  } else if (diagnosticFailure && !anyGbpApiSucceeded) {
+    gbpDiscoveryStatus = diagnosticFailure.status;
+    gbpDiscoveryDetail = diagnosticFailure.detail;
+  } else if (diagnosticFailure && (diagnosticFailure.status === "api_disabled" || diagnosticFailure.status === "quota_pending")) {
+    gbpDiscoveryStatus = diagnosticFailure.status;
+    gbpDiscoveryDetail = diagnosticFailure.detail;
+  } else if (nonPersonalAccount?.accountName) {
+    gbpDiscoveryStatus = "account_only";
+    gbpDiscoveryDetail = `Connected GBP Account '${nonPersonalAccount.accountName}' (${emailHint}), but Google returned 0 published storefront locations inside this account.`;
+  } else {
+    gbpDiscoveryStatus = "no_locations_found";
+    gbpDiscoveryDetail = `Google account ${emailHint || "signed in"} is connected, but Google returned 0 Google Business Profile listings managed by this email. Ensure ${emailHint || "this Google email"} is added as an Owner or Manager at business.google.com, or click 'Reconnect Google' to pick the Google account that owns your listing.`;
+  }
+
+  const now = Date.now();
+  const resolvedStoreName =
+    selectedLoc?.title || nonPersonalAccount?.accountName || meta.storeName || undefined;
+  const resolvedAccountId =
+    selectedLoc?.accountId || primaryAccount?.name || meta.accountId || undefined;
+  const resolvedAccountName =
+    selectedLoc?.accountName ||
+    nonPersonalAccount?.accountName ||
+    primaryAccount?.accountName ||
+    meta.accountName ||
+    undefined;
+  const resolvedLocationId = selectedLoc?.locationId || meta.locationId || undefined;
+
+  // Upgrade legacy `Google Business (email)` labels to the actual Business Name (`RADIANT INDUSTRIAL COMPANY`)
+  const isGenericLegacyLabel =
+    !conn.displayName || /^google business\s*\(/i.test(conn.displayName.trim());
+  const nextDisplayName =
+    resolvedStoreName ||
+    (isGenericLegacyLabel && ws?.name ? ws.name : conn.displayName);
+
+  // Never keep a raw numeric 21-digit Google OAuth `sub` ID (`116265574937662666329`) as Primary External ID
+  const isNumericOAuthSub = /^\d{15,25}$/.test((conn.externalAccountId || "").trim());
+  const nextExternalId =
+    resolvedLocationId ||
+    resolvedAccountId ||
+    (!isNumericOAuthSub && conn.externalAccountId ? conn.externalAccountId : "") ||
+    emailHint ||
+    conn.externalAccountId;
+
+  const nextMeta: ConnectionMetadata = {
+    ...meta,
+    channelKind: "google_business",
+    accountId: resolvedAccountId,
+    accountName: resolvedAccountName,
+    accountType: selectedLoc?.accountType || primaryAccount?.type || meta.accountType,
+    locationId: resolvedLocationId,
+    storeName: resolvedStoreName,
+    storeCode: selectedLoc?.storeCode ?? meta.storeCode,
+    primaryCategory: selectedLoc?.primaryCategory ?? meta.primaryCategory,
+    storeAddress: selectedLoc?.storeAddress ?? meta.storeAddress,
+    storePhone: selectedLoc?.storePhone ?? meta.storePhone,
+    websiteUri: selectedLoc?.websiteUri ?? meta.websiteUri,
+    mapsUri: selectedLoc?.mapsUri ?? meta.mapsUri,
+    newReviewUri: selectedLoc?.newReviewUri ?? meta.newReviewUri,
+    placeId: selectedLoc?.placeId ?? meta.placeId,
+    isVerifiedLocation: selectedLoc?.isVerified ?? meta.isVerifiedLocation,
+    availableLocations:
+      availableLocations.length > 0 ? availableLocations : meta.availableLocations,
+    gbpDiscoveryStatus,
+    gbpDiscoveryDetail,
+    lastGbpDiscoveredAt: now,
+    lastLiveCheckMessage:
+      gbpDiscoveryDetail ||
+      `Connected via Google Consent Screen (${resolvedStoreName || emailHint}).`,
+    lastLiveCheckedAccountName: resolvedStoreName || ws?.name || emailHint,
+  };
+
+  db.update(controlSchema.connections)
+    .set({
+      displayName: nextDisplayName,
+      externalAccountId: nextExternalId,
+      metadataJson: JSON.stringify(nextMeta),
+      lastHealthCheckAt: now,
+      updatedAt: now,
+    })
+    .where(eq(controlSchema.connections.id, conn.id))
+    .run();
+
+  upsertRoutingEntry("google", nextExternalId, params.workspaceId, now);
+
+  // Sync `gbp_location` rows in `controlSchema.assets` for discovered locations
+  if (availableLocations.length > 0) {
+    const existingAssets = db
+      .select()
+      .from(controlSchema.assets)
+      .where(
+        and(
+          eq(controlSchema.assets.workspaceId, params.workspaceId),
+          eq(controlSchema.assets.connectionId, conn.id)
+        )
+      )
+      .all();
+
+    for (const loc of availableLocations) {
+      const match = existingAssets.find((a) => a.externalId === loc.locationId);
+      const assetMeta = JSON.stringify({
+        accountId: loc.accountId,
+        address: loc.storeAddress,
+        phone: loc.storePhone,
+        category: loc.primaryCategory,
+        mapsUri: loc.mapsUri,
+      });
+      if (match) {
+        db.update(controlSchema.assets)
+          .set({
+            name: loc.title,
+            metadataJson: assetMeta,
+            active: loc.locationId === resolvedLocationId,
+          })
+          .where(eq(controlSchema.assets.id, match.id))
+          .run();
+      } else {
+        db.insert(controlSchema.assets)
+          .values({
+            id: newId(),
+            workspaceId: params.workspaceId,
+            connectionId: conn.id,
+            provider: "google",
+            assetType: "gbp_location",
+            externalId: loc.locationId,
+            name: loc.title,
+            metadataJson: assetMeta,
+            active: loc.locationId === resolvedLocationId,
+            createdAt: now,
+          })
+          .run();
+      }
+    }
+  }
+
+  return {
+    connected: true,
+    connectionId: conn.id,
+    displayName: nextDisplayName,
+    storeName: resolvedStoreName,
+    accountId: resolvedAccountId,
+    accountName: resolvedAccountName,
+    locationId: resolvedLocationId,
+    storeAddress: nextMeta.storeAddress,
+    storePhone: nextMeta.storePhone,
+    primaryCategory: nextMeta.primaryCategory,
+    websiteUri: nextMeta.websiteUri,
+    mapsUri: nextMeta.mapsUri,
+    newReviewUri: nextMeta.newReviewUri,
+    availableLocations: nextMeta.availableLocations ?? [],
+    gbpDiscoveryStatus,
+    gbpDiscoveryDetail,
+  };
+}
+
+export function updateGoogleBusinessReviewSyncMetadata(params: {
+  workspaceId: string;
+  connectionId: string;
+  totalReviewsCount: number;
+  averageRating?: number;
+  syncedAt?: number;
+  syncDiagnosticNote?: string;
+}): void {
+  const db = controlDb();
+  const conn = db
+    .select()
+    .from(controlSchema.connections)
+    .where(
+      and(
+        eq(controlSchema.connections.id, params.connectionId),
+        eq(controlSchema.connections.workspaceId, params.workspaceId)
+      )
+    )
+    .get();
+  if (!conn) return;
+
+  const meta = parseMetadataSafe(conn.metadataJson);
+  const ts = params.syncedAt ?? Date.now();
+  meta.lastReviewsSyncedAt = ts;
+  meta.totalReviewsCount = params.totalReviewsCount;
+  if (typeof params.averageRating === "number" && Number.isFinite(params.averageRating)) {
+    meta.averageRating = Math.round(params.averageRating * 10) / 10;
+  }
+  if (params.syncDiagnosticNote) {
+    meta.gbpDiscoveryDetail = params.syncDiagnosticNote;
+  }
+
+  db.update(controlSchema.connections)
+    .set({
+      metadataJson: JSON.stringify(meta),
+      updatedAt: ts,
+    })
+    .where(eq(controlSchema.connections.id, conn.id))
+    .run();
+}
+
+export const selectGoogleBusinessLocation = defineAction({
+  key: "connections.gbp_location.selected",
+  permission: "connections:manage",
+  input: z.object({
+    connectionId: z.string().min(4),
+    locationId: z.string().trim().min(3),
+  }),
+  summarize: (input) => `Switched active Google Business location to '${input.locationId}'`,
+  handler: async (ctx, input) => {
+    const normalizedLocId = input.locationId.startsWith("locations/")
+      ? input.locationId
+      : `locations/${input.locationId}`;
+    const hydrated = await discoverAndHydrateGoogleBusinessProfile({
+      workspaceId: ctx.workspaceId,
+      connectionId: input.connectionId,
+      preferredLocationId: normalizedLocId,
+    });
+    if (!hydrated.connected) {
+      throw new RslError("RSL-VAL-1001", "Google Business connection not found.");
+    }
+    return {
+      connectionId: input.connectionId,
+      displayName: hydrated.displayName,
+      storeName: hydrated.storeName,
+      locationId: hydrated.locationId,
+    };
+  },
+});
 
 /**
  * Uploads an encrypted .rslbackup archive directly to the customer's connected Google Drive folder (`drive.file`).
