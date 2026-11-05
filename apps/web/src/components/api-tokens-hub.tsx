@@ -106,6 +106,7 @@ const CHANNEL_KIND_LABELS: Record<ConnectionChannelKind, string> = {
   instagram_business: "Instagram Business",
   facebook_page: "Facebook Page",
   meta_ads_pixel: "Meta Ads & Pixel",
+  google_ads: "Google Ads Studio",
   google_business: "Google Business Profile",
   google_drive: "Google Drive Backup",
 };

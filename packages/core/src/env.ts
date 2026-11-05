@@ -105,11 +105,18 @@ const EnvSchema = z.object({
   META_WEBHOOK_VERIFY_TOKEN: z.string().optional().default(""),
   META_GRAPH_VERSION: z.string().default("v21.0"),
   META_CONFIG_ID: z.string().optional().default(""),
+  META_MANAGED_AD_ACCOUNT_ID: z.string().optional().default(""),
+  META_MANAGED_PAGE_ID: z.string().optional().default(""),
+  META_MANAGED_SYSTEM_TOKEN: z.string().optional().default(""),
 
   GBP_CLIENT_ID: z.string().optional().default(""),
   GBP_CLIENT_SECRET: z.string().optional().default(""),
   GDRIVE_BACKUP_CLIENT_ID: z.string().optional().default(""),
   GDRIVE_BACKUP_CLIENT_SECRET: z.string().optional().default(""),
+  GOOGLE_ADS_DEVELOPER_TOKEN: z.string().optional().default(""),
+  GOOGLE_ADS_LOGIN_CUSTOMER_ID: z.string().optional().default(""),
+  GOOGLE_ADS_MANAGED_CUSTOMER_ID: z.string().optional().default(""),
+  GOOGLE_ADS_MANAGED_REFRESH_TOKEN: z.string().optional().default(""),
 
   RAZORPAY_KEY_ID: z.string().optional().default(""),
   RAZORPAY_KEY_SECRET: z.string().optional().default(""),

@@ -685,3 +685,140 @@ export const replyToGoogleReview = defineAction({
     return { replied: true, publishedToGoogleLive };
   },
 });
+
+export async function publishGoogleBusinessLocalPost(params: {
+  workspaceId: string;
+  summary: string;
+  mediaUrl?: string;
+  ctaType?: "LEARN_MORE" | "BOOK" | "ORDER" | "SHOP" | "SIGN_UP" | "CALL";
+  ctaUrl?: string;
+}): Promise<{
+  ok: boolean;
+  mode: "live" | "sandbox" | "disconnected";
+  externalPostId?: string;
+  externalPermalink?: string;
+  error?: string;
+}> {
+  const { connections } = listWorkspaceConnections(params.workspaceId);
+  const gbpConn = connections.find((c) => c.channelKind === "google_business");
+  if (!gbpConn) {
+    return {
+      ok: false,
+      mode: "disconnected",
+      error: "Connect your Google Business Profile on Connected Channels first.",
+    };
+  }
+
+  const accessToken = await refreshGoogleConnectionIfNeeded(params.workspaceId, gbpConn.id);
+  if (!accessToken) {
+    return {
+      ok: false,
+      mode: "live",
+      error: "Google Business OAuth token expired or was revoked. Reconnect Google Business Profile.",
+    };
+  }
+
+  if (/^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken)) {
+    const sbId = `accounts/sandbox/locations/sandbox/localPosts/${newId()}`;
+    return {
+      ok: true,
+      mode: "sandbox",
+      externalPostId: sbId,
+      externalPermalink: `https://maps.google.com/?cid=sandbox_${Date.now()}`,
+    };
+  }
+
+  let locationId = gbpConn.metadata.locationId || "";
+  let accountId = gbpConn.metadata.accountId || "";
+
+  if (!locationId) {
+    const hydrated = await discoverAndHydrateGoogleBusinessProfile({
+      workspaceId: params.workspaceId,
+      connectionId: gbpConn.id,
+      accessToken,
+    });
+    locationId = hydrated.locationId || "";
+  }
+
+  if (!locationId) {
+    return {
+      ok: false,
+      mode: "live",
+      error: "No Google Business Location ID is active on this connection. Select your Storefront Location on Connected Channels.",
+    };
+  }
+
+  const locPart = locationId.startsWith("locations/") ? locationId : `locations/${locationId}`;
+  const accPart = accountId
+    ? accountId.startsWith("accounts/")
+      ? accountId
+      : `accounts/${accountId}`
+    : "accounts/-";
+  const parentPath = locationId.startsWith("accounts/") ? locationId : `${accPart}/${locPart}`;
+
+  const payload: Record<string, unknown> = {
+    languageCode: "en-IN",
+    summary: params.summary.trim().slice(0, 1500),
+    topicType: "STANDARD",
+  };
+
+  if (params.ctaUrl?.trim()) {
+    const actionType = params.ctaType && params.ctaType !== "CALL" ? params.ctaType : "LEARN_MORE";
+    payload.callToAction = {
+      actionType,
+      url: params.ctaUrl.trim(),
+    };
+  } else if (params.ctaType === "CALL") {
+    payload.callToAction = { actionType: "CALL" };
+  }
+
+  if (params.mediaUrl?.trim()) {
+    payload.media = [
+      {
+        mediaFormat: "PHOTO",
+        sourceUrl: params.mediaUrl.trim(),
+      },
+    ];
+  }
+
+  try {
+    const resp = await fetch(`https://mybusiness.googleapis.com/v4/${parentPath}/localPosts`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    const body = (await resp.json().catch(() => ({}))) as {
+      name?: string;
+      searchUrl?: string;
+      error?: { message?: string };
+    };
+
+    if (!resp.ok) {
+      return {
+        ok: false,
+        mode: "live",
+        error: `Google Business Local Post API error (HTTP ${resp.status}): ${body.error?.message || "Verify GBP API quota & storefront verification."}`,
+      };
+    }
+
+    return {
+      ok: true,
+      mode: "live",
+      externalPostId: body.name || `${parentPath}/localPosts/${Date.now()}`,
+      externalPermalink: body.searchUrl || gbpConn.metadata.mapsUri,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      mode: "live",
+      error: err instanceof Error ? err.message : "Network error calling Google Business Local Posts API.",
+    };
+  }
+}
+
+export * from "./ads";

@@ -2,11 +2,294 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { dispatchWorkspaceWebhookEvent } from "@rsl/api-keys";
 import { canDebitWalletUsage, consumeUsage, getWalletBalancePaise } from "@rsl/billing";
-import { newId, RslError } from "@rsl/core";
-import { tenantDataSchema, tenantLogsSchema } from "@rsl/database";
+import { resolveWorkspaceChannelCredentials } from "@rsl/connections";
+import { newEntityId, newId, RslError } from "@rsl/core";
+import { controlSchema, tenantDataSchema, tenantLogsSchema } from "@rsl/database";
 import { defineAction } from "@rsl/logging";
 import { reserveSendGuard, markSendGuardOutcome } from "@rsl/queue";
-import { tenantDataDb, tenantLogsDb } from "@rsl/tenancy";
+import { controlDb, tenantDataDb, tenantLogsDb } from "@rsl/tenancy";
+
+async function dispatchOutboundConversationMessageLive(params: {
+  workspaceId: string;
+  channel: "whatsapp" | "instagram" | "facebook" | "google_review";
+  contact?: typeof tenantDataSchema.contacts.$inferSelect | null;
+  body: string;
+  templateName?: string;
+  correlationId?: string;
+}): Promise<{
+  ok: boolean;
+  mode: "live" | "sandbox" | "disconnected";
+  externalMessageId: string | null;
+  deliveryStatus: "sent" | "delivered";
+  error?: string;
+}> {
+  if (params.channel === "whatsapp") {
+    const creds = resolveWorkspaceChannelCredentials({
+      workspaceId: params.workspaceId,
+      channelKind: "whatsapp_cloud",
+    });
+    if (!creds.ok || !creds.accessToken) {
+      return {
+        ok: true,
+        mode: "disconnected",
+        externalMessageId: null,
+        deliveryStatus: "delivered",
+      };
+    }
+
+    if (creds.mode === "sandbox") {
+      return {
+        ok: true,
+        mode: "sandbox",
+        externalMessageId: `wamid.sb_${newId()}`,
+        deliveryStatus: "delivered",
+      };
+    }
+
+    const rawPhone = params.contact?.phoneE164?.trim() || "";
+    const digits = rawPhone.replace(/[^0-9]/g, "");
+    const toDigits = digits.length === 10 ? `91${digits}` : digits;
+    if (toDigits.length < 10) {
+      return {
+        ok: false,
+        mode: "live",
+        externalMessageId: null,
+        deliveryStatus: "sent",
+        error: "Contact does not have a valid WhatsApp phone number (+91...).",
+      };
+    }
+
+    const wabaPhoneAsset = controlDb()
+      .select()
+      .from(controlSchema.assets)
+      .where(
+        and(
+          eq(controlSchema.assets.workspaceId, params.workspaceId),
+          eq(controlSchema.assets.assetType, "waba_phone"),
+          eq(controlSchema.assets.active, true)
+        )
+      )
+      .get();
+
+    const phoneNumberId =
+      creds.metadata?.phoneNumberId ||
+      wabaPhoneAsset?.externalId ||
+      creds.externalAccountId ||
+      "";
+    if (!phoneNumberId) {
+      return {
+        ok: false,
+        mode: "live",
+        externalMessageId: null,
+        deliveryStatus: "sent",
+        error: "WhatsApp Phone Number ID is missing on Connected Channels.",
+      };
+    }
+
+    const dataDb = tenantDataDb({ workspaceId: params.workspaceId });
+    const logsDb = tenantLogsDb({ workspaceId: params.workspaceId });
+    const started = Date.now();
+
+    let apiBody: Record<string, unknown>;
+    if (params.templateName) {
+      const tmplRow = dataDb
+        .select()
+        .from(tenantDataSchema.whatsappTemplates)
+        .where(eq(tenantDataSchema.whatsappTemplates.name, params.templateName))
+        .get();
+      apiBody = {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: toDigits,
+        type: "template",
+        template: {
+          name: params.templateName,
+          language: { code: tmplRow?.language || "en_IN" },
+        },
+      };
+    } else {
+      apiBody = {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: toDigits,
+        type: "text",
+        text: {
+          preview_url: true,
+          body: params.body.trim(),
+        },
+      };
+    }
+
+    try {
+      const resp = await fetch(
+        `https://graph.facebook.com/${creds.graphVersion}/${encodeURIComponent(phoneNumberId)}/messages`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${creds.accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(apiBody),
+          signal: AbortSignal.timeout(10_000),
+        }
+      );
+
+      logsDb
+        .insert(tenantLogsSchema.providerCalls)
+        .values({
+          id: newEntityId("req", params.workspaceId),
+          ts: Date.now(),
+          provider: "whatsapp",
+          operation: params.templateName ? "inbox.send_template" : "inbox.send_text",
+          method: "POST",
+          status: resp.status,
+          latencyMs: Date.now() - started,
+          correlationId: params.correlationId || newEntityId("req", params.workspaceId),
+        })
+        .run();
+
+      const resBody = (await resp.json().catch(() => ({}))) as {
+        messages?: Array<{ id?: string }>;
+        error?: { message?: string };
+      };
+
+      if (!resp.ok) {
+        return {
+          ok: false,
+          mode: "live",
+          externalMessageId: null,
+          deliveryStatus: "sent",
+          error: `WhatsApp Cloud API rejected message (HTTP ${resp.status}): ${resBody.error?.message || "Verify 24h window or template status."}`,
+        };
+      }
+
+      return {
+        ok: true,
+        mode: "live",
+        externalMessageId: resBody.messages?.[0]?.id || `wamid.live_${Date.now()}`,
+        deliveryStatus: "sent",
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        mode: "live",
+        externalMessageId: null,
+        deliveryStatus: "sent",
+        error: err instanceof Error ? err.message : "Network error reaching WhatsApp Cloud API.",
+      };
+    }
+  }
+
+  if (params.channel === "instagram" || params.channel === "facebook") {
+    const creds = resolveWorkspaceChannelCredentials({
+      workspaceId: params.workspaceId,
+      channelKind: params.channel === "instagram" ? "instagram_business" : "facebook_page",
+    });
+    if (!creds.ok || !creds.accessToken) {
+      return {
+        ok: true,
+        mode: "disconnected",
+        externalMessageId: null,
+        deliveryStatus: "delivered",
+      };
+    }
+
+    if (creds.mode === "sandbox") {
+      return {
+        ok: true,
+        mode: "sandbox",
+        externalMessageId: `mid.sb_${newId()}`,
+        deliveryStatus: "delivered",
+      };
+    }
+
+    const scopedRecipientId =
+      params.channel === "instagram"
+        ? params.contact?.instagramHandle?.trim()
+        : params.contact?.facebookScopedId?.trim();
+
+    // Only call live Send API if we have a real numeric/scoped sender ID from an inbound DM
+    if (!scopedRecipientId || scopedRecipientId.startsWith("@")) {
+      return {
+        ok: true,
+        mode: "disconnected",
+        externalMessageId: null,
+        deliveryStatus: "delivered",
+      };
+    }
+
+    const senderNode =
+      params.channel === "instagram"
+        ? creds.metadata?.igUserId || creds.metadata?.pageId || creds.externalAccountId
+        : creds.metadata?.pageId || creds.externalAccountId;
+
+    if (!senderNode) {
+      return {
+        ok: false,
+        mode: "live",
+        externalMessageId: null,
+        deliveryStatus: "sent",
+        error: `Connected ${params.channel} account is missing Page / IG User ID.`,
+      };
+    }
+
+    try {
+      const resp = await fetch(
+        `https://graph.facebook.com/${creds.graphVersion}/${encodeURIComponent(senderNode)}/messages`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${creds.accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            recipient: { id: scopedRecipientId },
+            messaging_type: "RESPONSE",
+            message: { text: params.body.trim() },
+          }),
+          signal: AbortSignal.timeout(10_000),
+        }
+      );
+
+      const resBody = (await resp.json().catch(() => ({}))) as {
+        message_id?: string;
+        error?: { message?: string };
+      };
+
+      if (!resp.ok) {
+        return {
+          ok: false,
+          mode: "live",
+          externalMessageId: null,
+          deliveryStatus: "sent",
+          error: `Meta Messaging API rejected ${params.channel} reply (HTTP ${resp.status}): ${resBody.error?.message || "Verify 24h DM window & messaging permissions."}`,
+        };
+      }
+
+      return {
+        ok: true,
+        mode: "live",
+        externalMessageId: resBody.message_id || `mid.live_${Date.now()}`,
+        deliveryStatus: "sent",
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        mode: "live",
+        externalMessageId: null,
+        deliveryStatus: "sent",
+        error: err instanceof Error ? err.message : "Network error reaching Meta Messaging API.",
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    mode: "disconnected",
+    externalMessageId: null,
+    deliveryStatus: "delivered",
+  };
+}
 
 export function listContacts(workspaceId: string, limit = 200) {
   return tenantDataDb({ workspaceId })
@@ -190,7 +473,7 @@ export const startOrLogConversation = defineAction({
     slaTargetMinutes: z.coerce.number().int().min(5).max(1440).default(30),
   }),
   summarize: (input) => `Logged ${input.direction} ${input.channel} conversation`,
-  handler: (ctx, input) => {
+  handler: async (ctx, input) => {
     const db = tenantDataDb(ctx);
     const contact = db
       .select()
@@ -199,6 +482,24 @@ export const startOrLogConversation = defineAction({
       .get();
     if (!contact) {
       throw new RslError("RSL-VAL-1001", "Selected customer contact was not found.");
+    }
+
+    let externalMessageId: string | null = null;
+    let outboundDeliveryStatus: "sent" | "delivered" = "delivered";
+
+    if (input.direction === "outbound") {
+      const liveOut = await dispatchOutboundConversationMessageLive({
+        workspaceId: ctx.workspaceId,
+        channel: input.channel,
+        contact,
+        body: input.body,
+        correlationId: ctx.correlationId,
+      });
+      if (!liveOut.ok) {
+        throw new RslError("RSL-VAL-1001", liveOut.error || "Could not deliver outbound message.");
+      }
+      externalMessageId = liveOut.externalMessageId;
+      outboundDeliveryStatus = liveOut.deliveryStatus;
     }
 
     const now = Date.now();
@@ -229,7 +530,8 @@ export const startOrLogConversation = defineAction({
         senderType: input.direction === "inbound" ? "customer" : "team_member",
         senderId: input.direction === "inbound" ? contact.id : ctx.actorId,
         body: input.body.trim(),
-        deliveryStatus: input.direction === "inbound" ? "read" : "delivered",
+        deliveryStatus: input.direction === "inbound" ? "read" : outboundDeliveryStatus,
+        externalMessageId,
         costPaise: 0,
         createdAt: now,
       })
@@ -266,7 +568,7 @@ export const replyToConversation = defineAction({
     templateName: z.string().optional(),
   }),
   summarize: (input) => `Sent reply in conversation ${input.conversationId.slice(-6)}`,
-  handler: (ctx, input) => {
+  handler: async (ctx, input) => {
     const db = tenantDataDb(ctx);
     const logsDb = tenantLogsDb(ctx);
     const conv = db
@@ -322,6 +624,25 @@ export const replyToConversation = defineAction({
       return { deduplicated: true, messageId: "" };
     }
 
+    // Dispatch live to WhatsApp Cloud API / Instagram / Facebook Messenger BEFORE charging wallet!
+    const liveOut = await dispatchOutboundConversationMessageLive({
+      workspaceId: ctx.workspaceId,
+      channel: conv.channel as "whatsapp" | "instagram" | "facebook" | "google_review",
+      contact,
+      body: input.body,
+      templateName: input.templateName,
+      correlationId: ctx.correlationId,
+    });
+
+    if (!liveOut.ok) {
+      markSendGuardOutcome({
+        workspaceId: ctx.workspaceId,
+        idempotencyKey: guardKey,
+        state: "failed",
+      });
+      throw new RslError("RSL-VAL-1001", liveOut.error || "Provider rejected outbound reply.");
+    }
+
     if (templateCostPaise > 0) {
       consumeUsage({
         workspaceId: ctx.workspaceId,
@@ -352,7 +673,8 @@ export const replyToConversation = defineAction({
         senderId: ctx.actorId,
         body: input.body.trim(),
         templateName: input.templateName || null,
-        deliveryStatus: "delivered",
+        deliveryStatus: liveOut.deliveryStatus,
+        externalMessageId: liveOut.externalMessageId,
         costPaise: input.templateName ? 85 : 0,
         pricingCategory: input.templateName ? "utility" : "service",
         createdAt: now,
@@ -381,10 +703,15 @@ export const replyToConversation = defineAction({
       workspaceId: ctx.workspaceId,
       idempotencyKey: guardKey,
       state: "confirmed",
-      externalId: msgId,
+      externalId: liveOut.externalMessageId ?? msgId,
     });
 
-    return { deduplicated: false, messageId: msgId };
+    return {
+      deduplicated: false,
+      messageId: msgId,
+      externalMessageId: liveOut.externalMessageId,
+      mode: liveOut.mode,
+    };
   },
 });
 

@@ -5,6 +5,7 @@ import { controlDb } from "./index";
 
 export type PlatformCredentialProviderKey =
   | "google_oauth"
+  | "google_ads"
   | "smtp_email"
   | "cloudflare_r2"
   | "meta_app"
@@ -114,6 +115,7 @@ export interface PlatformGoogleOAuthConfig {
   defaultDriveFolderName: string;
   enableDriveOAuth: boolean;
   enableGbpOAuth: boolean;
+  enableGoogleAdsOAuth: boolean;
   source: CredentialSource;
   isReady: boolean;
   maskedClientSecret: string;
@@ -127,6 +129,7 @@ export interface PublicGoogleOAuthStatus {
   isReady: boolean;
   enableDriveOAuth: boolean;
   enableGbpOAuth: boolean;
+  enableGoogleAdsOAuth: boolean;
   consentAppName: string;
   publishingStatus: "production" | "testing";
   defaultDriveFolderName: string;
@@ -145,6 +148,7 @@ export function getPlatformGoogleOAuthConfig(): PlatformGoogleOAuthConfig {
       defaultDriveFolderName: string;
       enableDriveOAuth: boolean;
       enableGbpOAuth: boolean;
+      enableGoogleAdsOAuth: boolean;
     }>(row.publicConfigJson);
     const sec = decryptSecretObject<{ clientSecret: string }>(row.encryptedSecrets);
     const clientId = (pub.clientId || "").trim();
@@ -161,6 +165,7 @@ export function getPlatformGoogleOAuthConfig(): PlatformGoogleOAuthConfig {
       defaultDriveFolderName: (pub.defaultDriveFolderName || "RapidShift Labs Backups").trim(),
       enableDriveOAuth: pub.enableDriveOAuth !== false,
       enableGbpOAuth: pub.enableGbpOAuth !== false,
+      enableGoogleAdsOAuth: pub.enableGoogleAdsOAuth !== false,
       source: clientId || clientSecret ? "database" : "unconfigured",
       isReady,
       maskedClientSecret: maskCredentialSecret(clientSecret),
@@ -195,6 +200,7 @@ export function getPlatformGoogleOAuthConfig(): PlatformGoogleOAuthConfig {
     defaultDriveFolderName: "RapidShift Labs Backups",
     enableDriveOAuth: true,
     enableGbpOAuth: true,
+    enableGoogleAdsOAuth: true,
     source: hasEnv ? "env" : "unconfigured",
     isReady: hasEnv,
     maskedClientSecret: maskCredentialSecret(envClientSecret),
@@ -211,6 +217,7 @@ export function getPublicGoogleOAuthStatus(): PublicGoogleOAuthStatus {
     isReady: cfg.isReady,
     enableDriveOAuth: cfg.isReady && cfg.enableDriveOAuth,
     enableGbpOAuth: cfg.isReady && cfg.enableGbpOAuth,
+    enableGoogleAdsOAuth: cfg.isReady && cfg.enableGoogleAdsOAuth,
     consentAppName: cfg.consentAppName,
     publishingStatus: cfg.publishingStatus,
     defaultDriveFolderName: cfg.defaultDriveFolderName,
@@ -228,6 +235,7 @@ export function savePlatformGoogleOAuthConfig(params: {
   defaultDriveFolderName?: string;
   enableDriveOAuth?: boolean;
   enableGbpOAuth?: boolean;
+  enableGoogleAdsOAuth?: boolean;
   staffId: string;
 }): PlatformGoogleOAuthConfig {
   const current = getPlatformGoogleOAuthConfig();
@@ -277,6 +285,7 @@ export function savePlatformGoogleOAuthConfig(params: {
     ).trim(),
     enableDriveOAuth: params.enableDriveOAuth ?? current.enableDriveOAuth,
     enableGbpOAuth: params.enableGbpOAuth ?? current.enableGbpOAuth,
+    enableGoogleAdsOAuth: params.enableGoogleAdsOAuth ?? current.enableGoogleAdsOAuth,
   };
 
   const encryptedSecrets = encryptEnvelope(JSON.stringify({ clientSecret: nextClientSecret }));
@@ -609,7 +618,7 @@ export function savePlatformManagedR2Config(params: {
 }
 
 /* ============================================================================
- * 4. Meta / WhatsApp Platform App Credentials
+ * 4. Meta / WhatsApp Platform App & Managed Business Manager Credentials
  * ============================================================================ */
 
 export interface PlatformMetaAppConfig {
@@ -619,11 +628,24 @@ export interface PlatformMetaAppConfig {
   configId: string;
   webhookVerifyToken: string;
   graphVersion: string;
+  enableMetaOAuth: boolean;
+  managedAdAccountId: string;
+  managedPageId: string;
+  managedSystemToken: string;
   source: CredentialSource;
   isReady: boolean;
+  isManagedAdsReady: boolean;
   maskedAppSecret: string;
   maskedVerifyToken: string;
+  maskedManagedSystemToken: string;
   updatedAt: number | null;
+}
+
+export interface PublicMetaOAuthStatus {
+  isReady: boolean;
+  enableMetaOAuth: boolean;
+  isManagedAdsReady: boolean;
+  graphVersion: string;
 }
 
 export function getPlatformMetaAppConfig(): PlatformMetaAppConfig {
@@ -635,14 +657,21 @@ export function getPlatformMetaAppConfig(): PlatformMetaAppConfig {
       appId: string;
       configId: string;
       graphVersion: string;
+      enableMetaOAuth: boolean;
+      managedAdAccountId: string;
+      managedPageId: string;
     }>(row.publicConfigJson);
     const sec = decryptSecretObject<{
       appSecret: string;
       webhookVerifyToken: string;
+      managedSystemToken: string;
     }>(row.encryptedSecrets);
     const appId = (pub.appId || "").trim();
     const appSecret = (sec.appSecret || "").trim();
     const webhookVerifyToken = (sec.webhookVerifyToken || "").trim();
+    const managedAdAccountId = (pub.managedAdAccountId || env.META_MANAGED_AD_ACCOUNT_ID || "").trim();
+    const managedPageId = (pub.managedPageId || env.META_MANAGED_PAGE_ID || "").trim();
+    const managedSystemToken = (sec.managedSystemToken || env.META_MANAGED_SYSTEM_TOKEN || "").trim();
 
     return {
       enabled: row.enabled,
@@ -651,15 +680,24 @@ export function getPlatformMetaAppConfig(): PlatformMetaAppConfig {
       configId: (pub.configId || "").trim(),
       webhookVerifyToken,
       graphVersion: (pub.graphVersion || env.META_GRAPH_VERSION || "v21.0").trim(),
+      enableMetaOAuth: pub.enableMetaOAuth !== false,
+      managedAdAccountId,
+      managedPageId,
+      managedSystemToken,
       source: appId || appSecret ? "database" : "unconfigured",
       isReady: row.enabled && Boolean(appId && appSecret),
+      isManagedAdsReady: Boolean(managedAdAccountId && managedSystemToken),
       maskedAppSecret: maskCredentialSecret(appSecret),
       maskedVerifyToken: maskCredentialSecret(webhookVerifyToken),
+      maskedManagedSystemToken: maskCredentialSecret(managedSystemToken),
       updatedAt: row.updatedAt,
     };
   }
 
   const hasEnv = Boolean(env.META_APP_ID && env.META_APP_SECRET);
+  const managedAdAccountId = (env.META_MANAGED_AD_ACCOUNT_ID || "").trim();
+  const managedPageId = (env.META_MANAGED_PAGE_ID || "").trim();
+  const managedSystemToken = (env.META_MANAGED_SYSTEM_TOKEN || "").trim();
   return {
     enabled: true,
     appId: env.META_APP_ID,
@@ -667,11 +705,27 @@ export function getPlatformMetaAppConfig(): PlatformMetaAppConfig {
     configId: env.META_CONFIG_ID,
     webhookVerifyToken: env.META_WEBHOOK_VERIFY_TOKEN,
     graphVersion: env.META_GRAPH_VERSION,
+    enableMetaOAuth: true,
+    managedAdAccountId,
+    managedPageId,
+    managedSystemToken,
     source: hasEnv ? "env" : "unconfigured",
     isReady: hasEnv,
+    isManagedAdsReady: Boolean(managedAdAccountId && managedSystemToken),
     maskedAppSecret: maskCredentialSecret(env.META_APP_SECRET),
     maskedVerifyToken: maskCredentialSecret(env.META_WEBHOOK_VERIFY_TOKEN),
+    maskedManagedSystemToken: maskCredentialSecret(managedSystemToken),
     updatedAt: null,
+  };
+}
+
+export function getPublicMetaOAuthStatus(): PublicMetaOAuthStatus {
+  const cfg = getPlatformMetaAppConfig();
+  return {
+    isReady: cfg.isReady,
+    enableMetaOAuth: cfg.isReady && cfg.enableMetaOAuth,
+    isManagedAdsReady: cfg.isManagedAdsReady,
+    graphVersion: cfg.graphVersion,
   };
 }
 
@@ -682,6 +736,10 @@ export function savePlatformMetaAppConfig(params: {
   configId?: string;
   webhookVerifyToken?: string;
   graphVersion?: string;
+  enableMetaOAuth?: boolean;
+  managedAdAccountId?: string;
+  managedPageId?: string;
+  managedSystemToken?: string;
   staffId: string;
 }): PlatformMetaAppConfig {
   const current = getPlatformMetaAppConfig();
@@ -694,6 +752,18 @@ export function savePlatformMetaAppConfig(params: {
     params.webhookVerifyToken && params.webhookVerifyToken.trim().length > 0
       ? params.webhookVerifyToken.trim()
       : current.webhookVerifyToken;
+  const managedSystemToken =
+    params.managedSystemToken && params.managedSystemToken.trim().length > 0
+      ? params.managedSystemToken.trim()
+      : current.managedSystemToken;
+  const managedAdAccountId =
+    params.managedAdAccountId !== undefined
+      ? params.managedAdAccountId.trim()
+      : current.managedAdAccountId;
+  const managedPageId =
+    params.managedPageId !== undefined
+      ? params.managedPageId.trim()
+      : current.managedPageId;
 
   if (!appId || !appSecret) {
     throw new RslError("RSL-VAL-1001", "Enter both Meta App ID and Meta App Secret.");
@@ -703,13 +773,17 @@ export function savePlatformMetaAppConfig(params: {
     appId,
     configId: (params.configId || "").trim(),
     graphVersion: (params.graphVersion || "v21.0").trim(),
+    enableMetaOAuth: params.enableMetaOAuth ?? current.enableMetaOAuth,
+    managedAdAccountId,
+    managedPageId,
   };
   const encryptedSecrets = encryptEnvelope(
-    JSON.stringify({ appSecret, webhookVerifyToken })
+    JSON.stringify({ appSecret, webhookVerifyToken, managedSystemToken })
   );
   const maskedHints = {
     appSecret: maskCredentialSecret(appSecret),
     webhookVerifyToken: maskCredentialSecret(webhookVerifyToken),
+    managedSystemToken: maskCredentialSecret(managedSystemToken),
   };
   const now = Date.now();
   const enabled = params.enabled ?? true;
@@ -739,6 +813,186 @@ export function savePlatformMetaAppConfig(params: {
     .run();
 
   return getPlatformMetaAppConfig();
+}
+
+/* ============================================================================
+ * 4B. Google Ads API Developer Token & Managed MCC Credentials
+ * ============================================================================ */
+
+export interface PlatformGoogleAdsConfig {
+  enabled: boolean;
+  developerToken: string;
+  loginCustomerId: string;
+  managedCustomerId: string;
+  managedRefreshToken: string;
+  apiVersion: string;
+  source: CredentialSource;
+  isReady: boolean;
+  isManagedAdsReady: boolean;
+  maskedDeveloperToken: string;
+  maskedManagedRefreshToken: string;
+  updatedAt: number | null;
+}
+
+export interface PublicGoogleAdsStatus {
+  isReady: boolean;
+  isManagedAdsReady: boolean;
+  hasDeveloperToken: boolean;
+  apiVersion: string;
+}
+
+function normalizeCustomerIdDigits(raw: string | undefined | null): string {
+  return (raw || "").replace(/[^0-9]/g, "").trim();
+}
+
+export function getPlatformGoogleAdsConfig(): PlatformGoogleAdsConfig {
+  const env = getEnv();
+  const row = readRow("google_ads");
+
+  if (row) {
+    const pub = parseJsonObject<{
+      loginCustomerId: string;
+      managedCustomerId: string;
+      apiVersion: string;
+    }>(row.publicConfigJson);
+    const sec = decryptSecretObject<{
+      developerToken: string;
+      managedRefreshToken: string;
+    }>(row.encryptedSecrets);
+
+    const developerToken = (sec.developerToken || env.GOOGLE_ADS_DEVELOPER_TOKEN || "").trim();
+    const loginCustomerId = normalizeCustomerIdDigits(
+      pub.loginCustomerId || env.GOOGLE_ADS_LOGIN_CUSTOMER_ID
+    );
+    const managedCustomerId = normalizeCustomerIdDigits(
+      pub.managedCustomerId || env.GOOGLE_ADS_MANAGED_CUSTOMER_ID
+    );
+    const managedRefreshToken = (
+      sec.managedRefreshToken ||
+      env.GOOGLE_ADS_MANAGED_REFRESH_TOKEN ||
+      ""
+    ).trim();
+
+    return {
+      enabled: row.enabled,
+      developerToken,
+      loginCustomerId,
+      managedCustomerId,
+      managedRefreshToken,
+      apiVersion: (pub.apiVersion || "v18").trim(),
+      source: developerToken ? "database" : "unconfigured",
+      isReady: row.enabled && Boolean(developerToken),
+      isManagedAdsReady:
+        row.enabled && Boolean(developerToken && managedCustomerId && managedRefreshToken),
+      maskedDeveloperToken: maskCredentialSecret(developerToken),
+      maskedManagedRefreshToken: maskCredentialSecret(managedRefreshToken),
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  const developerToken = (env.GOOGLE_ADS_DEVELOPER_TOKEN || "").trim();
+  const loginCustomerId = normalizeCustomerIdDigits(env.GOOGLE_ADS_LOGIN_CUSTOMER_ID);
+  const managedCustomerId = normalizeCustomerIdDigits(env.GOOGLE_ADS_MANAGED_CUSTOMER_ID);
+  const managedRefreshToken = (env.GOOGLE_ADS_MANAGED_REFRESH_TOKEN || "").trim();
+  const hasEnv = Boolean(developerToken);
+
+  return {
+    enabled: true,
+    developerToken,
+    loginCustomerId,
+    managedCustomerId,
+    managedRefreshToken,
+    apiVersion: "v18",
+    source: hasEnv ? "env" : "unconfigured",
+    isReady: hasEnv,
+    isManagedAdsReady: Boolean(developerToken && managedCustomerId && managedRefreshToken),
+    maskedDeveloperToken: maskCredentialSecret(developerToken),
+    maskedManagedRefreshToken: maskCredentialSecret(managedRefreshToken),
+    updatedAt: null,
+  };
+}
+
+export function getPublicGoogleAdsStatus(): PublicGoogleAdsStatus {
+  const cfg = getPlatformGoogleAdsConfig();
+  const oauth = getPlatformGoogleOAuthConfig();
+  return {
+    isReady: oauth.isReady && oauth.enableGoogleAdsOAuth,
+    isManagedAdsReady: cfg.isManagedAdsReady && oauth.isReady,
+    hasDeveloperToken: cfg.isReady,
+    apiVersion: cfg.apiVersion,
+  };
+}
+
+export function savePlatformGoogleAdsConfig(params: {
+  enabled?: boolean;
+  developerToken?: string;
+  loginCustomerId?: string;
+  managedCustomerId?: string;
+  managedRefreshToken?: string;
+  apiVersion?: string;
+  staffId: string;
+}): PlatformGoogleAdsConfig {
+  const current = getPlatformGoogleAdsConfig();
+  const developerToken =
+    params.developerToken && params.developerToken.trim().length > 0
+      ? params.developerToken.trim()
+      : current.developerToken;
+  const managedRefreshToken =
+    params.managedRefreshToken && params.managedRefreshToken.trim().length > 0
+      ? params.managedRefreshToken.trim()
+      : current.managedRefreshToken;
+
+  if (!developerToken) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Enter your Google Ads API Developer Token (from Google Ads Manager MCC → Tools → API Center)."
+    );
+  }
+
+  const publicConfig = {
+    loginCustomerId: normalizeCustomerIdDigits(
+      params.loginCustomerId ?? current.loginCustomerId
+    ),
+    managedCustomerId: normalizeCustomerIdDigits(
+      params.managedCustomerId ?? current.managedCustomerId
+    ),
+    apiVersion: (params.apiVersion || current.apiVersion || "v18").trim(),
+  };
+  const encryptedSecrets = encryptEnvelope(
+    JSON.stringify({ developerToken, managedRefreshToken })
+  );
+  const maskedHints = {
+    developerToken: maskCredentialSecret(developerToken),
+    managedRefreshToken: maskCredentialSecret(managedRefreshToken),
+  };
+  const now = Date.now();
+  const enabled = params.enabled ?? true;
+
+  controlDb()
+    .insert(controlSchema.platformCredentials)
+    .values({
+      providerKey: "google_ads",
+      enabled,
+      publicConfigJson: JSON.stringify(publicConfig),
+      encryptedSecrets,
+      maskedHintsJson: JSON.stringify(maskedHints),
+      updatedByStaffId: params.staffId,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: controlSchema.platformCredentials.providerKey,
+      set: {
+        enabled,
+        publicConfigJson: JSON.stringify(publicConfig),
+        encryptedSecrets,
+        maskedHintsJson: JSON.stringify(maskedHints),
+        updatedByStaffId: params.staffId,
+        updatedAt: now,
+      },
+    })
+    .run();
+
+  return getPlatformGoogleAdsConfig();
 }
 
 /* ============================================================================
@@ -883,6 +1137,7 @@ export function recordPlatformCredentialVerification(params: {
  */
 export function getSafePlatformCredentialsAdminSnapshot() {
   const google = getPlatformGoogleOAuthConfig();
+  const googleAds = getPlatformGoogleAdsConfig();
   const smtp = getPlatformSmtpConfig();
   const r2 = getPlatformManagedR2Config();
   const meta = getPlatformMetaAppConfig();
@@ -898,6 +1153,7 @@ export function getSafePlatformCredentialsAdminSnapshot() {
       defaultDriveFolderName: google.defaultDriveFolderName,
       enableDriveOAuth: google.enableDriveOAuth,
       enableGbpOAuth: google.enableGbpOAuth,
+      enableGoogleAdsOAuth: google.enableGoogleAdsOAuth,
       source: google.source,
       isReady: google.isReady,
       maskedClientSecret: google.maskedClientSecret,
@@ -905,6 +1161,18 @@ export function getSafePlatformCredentialsAdminSnapshot() {
       lastVerifiedAt: google.lastVerifiedAt,
       lastVerifyStatus: google.lastVerifyStatus,
       lastVerifyMessage: google.lastVerifyMessage,
+    },
+    googleAds: {
+      enabled: googleAds.enabled,
+      loginCustomerId: googleAds.loginCustomerId,
+      managedCustomerId: googleAds.managedCustomerId,
+      apiVersion: googleAds.apiVersion,
+      source: googleAds.source,
+      isReady: googleAds.isReady,
+      isManagedAdsReady: googleAds.isManagedAdsReady,
+      maskedDeveloperToken: googleAds.maskedDeveloperToken,
+      maskedManagedRefreshToken: googleAds.maskedManagedRefreshToken,
+      updatedAt: googleAds.updatedAt,
     },
     smtp: {
       enabled: smtp.enabled,
@@ -939,10 +1207,15 @@ export function getSafePlatformCredentialsAdminSnapshot() {
       appId: meta.appId,
       configId: meta.configId,
       graphVersion: meta.graphVersion,
+      enableMetaOAuth: meta.enableMetaOAuth,
+      managedAdAccountId: meta.managedAdAccountId,
+      managedPageId: meta.managedPageId,
       source: meta.source,
       isReady: meta.isReady,
+      isManagedAdsReady: meta.isManagedAdsReady,
       maskedAppSecret: meta.maskedAppSecret,
       maskedVerifyToken: meta.maskedVerifyToken,
+      maskedManagedSystemToken: meta.maskedManagedSystemToken,
       updatedAt: meta.updatedAt,
     },
     razorpay: {

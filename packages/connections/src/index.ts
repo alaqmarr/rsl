@@ -6,6 +6,7 @@ import { controlSchema } from "@rsl/database";
 import { appendActionLog, defineAction } from "@rsl/logging";
 import {
   controlDb,
+  getPlatformGoogleAdsConfig,
   getPlatformGoogleOAuthConfig,
   getPlatformMetaAppConfig,
 } from "@rsl/tenancy";
@@ -21,8 +22,26 @@ export type ConnectionChannelKind =
   | "facebook_page"
   | "instagram_business"
   | "meta_ads_pixel"
+  | "google_ads"
   | "google_business"
   | "google_drive";
+
+export type GoogleAdsDiscoveryStatus =
+  | "verified_customers"
+  | "no_customers_found"
+  | "dev_token_missing"
+  | "api_error"
+  | "token_error";
+
+export interface GoogleAdsCustomerSummary {
+  customerId: string;
+  formattedCustomerId: string;
+  descriptiveName: string;
+  currencyCode?: string;
+  timeZone?: string;
+  isManager?: boolean;
+  loginCustomerId?: string;
+}
 
 export type GoogleBusinessDiscoveryStatus =
   | "verified_locations"
@@ -62,6 +81,15 @@ export interface ConnectionMetadata {
   igHandle?: string;
   adAccountId?: string;
   pixelId?: string;
+  customerId?: string;
+  formattedCustomerId?: string;
+  loginCustomerId?: string;
+  currencyCode?: string;
+  timeZone?: string;
+  availableAdCustomers?: GoogleAdsCustomerSummary[];
+  adsDiscoveryStatus?: GoogleAdsDiscoveryStatus;
+  adsDiscoveryDetail?: string;
+  lastAdsDiscoveredAt?: number;
   locationId?: string;
   accountId?: string;
   accountName?: string;
@@ -200,6 +228,7 @@ function inferChannelKind(
   if (meta.channelKind) return meta.channelKind;
   if (provider === "whatsapp" || assetTypes.includes("waba_phone")) return "whatsapp_cloud";
   if (provider === "gdrive") return "google_drive";
+  if (provider === "google_ads" || assetTypes.includes("google_ad_customer")) return "google_ads";
   if (provider === "google" || assetTypes.includes("gbp_location")) return "google_business";
   if (assetTypes.includes("ig_account")) return "instagram_business";
   if (assetTypes.includes("ad_account") || assetTypes.includes("pixel")) return "meta_ads_pixel";
@@ -368,6 +397,7 @@ const connectionMetadataInputSchema = z
         "facebook_page",
         "instagram_business",
         "meta_ads_pixel",
+        "google_ads",
         "google_business",
         "google_drive",
       ])
@@ -383,6 +413,10 @@ const connectionMetadataInputSchema = z
     igHandle: z.string().optional(),
     adAccountId: z.string().optional(),
     pixelId: z.string().optional(),
+    customerId: z.string().optional(),
+    formattedCustomerId: z.string().optional(),
+    loginCustomerId: z.string().optional(),
+    currencyCode: z.string().optional(),
     locationId: z.string().optional(),
     accountId: z.string().optional(),
     accountName: z.string().optional(),
@@ -403,14 +437,22 @@ export const linkExternalConnection = defineAction({
   key: "connections.linked",
   permission: "connections:manage",
   input: z.object({
-    provider: z.enum(["meta", "whatsapp", "google", "gdrive"]),
+    provider: z.enum(["meta", "whatsapp", "google", "gdrive", "google_ads"]),
     displayName: z.string().trim().min(2, "Enter a descriptive account label").max(120),
     externalAccountId: z.string().trim().min(2, "Enter the external Account / Phone / Page ID").max(120),
     accessToken: z.string().trim().min(6, "Paste a valid access token (at least 6 characters)"),
     refreshToken: z.string().optional(),
     scopesGranted: z.array(z.string()).default([]),
     assetType: z
-      .enum(["fb_page", "ig_account", "ad_account", "pixel", "waba_phone", "gbp_location"])
+      .enum([
+        "fb_page",
+        "ig_account",
+        "ad_account",
+        "pixel",
+        "waba_phone",
+        "gbp_location",
+        "google_ad_customer",
+      ])
       .optional(),
     assetName: z.string().optional(),
     metadata: connectionMetadataInputSchema,
@@ -741,7 +783,11 @@ export const verifyExternalConnectionHealth = defineAction({
           liveMessage =
             "Vault token intact (Meta Graph API unreachable from current network; check outbound internet or firewall).";
         }
-      } else if (conn.provider === "google" || conn.provider === "gdrive") {
+      } else if (
+        conn.provider === "google" ||
+        conn.provider === "gdrive" ||
+        conn.provider === "google_ads"
+      ) {
         try {
           const refreshed = await refreshGoogleConnectionIfNeeded(ctx.workspaceId, conn.id);
           if (refreshed) {
@@ -762,7 +808,6 @@ export const verifyExternalConnectionHealth = defineAction({
                 connectionId: conn.id,
                 accessToken,
               });
-              // Re-load upgraded metadata & displayName after GBP discovery
               const upgradedRow = db
                 .select()
                 .from(controlSchema.connections)
@@ -779,6 +824,23 @@ export const verifyExternalConnectionHealth = defineAction({
                 liveMessage =
                   "Verified live with Google OAuth2 API (automatic refresh token active).";
               }
+            } else if (conn.provider === "google_ads") {
+              const gads = await discoverAndHydrateGoogleAdsAccounts({
+                workspaceId: ctx.workspaceId,
+                connectionId: conn.id,
+                accessToken,
+              });
+              const upgradedRow = db
+                .select()
+                .from(controlSchema.connections)
+                .where(eq(controlSchema.connections.id, conn.id))
+                .get();
+              if (upgradedRow) {
+                Object.assign(meta, parseMetadataSafe(upgradedRow.metadataJson));
+              }
+              liveMessage =
+                gads.adsDiscoveryDetail ||
+                `Verified live with Google Ads OAuth2 (${gads.displayName}).`;
             } else {
               liveMessage =
                 "Verified live with Google OAuth2 API (automatic refresh token active).";
@@ -788,7 +850,9 @@ export const verifyExternalConnectionHealth = defineAction({
             liveMessage =
               conn.provider === "google"
                 ? "Google OAuth2 rejected this token. Click 'Reconnect Google' to re-authorize your Google Business Profile in one click."
-                : "Google OAuth2 rejected this token. Click 'Reconnect Google Drive' to re-authorize your account in one click.";
+                : conn.provider === "google_ads"
+                  ? "Google OAuth2 rejected this token. Click 'Connect Google Ads' to re-authorize your Google Ads account in one click."
+                  : "Google OAuth2 rejected this token. Click 'Reconnect Google Drive' to re-authorize your account in one click.";
           }
         } catch {
           liveMessage = "Vault token intact (Google OAuth API unreachable from current network).";
@@ -837,7 +901,7 @@ export const verifyExternalConnectionHealth = defineAction({
  * Automatic 1-Click Google OAuth 2.0 Consent Screen Flow (`drive.file` & GBP)
  * ============================================================================ */
 
-export type GoogleOAuthPurpose = "google_drive" | "google_business";
+export type GoogleOAuthPurpose = "google_drive" | "google_business" | "google_ads";
 
 export function generateGoogleOAuthPkcePair(): {
   codeVerifier: string;
@@ -854,7 +918,9 @@ export function generateGoogleOAuthPkcePair(): {
 export function isGoogleOAuthPurposeConfigured(purpose: GoogleOAuthPurpose = "google_drive"): boolean {
   const cfg = getPlatformGoogleOAuthConfig();
   if (!cfg.isReady) return false;
-  return purpose === "google_drive" ? cfg.enableDriveOAuth : cfg.enableGbpOAuth;
+  if (purpose === "google_drive") return cfg.enableDriveOAuth;
+  if (purpose === "google_ads") return cfg.enableGoogleAdsOAuth;
+  return cfg.enableGbpOAuth;
 }
 
 export function buildGoogleOAuthAuthorizeUrl(params: {
@@ -876,6 +942,9 @@ export function buildGoogleOAuthAuthorizeUrl(params: {
   if (params.purpose === "google_business" && !cfg.enableGbpOAuth) {
     throw new RslError("RSL-VAL-1001", "Google Business Profile 1-click sign-in is currently turned off for this platform.");
   }
+  if (params.purpose === "google_ads" && !cfg.enableGoogleAdsOAuth) {
+    throw new RslError("RSL-VAL-1001", "Google Ads 1-click sign-in is currently turned off for this platform.");
+  }
 
   const scopes =
     params.purpose === "google_drive"
@@ -885,12 +954,19 @@ export function buildGoogleOAuthAuthorizeUrl(params: {
           "profile",
           "https://www.googleapis.com/auth/drive.file",
         ]
-      : [
-          "openid",
-          "email",
-          "profile",
-          "https://www.googleapis.com/auth/business.manage",
-        ];
+      : params.purpose === "google_ads"
+        ? [
+            "openid",
+            "email",
+            "profile",
+            "https://www.googleapis.com/auth/adwords",
+          ]
+        : [
+            "openid",
+            "email",
+            "profile",
+            "https://www.googleapis.com/auth/business.manage",
+          ];
 
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.searchParams.set("client_id", cfg.clientId);
@@ -1110,6 +1186,10 @@ export async function completeGoogleOAuthConnection(params: {
   storeName?: string;
   gbpDiscoveryStatus?: GoogleBusinessDiscoveryStatus;
   gbpDiscoveryDetail?: string;
+  customerId?: string;
+  formattedCustomerId?: string;
+  adsDiscoveryStatus?: GoogleAdsDiscoveryStatus;
+  adsDiscoveryDetail?: string;
 }> {
   const cfg = getPlatformGoogleOAuthConfig();
   if (!cfg.isReady) {
@@ -1335,6 +1415,128 @@ export async function completeGoogleOAuthConnection(params: {
       email,
       displayName,
       folderName: folder.folderName,
+    };
+  }
+
+  if (params.purpose === "google_ads") {
+    const existingAds = db
+      .select()
+      .from(controlSchema.connections)
+      .where(
+        and(
+          eq(controlSchema.connections.workspaceId, params.workspaceId),
+          eq(controlSchema.connections.provider, "google_ads")
+        )
+      )
+      .get();
+
+    const existingMeta = parseMetadataSafe(existingAds?.metadataJson);
+    let preservedRefresh = refreshToken;
+    if (!preservedRefresh && existingAds) {
+      try {
+        preservedRefresh = (
+          JSON.parse(decryptEnvelope(existingAds.encryptedTokens)) as StoredTokenPayload
+        ).refreshToken;
+      } catch {
+        preservedRefresh = undefined;
+      }
+    }
+
+    const encryptedTokens = encryptEnvelope(
+      JSON.stringify({
+        accessToken,
+        refreshToken: preservedRefresh,
+        issuedAt: now,
+      } satisfies StoredTokenPayload)
+    );
+
+    const wsRow = db
+      .select({ name: controlSchema.workspaces.name })
+      .from(controlSchema.workspaces)
+      .where(eq(controlSchema.workspaces.id, params.workspaceId))
+      .get();
+
+    const initialExtId = existingMeta.customerId || email || googleSub;
+    const initialDisplayName =
+      existingMeta.accountName || wsRow?.name || `Google Ads (${email})`;
+
+    const initialMeta: ConnectionMetadata = {
+      ...existingMeta,
+      channelKind: "google_ads",
+      driveEmail: email,
+      googleUserName,
+      googleSub: googleSub || existingMeta.googleSub || undefined,
+      oauthConnected: true,
+      maskedTokenHint: maskSecretToken(accessToken),
+      tokenMode: "live",
+    };
+
+    const connectionId = existingAds?.id ?? newId();
+    if (existingAds) {
+      db.update(controlSchema.connections)
+        .set({
+          displayName: initialDisplayName,
+          externalAccountId: initialExtId,
+          encryptedTokens,
+          scopesGrantedJson: JSON.stringify(scopesGranted),
+          metadataJson: JSON.stringify(initialMeta),
+          status: "healthy",
+          lastHealthCheckAt: now,
+          expiresAt,
+          updatedAt: now,
+        })
+        .where(eq(controlSchema.connections.id, existingAds.id))
+        .run();
+    } else {
+      db.insert(controlSchema.connections)
+        .values({
+          id: connectionId,
+          workspaceId: params.workspaceId,
+          provider: "google_ads",
+          displayName: initialDisplayName,
+          externalAccountId: initialExtId,
+          encryptedTokens,
+          scopesGrantedJson: JSON.stringify(scopesGranted),
+          metadataJson: JSON.stringify(initialMeta),
+          status: "healthy",
+          lastHealthCheckAt: now,
+          expiresAt,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+    }
+
+    const hydratedAds = await discoverAndHydrateGoogleAdsAccounts({
+      workspaceId: params.workspaceId,
+      connectionId,
+      accessToken,
+      preferredCustomerId: existingMeta.customerId,
+    });
+
+    appendActionLog({
+      workspaceId: params.workspaceId,
+      actorType: "user",
+      actorId: params.actorId,
+      source: "web",
+      action: "connections.linked",
+      outcome: "success",
+      requestId: newId(),
+      correlationId: newId(),
+      durationMs: 15,
+      summary: hydratedAds.formattedCustomerId
+        ? `Connected Google Ads Account '${hydratedAds.displayName}' (${hydratedAds.formattedCustomerId})`
+        : `Connected Google Ads (${email}) via OAuth Consent Screen`,
+    });
+
+    return {
+      connectionId,
+      email,
+      displayName: hydratedAds.displayName,
+      customerId: hydratedAds.customerId,
+      formattedCustomerId: hydratedAds.formattedCustomerId,
+      adsDiscoveryStatus: hydratedAds.adsDiscoveryStatus,
+      adsDiscoveryDetail: hydratedAds.adsDiscoveryDetail,
     };
   }
 
@@ -2360,4 +2562,1241 @@ export async function uploadFileToWorkspaceGoogleDrive(params: {
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+/* ============================================================================
+ * Google Ads Customer Discovery, Switcher & Credential Resolution (`v18`)
+ * ============================================================================ */
+
+export function normalizeGoogleAdsCustomerId(raw: string | undefined | null): string {
+  return (raw || "")
+    .replace(/^customers\//i, "")
+    .replace(/[^0-9]/g, "")
+    .trim();
+}
+
+export function formatGoogleAdsCustomerId(raw: string | undefined | null): string {
+  const digits = normalizeGoogleAdsCustomerId(raw);
+  if (digits.length === 10) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+  return digits;
+}
+
+export async function discoverAndHydrateGoogleAdsAccounts(params: {
+  workspaceId: string;
+  connectionId?: string;
+  accessToken?: string;
+  preferredCustomerId?: string;
+}): Promise<{
+  connected: boolean;
+  connectionId?: string;
+  displayName: string;
+  customerId?: string;
+  formattedCustomerId?: string;
+  loginCustomerId?: string;
+  currencyCode?: string;
+  availableAdCustomers: GoogleAdsCustomerSummary[];
+  adsDiscoveryStatus: GoogleAdsDiscoveryStatus;
+  adsDiscoveryDetail?: string;
+}> {
+  const db = controlDb();
+  const ws = db
+    .select({ id: controlSchema.workspaces.id, name: controlSchema.workspaces.name })
+    .from(controlSchema.workspaces)
+    .where(eq(controlSchema.workspaces.id, params.workspaceId))
+    .get();
+
+  const conn = params.connectionId
+    ? db
+        .select()
+        .from(controlSchema.connections)
+        .where(
+          and(
+            eq(controlSchema.connections.id, params.connectionId),
+            eq(controlSchema.connections.workspaceId, params.workspaceId)
+          )
+        )
+        .get()
+    : db
+        .select()
+        .from(controlSchema.connections)
+        .where(
+          and(
+            eq(controlSchema.connections.workspaceId, params.workspaceId),
+            eq(controlSchema.connections.provider, "google_ads")
+          )
+        )
+        .get();
+
+  if (!conn) {
+    return {
+      connected: false,
+      displayName: ws?.name || "Google Ads",
+      availableAdCustomers: [],
+      adsDiscoveryStatus: "no_customers_found",
+      adsDiscoveryDetail: "Google Ads account is not connected yet.",
+    };
+  }
+
+  const meta = parseMetadataSafe(conn.metadataJson);
+  const emailHint = meta.driveEmail || "";
+
+  let token = params.accessToken || "";
+  if (!token) {
+    token = (await refreshGoogleConnectionIfNeeded(params.workspaceId, conn.id)) || "";
+  }
+  if (!token) {
+    return {
+      connected: true,
+      connectionId: conn.id,
+      displayName: conn.displayName,
+      availableAdCustomers: meta.availableAdCustomers ?? [],
+      adsDiscoveryStatus: "token_error",
+      adsDiscoveryDetail:
+        "Google Ads OAuth session expired. Click 'Connect Google Ads' to re-authorize in one click.",
+    };
+  }
+
+  const now = Date.now();
+  if (/^(rsl_sandbox_|sandbox_|test_)/i.test(token)) {
+    const sbCid = normalizeGoogleAdsCustomerId(meta.customerId || conn.externalAccountId) || "1234567890";
+    const sbFmt = formatGoogleAdsCustomerId(sbCid);
+    const sbName = meta.accountName || `${ws?.name || "Sandbox"} Google Ads`;
+    const sbCustomer: GoogleAdsCustomerSummary = {
+      customerId: sbCid,
+      formattedCustomerId: sbFmt,
+      descriptiveName: sbName,
+      currencyCode: "INR",
+      timeZone: "Asia/Kolkata",
+      isManager: false,
+    };
+    const nextMeta: ConnectionMetadata = {
+      ...meta,
+      channelKind: "google_ads",
+      customerId: sbCid,
+      formattedCustomerId: sbFmt,
+      accountName: sbName,
+      currencyCode: "INR",
+      timeZone: "Asia/Kolkata",
+      availableAdCustomers: [sbCustomer],
+      adsDiscoveryStatus: "verified_customers",
+      adsDiscoveryDetail: `Sandbox Google Ads Customer ${sbFmt} (${sbName}) ready.`,
+      lastAdsDiscoveredAt: now,
+      tokenMode: "sandbox",
+    };
+    db.update(controlSchema.connections)
+      .set({
+        displayName: `${sbName} (${sbFmt})`,
+        externalAccountId: sbCid,
+        metadataJson: JSON.stringify(nextMeta),
+        updatedAt: now,
+      })
+      .where(eq(controlSchema.connections.id, conn.id))
+      .run();
+    return {
+      connected: true,
+      connectionId: conn.id,
+      displayName: `${sbName} (${sbFmt})`,
+      customerId: sbCid,
+      formattedCustomerId: sbFmt,
+      currencyCode: "INR",
+      availableAdCustomers: [sbCustomer],
+      adsDiscoveryStatus: "verified_customers",
+      adsDiscoveryDetail: nextMeta.adsDiscoveryDetail,
+    };
+  }
+
+  const adsCfg = getPlatformGoogleAdsConfig();
+  if (!adsCfg.developerToken) {
+    const manualCid = normalizeGoogleAdsCustomerId(
+      params.preferredCustomerId || meta.customerId || conn.externalAccountId
+    );
+    const manualFmt = manualCid.length === 10 ? formatGoogleAdsCustomerId(manualCid) : undefined;
+    const detail = manualFmt
+      ? `Google Ads Sign-In (${emailHint || "active"}) linked to Customer ID ${manualFmt}. Add a Google Ads Developer Token in Platform Credentials to enable live campaign API mutations.`
+      : `Google Ads Sign-In (${emailHint || "active"}) is connected! Add your Google Ads Developer Token in Platform Credentials (or enter your 10-digit Customer ID via Edit) to discover ad accounts automatically.`;
+    const nextMeta: ConnectionMetadata = {
+      ...meta,
+      channelKind: "google_ads",
+      customerId: manualCid.length === 10 ? manualCid : meta.customerId,
+      formattedCustomerId: manualFmt ?? meta.formattedCustomerId,
+      adsDiscoveryStatus: "dev_token_missing",
+      adsDiscoveryDetail: detail,
+      lastAdsDiscoveredAt: now,
+      lastLiveCheckMessage: detail,
+    };
+    db.update(controlSchema.connections)
+      .set({
+        metadataJson: JSON.stringify(nextMeta),
+        updatedAt: now,
+      })
+      .where(eq(controlSchema.connections.id, conn.id))
+      .run();
+    return {
+      connected: true,
+      connectionId: conn.id,
+      displayName: conn.displayName,
+      customerId: nextMeta.customerId,
+      formattedCustomerId: nextMeta.formattedCustomerId,
+      availableAdCustomers: meta.availableAdCustomers ?? [],
+      adsDiscoveryStatus: "dev_token_missing",
+      adsDiscoveryDetail: detail,
+    };
+  }
+
+  const discovered = new Map<string, GoogleAdsCustomerSummary>();
+  let apiFailureDetail = "";
+
+  try {
+    const listResp = await fetch(
+      "https://googleads.googleapis.com/v18/customers:listAccessibleCustomers",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "developer-token": adsCfg.developerToken,
+        },
+        signal: AbortSignal.timeout(8000),
+      }
+    );
+    const listTxt = await listResp.text().catch(() => "");
+    if (!listResp.ok) {
+      apiFailureDetail = `Google Ads API listAccessibleCustomers returned HTTP ${listResp.status}: ${listTxt.slice(0, 180)}`;
+    } else {
+      const parsed = JSON.parse(listTxt || "{}") as { resourceNames?: string[] };
+      const cids = (parsed.resourceNames ?? [])
+        .map((r) => normalizeGoogleAdsCustomerId(r))
+        .filter((id) => id.length > 0)
+        .slice(0, 10);
+
+      for (const cid of cids) {
+        try {
+          const searchResp = await fetch(
+            `https://googleads.googleapis.com/v18/customers/${cid}/googleAds:searchStream`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "developer-token": adsCfg.developerToken,
+                "Content-Type": "application/json",
+                ...(adsCfg.loginCustomerId
+                  ? { "login-customer-id": normalizeGoogleAdsCustomerId(adsCfg.loginCustomerId) }
+                  : {}),
+              },
+              body: JSON.stringify({
+                query:
+                  "SELECT customer.id, customer.descriptive_name, customer.currency_code, customer.time_zone, customer.manager FROM customer LIMIT 1",
+              }),
+              signal: AbortSignal.timeout(6500),
+            }
+          );
+          if (searchResp.ok) {
+            const batches = (await searchResp.json().catch(() => [])) as Array<{
+              results?: Array<{
+                customer?: {
+                  id?: string | number;
+                  descriptiveName?: string;
+                  currencyCode?: string;
+                  timeZone?: string;
+                  manager?: boolean;
+                };
+              }>;
+            }>;
+            const cObj = batches[0]?.results?.[0]?.customer;
+            const resolvedCid = normalizeGoogleAdsCustomerId(String(cObj?.id ?? cid)) || cid;
+            const isMgr = Boolean(cObj?.manager);
+            discovered.set(resolvedCid, {
+              customerId: resolvedCid,
+              formattedCustomerId: formatGoogleAdsCustomerId(resolvedCid),
+              descriptiveName:
+                cObj?.descriptiveName?.trim() || `Google Ads ${formatGoogleAdsCustomerId(resolvedCid)}`,
+              currencyCode: cObj?.currencyCode || "INR",
+              timeZone: cObj?.timeZone || "Asia/Kolkata",
+              isManager: isMgr,
+            });
+
+            if (isMgr) {
+              // Discover child client ad accounts under this MCC
+              const childResp = await fetch(
+                `https://googleads.googleapis.com/v18/customers/${resolvedCid}/googleAds:searchStream`,
+                {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    "developer-token": adsCfg.developerToken,
+                    "login-customer-id": resolvedCid,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    query:
+                      "SELECT customer_client.id, customer_client.descriptive_name, customer_client.currency_code, customer_client.time_zone, customer_client.manager FROM customer_client WHERE customer_client.status = 'ENABLED' AND customer_client.manager = false LIMIT 20",
+                  }),
+                  signal: AbortSignal.timeout(6500),
+                }
+              );
+              if (childResp.ok) {
+                const childBatches = (await childResp.json().catch(() => [])) as Array<{
+                  results?: Array<{
+                    customerClient?: {
+                      id?: string | number;
+                      descriptiveName?: string;
+                      currencyCode?: string;
+                      timeZone?: string;
+                      manager?: boolean;
+                    };
+                  }>;
+                }>;
+                for (const batch of childBatches) {
+                  for (const row of batch.results ?? []) {
+                    const cc = row.customerClient;
+                    const childCid = normalizeGoogleAdsCustomerId(String(cc?.id ?? ""));
+                    if (!childCid) continue;
+                    discovered.set(childCid, {
+                      customerId: childCid,
+                      formattedCustomerId: formatGoogleAdsCustomerId(childCid),
+                      descriptiveName:
+                        cc?.descriptiveName?.trim() ||
+                        `Google Ads ${formatGoogleAdsCustomerId(childCid)}`,
+                      currencyCode: cc?.currencyCode || "INR",
+                      timeZone: cc?.timeZone || "Asia/Kolkata",
+                      isManager: false,
+                      loginCustomerId: resolvedCid,
+                    });
+                  }
+                }
+              }
+            }
+          } else {
+            discovered.set(cid, {
+              customerId: cid,
+              formattedCustomerId: formatGoogleAdsCustomerId(cid),
+              descriptiveName: `Google Ads ${formatGoogleAdsCustomerId(cid)}`,
+              currencyCode: "INR",
+            });
+          }
+        } catch {
+          discovered.set(cid, {
+            customerId: cid,
+            formattedCustomerId: formatGoogleAdsCustomerId(cid),
+            descriptiveName: `Google Ads ${formatGoogleAdsCustomerId(cid)}`,
+            currencyCode: "INR",
+          });
+        }
+      }
+    }
+  } catch (err) {
+    apiFailureDetail = err instanceof Error ? err.message : String(err);
+  }
+
+  const availableAdCustomers = Array.from(discovered.values());
+  const preferredCid = normalizeGoogleAdsCustomerId(params.preferredCustomerId || meta.customerId);
+  const wsLower = (ws?.name || "").trim().toLowerCase();
+
+  let selected: GoogleAdsCustomerSummary | undefined;
+  if (preferredCid) {
+    selected = availableAdCustomers.find((c) => c.customerId === preferredCid);
+  }
+  if (!selected && wsLower) {
+    selected = availableAdCustomers.find(
+      (c) => !c.isManager && c.descriptiveName.toLowerCase().includes(wsLower)
+    );
+  }
+  if (!selected) {
+    selected =
+      availableAdCustomers.find((c) => !c.isManager && c.currencyCode === "INR") ||
+      availableAdCustomers.find((c) => !c.isManager) ||
+      availableAdCustomers[0];
+  }
+
+  let adsDiscoveryStatus: GoogleAdsDiscoveryStatus;
+  let adsDiscoveryDetail: string;
+
+  if (selected) {
+    adsDiscoveryStatus = "verified_customers";
+    adsDiscoveryDetail =
+      availableAdCustomers.length > 1
+        ? `Discovered ${availableAdCustomers.length} Google Ads accounts — active: ${selected.descriptiveName} (${selected.formattedCustomerId}, ${selected.currencyCode || "INR"}).`
+        : `Connected Google Ads account ${selected.descriptiveName} (${selected.formattedCustomerId}, ${selected.currencyCode || "INR"}).`;
+  } else if (apiFailureDetail) {
+    adsDiscoveryStatus = "api_error";
+    adsDiscoveryDetail = apiFailureDetail;
+  } else {
+    adsDiscoveryStatus = "no_customers_found";
+    adsDiscoveryDetail = `Google account ${emailHint || "signed in"} returned 0 Google Ads Customer IDs. Create a Google Ads account at ads.google.com or use RapidShift Managed Vault mode on the Ads Studio page.`;
+  }
+
+  const nextDisplayName = selected
+    ? `${selected.descriptiveName} (${selected.formattedCustomerId})`
+    : conn.displayName;
+  const nextExternalId = selected?.customerId || conn.externalAccountId;
+  const resolvedLoginCid =
+    selected?.loginCustomerId ||
+    (adsCfg.loginCustomerId ? normalizeGoogleAdsCustomerId(adsCfg.loginCustomerId) : undefined) ||
+    meta.loginCustomerId;
+
+  const nextMeta: ConnectionMetadata = {
+    ...meta,
+    channelKind: "google_ads",
+    customerId: selected?.customerId ?? meta.customerId,
+    formattedCustomerId: selected?.formattedCustomerId ?? meta.formattedCustomerId,
+    loginCustomerId: resolvedLoginCid,
+    accountName: selected?.descriptiveName ?? meta.accountName,
+    currencyCode: selected?.currencyCode ?? meta.currencyCode ?? "INR",
+    timeZone: selected?.timeZone ?? meta.timeZone ?? "Asia/Kolkata",
+    availableAdCustomers:
+      availableAdCustomers.length > 0 ? availableAdCustomers : meta.availableAdCustomers,
+    adsDiscoveryStatus,
+    adsDiscoveryDetail,
+    lastAdsDiscoveredAt: now,
+    lastLiveCheckMessage: adsDiscoveryDetail,
+    lastLiveCheckedAccountName: selected?.descriptiveName || emailHint,
+  };
+
+  db.update(controlSchema.connections)
+    .set({
+      displayName: nextDisplayName,
+      externalAccountId: nextExternalId,
+      metadataJson: JSON.stringify(nextMeta),
+      lastHealthCheckAt: now,
+      updatedAt: now,
+    })
+    .where(eq(controlSchema.connections.id, conn.id))
+    .run();
+
+  if (selected?.customerId) {
+    upsertRoutingEntry("google_ads", selected.customerId, params.workspaceId, now);
+  }
+
+  return {
+    connected: true,
+    connectionId: conn.id,
+    displayName: nextDisplayName,
+    customerId: nextMeta.customerId,
+    formattedCustomerId: nextMeta.formattedCustomerId,
+    loginCustomerId: resolvedLoginCid,
+    currencyCode: nextMeta.currencyCode,
+    availableAdCustomers: nextMeta.availableAdCustomers ?? [],
+    adsDiscoveryStatus,
+    adsDiscoveryDetail,
+  };
+}
+
+export const selectGoogleAdsCustomer = defineAction({
+  key: "connections.google_ads_customer.selected",
+  permission: "connections:manage",
+  input: z.object({
+    connectionId: z.string().min(4),
+    customerId: z.string().trim().min(6),
+  }),
+  summarize: (input) =>
+    `Switched active Google Ads Customer ID to '${formatGoogleAdsCustomerId(input.customerId)}'`,
+  handler: async (ctx, input) => {
+    const cleanCid = normalizeGoogleAdsCustomerId(input.customerId);
+    if (cleanCid.length !== 10) {
+      throw new RslError("RSL-VAL-1001", "Enter a valid 10-digit Google Ads Customer ID (e.g. 123-456-7890).");
+    }
+    const hydrated = await discoverAndHydrateGoogleAdsAccounts({
+      workspaceId: ctx.workspaceId,
+      connectionId: input.connectionId,
+      preferredCustomerId: cleanCid,
+    });
+    if (!hydrated.connected) {
+      throw new RslError("RSL-VAL-1001", "Google Ads connection not found.");
+    }
+    return {
+      connectionId: input.connectionId,
+      displayName: hydrated.displayName,
+      customerId: hydrated.customerId || cleanCid,
+      formattedCustomerId: hydrated.formattedCustomerId || formatGoogleAdsCustomerId(cleanCid),
+    };
+  },
+});
+
+export async function resolveWorkspaceGoogleAdsCredentials(params: {
+  workspaceId: string;
+  billingMode: "direct_client" | "rsl_managed_vault";
+}): Promise<{
+  ok: boolean;
+  mode: "live" | "sandbox";
+  accessToken?: string;
+  customerId?: string;
+  loginCustomerId?: string;
+  developerToken?: string;
+  error?: string;
+}> {
+  const adsCfg = getPlatformGoogleAdsConfig();
+  const oauthCfg = getPlatformGoogleOAuthConfig();
+
+  if (params.billingMode === "rsl_managed_vault") {
+    const managedCid = normalizeGoogleAdsCustomerId(adsCfg.managedCustomerId);
+    if (managedCid && adsCfg.managedRefreshToken && adsCfg.developerToken && oauthCfg.isReady) {
+      if (/^(rsl_sandbox_|sandbox_|test_)/i.test(adsCfg.managedRefreshToken)) {
+        return {
+          ok: true,
+          mode: "sandbox",
+          accessToken: adsCfg.managedRefreshToken,
+          customerId: managedCid,
+          loginCustomerId: normalizeGoogleAdsCustomerId(adsCfg.loginCustomerId) || undefined,
+          developerToken: adsCfg.developerToken,
+        };
+      }
+      try {
+        const body = new URLSearchParams({
+          client_id: oauthCfg.clientId,
+          client_secret: oauthCfg.clientSecret,
+          refresh_token: adsCfg.managedRefreshToken,
+          grant_type: "refresh_token",
+        });
+        const resp = await fetch("https://oauth2.googleapis.com/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: body.toString(),
+          signal: AbortSignal.timeout(8000),
+        });
+        const tokenData = (await resp.json().catch(() => ({}))) as { access_token?: string };
+        if (resp.ok && tokenData.access_token) {
+          return {
+            ok: true,
+            mode: "live",
+            accessToken: tokenData.access_token,
+            customerId: managedCid,
+            loginCustomerId: normalizeGoogleAdsCustomerId(adsCfg.loginCustomerId) || undefined,
+            developerToken: adsCfg.developerToken,
+          };
+        }
+      } catch {
+        // Fall through to workspace's own Google Ads connection if available
+      }
+    }
+  }
+
+  const conn = controlDb()
+    .select()
+    .from(controlSchema.connections)
+    .where(
+      and(
+        eq(controlSchema.connections.workspaceId, params.workspaceId),
+        eq(controlSchema.connections.provider, "google_ads")
+      )
+    )
+    .get();
+
+  if (!conn) {
+    return {
+      ok: false,
+      mode: "live",
+      error:
+        params.billingMode === "rsl_managed_vault"
+          ? "RapidShift Managed Google Ads MCC is not configured yet in Platform Credentials, and no client Google Ads account is connected on Connected Channels."
+          : "Connect your Google Ads account on Connected Channels first (or switch Billing Mode to RSL Managed Vault).",
+    };
+  }
+
+  const meta = parseMetadataSafe(conn.metadataJson);
+  const accessToken = await refreshGoogleConnectionIfNeeded(params.workspaceId, conn.id);
+  if (!accessToken) {
+    return {
+      ok: false,
+      mode: "live",
+      error: "Google Ads OAuth token expired or was revoked. Reconnect Google Ads on Connected Channels.",
+    };
+  }
+
+  const customerId = normalizeGoogleAdsCustomerId(meta.customerId || conn.externalAccountId);
+  if (/^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken)) {
+    return {
+      ok: true,
+      mode: "sandbox",
+      accessToken,
+      customerId: customerId || "1234567890",
+      loginCustomerId: meta.loginCustomerId,
+      developerToken: adsCfg.developerToken || "sandbox_dev_token",
+    };
+  }
+
+  if (!customerId || customerId.length !== 10) {
+    return {
+      ok: false,
+      mode: "live",
+      error: "No 10-digit Google Ads Customer ID is selected yet. Open Connected Channels → Google Ads to select or enter your Customer ID.",
+    };
+  }
+
+  if (!adsCfg.developerToken) {
+    return {
+      ok: false,
+      mode: "live",
+      error: "Google Ads Developer Token is not configured yet in Platform Credentials.",
+    };
+  }
+
+  return {
+    ok: true,
+    mode: "live",
+    accessToken,
+    customerId,
+    loginCustomerId:
+      meta.loginCustomerId || normalizeGoogleAdsCustomerId(adsCfg.loginCustomerId) || undefined,
+    developerToken: adsCfg.developerToken,
+  };
+}
+
+export function resolveWorkspaceMetaAdsCredentials(params: {
+  workspaceId: string;
+  billingMode: "direct_client" | "rsl_managed_vault";
+}): {
+  ok: boolean;
+  mode: "live" | "sandbox";
+  accessToken?: string;
+  adAccountId?: string;
+  pageId?: string;
+  igUserId?: string;
+  pixelId?: string;
+  graphVersion: string;
+  error?: string;
+} {
+  const metaCfg = getPlatformMetaAppConfig();
+  const graphVersion = metaCfg.graphVersion || "v21.0";
+
+  if (params.billingMode === "rsl_managed_vault" && metaCfg.isManagedAdsReady) {
+    const rawAct = metaCfg.managedAdAccountId.replace(/^act_/i, "").trim();
+    const isSb = /^(rsl_sandbox_|sandbox_|test_)/i.test(metaCfg.managedSystemToken);
+    return {
+      ok: true,
+      mode: isSb ? "sandbox" : "live",
+      accessToken: metaCfg.managedSystemToken,
+      adAccountId: `act_${rawAct}`,
+      pageId: metaCfg.managedPageId || undefined,
+      graphVersion,
+    };
+  }
+
+  const allMetaConns = controlDb()
+    .select()
+    .from(controlSchema.connections)
+    .where(
+      and(
+        eq(controlSchema.connections.workspaceId, params.workspaceId),
+        eq(controlSchema.connections.provider, "meta")
+      )
+    )
+    .orderBy(desc(controlSchema.connections.updatedAt))
+    .all();
+
+  let adsConn: (typeof allMetaConns)[number] | undefined;
+  let pageIdFromWorkspace: string | undefined;
+  let igUserIdFromWorkspace: string | undefined;
+  let pixelIdFromWorkspace: string | undefined;
+
+  for (const c of allMetaConns) {
+    const m = parseMetadataSafe(c.metadataJson);
+    if (!pageIdFromWorkspace && m.pageId) pageIdFromWorkspace = m.pageId;
+    if (!igUserIdFromWorkspace && m.igUserId) igUserIdFromWorkspace = m.igUserId;
+    if (!pixelIdFromWorkspace && m.pixelId) pixelIdFromWorkspace = m.pixelId;
+    if (
+      !adsConn &&
+      (m.channelKind === "meta_ads_pixel" ||
+        Boolean(m.adAccountId) ||
+        /^act_\d+$/i.test(c.externalAccountId))
+    ) {
+      adsConn = c;
+    }
+  }
+
+  if (!adsConn) {
+    return {
+      ok: false,
+      mode: "live",
+      graphVersion,
+      error:
+        params.billingMode === "rsl_managed_vault"
+          ? "RapidShift Managed Meta Ad Account is not configured yet in Platform Credentials, and no client Meta Ad Account is connected on Connected Channels."
+          : "Connect your Meta Ad Account (act_...) on Connected Channels first, or switch Billing Mode to RSL Managed Vault.",
+    };
+  }
+
+  const meta = parseMetadataSafe(adsConn.metadataJson);
+  let token = "";
+  try {
+    token = (JSON.parse(decryptEnvelope(adsConn.encryptedTokens)) as StoredTokenPayload).accessToken;
+  } catch {
+    token = "";
+  }
+  if (!token) {
+    return {
+      ok: false,
+      mode: "live",
+      graphVersion,
+      error: "Meta Ad Account access token could not be decrypted. Reconnect Meta Ads on Connected Channels.",
+    };
+  }
+
+  const rawAct = (meta.adAccountId || adsConn.externalAccountId || "")
+    .replace(/^act_/i, "")
+    .trim();
+  const isSb = /^(rsl_sandbox_|sandbox_|test_)/i.test(token);
+
+  if (!rawAct && !isSb) {
+    return {
+      ok: false,
+      mode: "live",
+      graphVersion,
+      error: "Meta connection does not have an Ad Account ID (act_...). Edit or reconnect Meta Ads & Pixel on Connected Channels.",
+    };
+  }
+
+  return {
+    ok: true,
+    mode: isSb ? "sandbox" : "live",
+    accessToken: token,
+    adAccountId: rawAct ? `act_${rawAct}` : "act_1000000001",
+    pageId: meta.pageId || pageIdFromWorkspace || metaCfg.managedPageId || undefined,
+    igUserId: meta.igUserId || igUserIdFromWorkspace || undefined,
+    pixelId: meta.pixelId || pixelIdFromWorkspace || undefined,
+    graphVersion,
+  };
+}
+
+export function resolveWorkspaceChannelCredentials(params: {
+  workspaceId: string;
+  channelKind: "whatsapp_cloud" | "instagram_business" | "facebook_page" | "meta_ads_pixel";
+}): {
+  ok: boolean;
+  mode: "live" | "sandbox";
+  connectionId?: string;
+  accessToken?: string;
+  externalAccountId?: string;
+  metadata?: ConnectionMetadata;
+  graphVersion: string;
+  error?: string;
+} {
+  const metaCfg = getPlatformMetaAppConfig();
+  const graphVersion = metaCfg.graphVersion || "v21.0";
+  const targetProvider = params.channelKind === "whatsapp_cloud" ? "whatsapp" : "meta";
+
+  const rows = controlDb()
+    .select()
+    .from(controlSchema.connections)
+    .where(
+      and(
+        eq(controlSchema.connections.workspaceId, params.workspaceId),
+        eq(controlSchema.connections.provider, targetProvider)
+      )
+    )
+    .orderBy(desc(controlSchema.connections.updatedAt))
+    .all();
+
+  const match =
+    rows.find((r) => parseMetadataSafe(r.metadataJson).channelKind === params.channelKind) ||
+    (params.channelKind === "whatsapp_cloud"
+      ? rows[0]
+      : params.channelKind === "facebook_page"
+        ? rows.find((r) => Boolean(parseMetadataSafe(r.metadataJson).pageId))
+        : params.channelKind === "instagram_business"
+          ? rows.find((r) => Boolean(parseMetadataSafe(r.metadataJson).igUserId))
+          : rows.find((r) => Boolean(parseMetadataSafe(r.metadataJson).pixelId)));
+
+  if (!match) {
+    return {
+      ok: false,
+      mode: "live",
+      graphVersion,
+      error: `No active ${params.channelKind} connection found in Connected Channels.`,
+    };
+  }
+
+  let token = "";
+  try {
+    const parsed = JSON.parse(decryptEnvelope(match.encryptedTokens)) as StoredTokenPayload;
+    token = parsed.accessToken || "";
+  } catch {
+    try {
+      token = decryptEnvelope(match.encryptedTokens).trim();
+    } catch {
+      token = "";
+    }
+  }
+
+  if (!token) {
+    return {
+      ok: false,
+      mode: "live",
+      graphVersion,
+      error: `Stored ${params.channelKind} access token could not be decrypted. Reconnect on Connected Channels.`,
+    };
+  }
+
+  const metadata = parseMetadataSafe(match.metadataJson);
+  const isSb = /^(rsl_sandbox_|sandbox_|test_)/i.test(token);
+
+  return {
+    ok: true,
+    mode: isSb ? "sandbox" : "live",
+    connectionId: match.id,
+    accessToken: token,
+    externalAccountId: match.externalAccountId,
+    metadata,
+    graphVersion,
+  };
+}
+
+/* ============================================================================
+ * Automatic 1-Click Meta (Facebook / Instagram / Ads / WABA) OAuth 2.0 Flow
+ * ============================================================================ */
+
+export type MetaOAuthPurpose =
+  | "meta_all"
+  | "facebook_page"
+  | "instagram_business"
+  | "meta_ads_pixel"
+  | "whatsapp_cloud";
+
+export function isMetaOAuthConfigured(): boolean {
+  const cfg = getPlatformMetaAppConfig();
+  return cfg.isReady && cfg.enableMetaOAuth;
+}
+
+export function buildMetaOAuthAuthorizeUrl(params: {
+  redirectUri: string;
+  state: string;
+  purpose: MetaOAuthPurpose;
+}): string {
+  const cfg = getPlatformMetaAppConfig();
+  if (!cfg.isReady || !cfg.enableMetaOAuth) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Meta 1-click Facebook Login is not configured yet on this platform. You can connect using a System User Token below or configure Meta App ID + Secret in Platform Credentials."
+    );
+  }
+
+  const scopeSet = new Set<string>(["public_profile", "business_management"]);
+  if (params.purpose === "facebook_page" || params.purpose === "meta_all") {
+    scopeSet.add("pages_show_list");
+    scopeSet.add("pages_read_engagement");
+    scopeSet.add("pages_manage_posts");
+    scopeSet.add("pages_messaging");
+    scopeSet.add("leads_retrieval");
+    scopeSet.add("pages_manage_ads");
+  }
+  if (params.purpose === "instagram_business" || params.purpose === "meta_all") {
+    scopeSet.add("pages_show_list");
+    scopeSet.add("instagram_basic");
+    scopeSet.add("instagram_content_publish");
+    scopeSet.add("instagram_manage_messages");
+  }
+  if (params.purpose === "meta_ads_pixel" || params.purpose === "meta_all") {
+    scopeSet.add("ads_management");
+    scopeSet.add("ads_read");
+    scopeSet.add("pages_show_list");
+    scopeSet.add("leads_retrieval");
+  }
+  if (params.purpose === "whatsapp_cloud" || params.purpose === "meta_all") {
+    scopeSet.add("whatsapp_business_management");
+    scopeSet.add("whatsapp_business_messaging");
+  }
+
+  const url = new URL(`https://www.facebook.com/${cfg.graphVersion}/dialog/oauth`);
+  url.searchParams.set("client_id", cfg.appId);
+  url.searchParams.set("redirect_uri", params.redirectUri);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("state", params.state);
+  url.searchParams.set("scope", Array.from(scopeSet).join(","));
+  return url.toString();
+}
+
+export async function completeMetaOAuthConnection(params: {
+  workspaceId: string;
+  actorId: string;
+  code: string;
+  redirectUri: string;
+  purpose: MetaOAuthPurpose;
+}): Promise<{
+  connectedLabels: string[];
+  summaryMessage: string;
+}> {
+  const cfg = getPlatformMetaAppConfig();
+  if (!cfg.isReady) {
+    throw new RslError("RSL-VAL-1001", "Meta App ID and App Secret are not configured on this platform.");
+  }
+
+  const v = cfg.graphVersion || "v21.0";
+  const tokenUrl = new URL(`https://graph.facebook.com/${v}/oauth/access_token`);
+  tokenUrl.searchParams.set("client_id", cfg.appId);
+  tokenUrl.searchParams.set("redirect_uri", params.redirectUri);
+  tokenUrl.searchParams.set("client_secret", cfg.appSecret);
+  tokenUrl.searchParams.set("code", params.code);
+
+  const tokenResp = await fetch(tokenUrl.toString(), {
+    method: "GET",
+    signal: AbortSignal.timeout(10000),
+  });
+  const tokenData = (await tokenResp.json().catch(() => ({}))) as {
+    access_token?: string;
+    expires_in?: number;
+    error?: { message?: string };
+  };
+
+  if (!tokenResp.ok || !tokenData.access_token) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      `Meta OAuth token exchange failed: ${tokenData.error?.message || `HTTP ${tokenResp.status}`}. Ensure '${params.redirectUri}' is added to Valid OAuth Redirect URIs in Meta App Settings.`
+    );
+  }
+
+  // Upgrade short-lived user token to 60-day long-lived user token
+  let userToken = tokenData.access_token;
+  let expiresInSec = Number(tokenData.expires_in || 5_184_000);
+  try {
+    const exchangeUrl = new URL(`https://graph.facebook.com/${v}/oauth/access_token`);
+    exchangeUrl.searchParams.set("grant_type", "fb_exchange_token");
+    exchangeUrl.searchParams.set("client_id", cfg.appId);
+    exchangeUrl.searchParams.set("client_secret", cfg.appSecret);
+    exchangeUrl.searchParams.set("fb_exchange_token", userToken);
+    const exResp = await fetch(exchangeUrl.toString(), { signal: AbortSignal.timeout(8000) });
+    if (exResp.ok) {
+      const exData = (await exResp.json()) as { access_token?: string; expires_in?: number };
+      if (exData.access_token) {
+        userToken = exData.access_token;
+        expiresInSec = Number(exData.expires_in || 5_184_000);
+      }
+    }
+  } catch {
+    // Keep initial userToken if exchange fails
+  }
+
+  const db = controlDb();
+  const now = Date.now();
+  const userExpiresAt = now + Math.max(86_400, expiresInSec) * 1000;
+  const connectedLabels: string[] = [];
+
+  const upsertDiscoveredChannel = (item: {
+    provider: "meta" | "whatsapp";
+    channelKind: ConnectionChannelKind;
+    displayName: string;
+    externalAccountId: string;
+    accessToken: string;
+    expiresAt: number | null;
+    scopes: string[];
+    meta: ConnectionMetadata;
+    assetType: "fb_page" | "ig_account" | "ad_account" | "waba_phone";
+  }) => {
+    const existingRows = db
+      .select()
+      .from(controlSchema.connections)
+      .where(
+        and(
+          eq(controlSchema.connections.workspaceId, params.workspaceId),
+          eq(controlSchema.connections.provider, item.provider)
+        )
+      )
+      .all();
+
+    const existing = existingRows.find((r) => {
+      const m = parseMetadataSafe(r.metadataJson);
+      return (
+        r.externalAccountId === item.externalAccountId ||
+        m.channelKind === item.channelKind
+      );
+    });
+
+    const enc = encryptEnvelope(
+      JSON.stringify({
+        accessToken: item.accessToken,
+        issuedAt: now,
+      } satisfies StoredTokenPayload)
+    );
+    const fullMeta: ConnectionMetadata = {
+      ...item.meta,
+      channelKind: item.channelKind,
+      oauthConnected: true,
+      maskedTokenHint: maskSecretToken(item.accessToken),
+      tokenMode: "live",
+      lastLiveCheckMessage: `Connected via 1-Click Meta Login (${item.displayName}).`,
+      lastLiveCheckedAccountName: item.displayName,
+    };
+
+    const connId = existing?.id ?? newId();
+    if (existing) {
+      db.update(controlSchema.connections)
+        .set({
+          displayName: item.displayName,
+          externalAccountId: item.externalAccountId,
+          encryptedTokens: enc,
+          scopesGrantedJson: JSON.stringify(item.scopes),
+          metadataJson: JSON.stringify(fullMeta),
+          status: "healthy",
+          lastHealthCheckAt: now,
+          expiresAt: item.expiresAt,
+          updatedAt: now,
+        })
+        .where(eq(controlSchema.connections.id, existing.id))
+        .run();
+    } else {
+      db.insert(controlSchema.connections)
+        .values({
+          id: connId,
+          workspaceId: params.workspaceId,
+          provider: item.provider,
+          displayName: item.displayName,
+          externalAccountId: item.externalAccountId,
+          encryptedTokens: enc,
+          scopesGrantedJson: JSON.stringify(item.scopes),
+          metadataJson: JSON.stringify(fullMeta),
+          status: "healthy",
+          lastHealthCheckAt: now,
+          expiresAt: item.expiresAt,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+    }
+
+    upsertRoutingEntry(item.provider, item.externalAccountId, params.workspaceId, now);
+    if (fullMeta.pageId) upsertRoutingEntry("meta", fullMeta.pageId, params.workspaceId, now);
+    if (fullMeta.igUserId) upsertRoutingEntry("meta", fullMeta.igUserId, params.workspaceId, now);
+    if (fullMeta.wabaId) upsertRoutingEntry("whatsapp", fullMeta.wabaId, params.workspaceId, now);
+    if (fullMeta.phoneNumberId) {
+      upsertRoutingEntry("whatsapp", fullMeta.phoneNumberId, params.workspaceId, now);
+    }
+
+    connectedLabels.push(item.displayName);
+  };
+
+  let primaryPageId: string | undefined;
+
+  // 1. Discover Facebook Pages & Linked Instagram Business Accounts
+  if (
+    params.purpose === "facebook_page" ||
+    params.purpose === "instagram_business" ||
+    params.purpose === "meta_ads_pixel" ||
+    params.purpose === "meta_all"
+  ) {
+    try {
+      const pagesResp = await fetch(
+        `https://graph.facebook.com/${v}/me/accounts?fields=id,name,access_token,instagram_business_account{id,username,name}&limit=25`,
+        {
+          headers: { Authorization: `Bearer ${userToken}` },
+          signal: AbortSignal.timeout(8000),
+        }
+      );
+      if (pagesResp.ok) {
+        const pagesBody = (await pagesResp.json()) as {
+          data?: Array<{
+            id: string;
+            name: string;
+            access_token?: string;
+            instagram_business_account?: { id: string; username?: string; name?: string };
+          }>;
+        };
+        const firstPage = pagesBody.data?.[0];
+        if (firstPage?.id) {
+          primaryPageId = firstPage.id;
+          const pagePermToken = firstPage.access_token || userToken;
+          if (params.purpose === "facebook_page" || params.purpose === "meta_all") {
+            upsertDiscoveredChannel({
+              provider: "meta",
+              channelKind: "facebook_page",
+              displayName: firstPage.name,
+              externalAccountId: firstPage.id,
+              accessToken: pagePermToken,
+              expiresAt: null, // Page tokens derived from long-lived user tokens do not expire
+              scopes: ["pages_show_list", "pages_manage_posts", "pages_messaging", "leads_retrieval"],
+              meta: {
+                pageId: firstPage.id,
+                pageName: firstPage.name,
+              },
+              assetType: "fb_page",
+            });
+          }
+
+          const ig = firstPage.instagram_business_account;
+          if (
+            ig?.id &&
+            (params.purpose === "instagram_business" || params.purpose === "meta_all")
+          ) {
+            const igDisplay = ig.username ? `@${ig.username}` : ig.name || `Instagram (${ig.id})`;
+            upsertDiscoveredChannel({
+              provider: "meta",
+              channelKind: "instagram_business",
+              displayName: igDisplay,
+              externalAccountId: ig.id,
+              accessToken: pagePermToken,
+              expiresAt: null,
+              scopes: ["instagram_basic", "instagram_content_publish", "instagram_manage_messages"],
+              meta: {
+                igUserId: ig.id,
+                igHandle: ig.username ? `@${ig.username}` : undefined,
+                linkedPageId: firstPage.id,
+                pageId: firstPage.id,
+              },
+              assetType: "ig_account",
+            });
+          }
+        }
+      }
+    } catch {
+      // Continue to ad account discovery
+    }
+  }
+
+  // 2. Discover Meta Ad Accounts & Pixels
+  if (params.purpose === "meta_ads_pixel" || params.purpose === "meta_all") {
+    try {
+      const adResp = await fetch(
+        `https://graph.facebook.com/${v}/me/adaccounts?fields=id,account_id,name,currency,account_status&limit=25`,
+        {
+          headers: { Authorization: `Bearer ${userToken}` },
+          signal: AbortSignal.timeout(8000),
+        }
+      );
+      if (adResp.ok) {
+        const adBody = (await adResp.json()) as {
+          data?: Array<{
+            id: string;
+            account_id?: string;
+            name?: string;
+            currency?: string;
+            account_status?: number;
+          }>;
+        };
+        const activeAdAcc =
+          adBody.data?.find((a) => a.account_status === 1 && a.currency === "INR") ||
+          adBody.data?.find((a) => a.account_status === 1) ||
+          adBody.data?.[0];
+
+        if (activeAdAcc?.id) {
+          const actId = activeAdAcc.id.startsWith("act_")
+            ? activeAdAcc.id
+            : `act_${activeAdAcc.account_id || activeAdAcc.id}`;
+
+          let discoveredPixelId: string | undefined;
+          try {
+            const pxResp = await fetch(
+              `https://graph.facebook.com/${v}/${actId}/adspixels?fields=id,name&limit=5`,
+              {
+                headers: { Authorization: `Bearer ${userToken}` },
+                signal: AbortSignal.timeout(6000),
+              }
+            );
+            if (pxResp.ok) {
+              const pxBody = (await pxResp.json()) as { data?: Array<{ id: string }> };
+              discoveredPixelId = pxBody.data?.[0]?.id;
+            }
+          } catch {
+            // Optional pixel discovery
+          }
+
+          const adLabel = activeAdAcc.name
+            ? `${activeAdAcc.name} (${actId})`
+            : `Meta Ads (${actId})`;
+
+          upsertDiscoveredChannel({
+            provider: "meta",
+            channelKind: "meta_ads_pixel",
+            displayName: adLabel,
+            externalAccountId: actId,
+            accessToken: userToken,
+            expiresAt: userExpiresAt,
+            scopes: ["ads_management", "ads_read", "business_management", "leads_retrieval"],
+            meta: {
+              adAccountId: actId,
+              pixelId: discoveredPixelId,
+              pageId: primaryPageId,
+              currencyCode: activeAdAcc.currency || "INR",
+            },
+            assetType: "ad_account",
+          });
+        }
+      }
+    } catch {
+      // Continue to WABA discovery
+    }
+  }
+
+  // 3. Discover WhatsApp Business Accounts (WABA)
+  if (params.purpose === "whatsapp_cloud" || params.purpose === "meta_all") {
+    try {
+      const bizResp = await fetch(
+        `https://graph.facebook.com/${v}/me/businesses?fields=id,name,owned_whatsapp_business_accounts{id,name}&limit=10`,
+        {
+          headers: { Authorization: `Bearer ${userToken}` },
+          signal: AbortSignal.timeout(8000),
+        }
+      );
+      if (bizResp.ok) {
+        const bizBody = (await bizResp.json()) as {
+          data?: Array<{
+            id: string;
+            owned_whatsapp_business_accounts?: { data?: Array<{ id: string; name?: string }> };
+          }>;
+        };
+        const firstWaba = bizBody.data
+          ?.flatMap((b) => b.owned_whatsapp_business_accounts?.data ?? [])
+          .find((w) => Boolean(w.id));
+        if (firstWaba?.id) {
+          const phoneResp = await fetch(
+            `https://graph.facebook.com/${v}/${firstWaba.id}/phone_numbers?fields=id,display_phone_number,verified_name&limit=5`,
+            {
+              headers: { Authorization: `Bearer ${userToken}` },
+              signal: AbortSignal.timeout(6000),
+            }
+          );
+          if (phoneResp.ok) {
+            const phoneBody = (await phoneResp.json()) as {
+              data?: Array<{ id: string; display_phone_number?: string; verified_name?: string }>;
+            };
+            const firstPhone = phoneBody.data?.[0];
+            if (firstPhone?.id) {
+              const wabaLabel =
+                firstPhone.verified_name ||
+                firstWaba.name ||
+                `WhatsApp (${firstPhone.display_phone_number || firstPhone.id})`;
+              upsertDiscoveredChannel({
+                provider: "whatsapp",
+                channelKind: "whatsapp_cloud",
+                displayName: wabaLabel,
+                externalAccountId: firstPhone.id,
+                accessToken: userToken,
+                expiresAt: userExpiresAt,
+                scopes: ["whatsapp_business_management", "whatsapp_business_messaging"],
+                meta: {
+                  wabaId: firstWaba.id,
+                  phoneNumberId: firstPhone.id,
+                  displayPhone: firstPhone.display_phone_number,
+                  metaAppId: cfg.appId,
+                },
+                assetType: "waba_phone",
+              });
+            }
+          }
+        }
+      }
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  const summaryMessage =
+    connectedLabels.length > 0
+      ? `Connected via 1-Click Meta Login: ${connectedLabels.join(" • ")}`
+      : "Signed in with Facebook, but Meta returned 0 Pages, Instagram Business accounts, or Ad Accounts assigned to this profile. Ensure your Facebook account is an Admin of your Business Manager assets.";
+
+  appendActionLog({
+    workspaceId: params.workspaceId,
+    actorType: "user",
+    actorId: params.actorId,
+    source: "web",
+    action: "connections.linked",
+    outcome: "success",
+    requestId: newId(),
+    correlationId: newId(),
+    durationMs: 25,
+    summary: summaryMessage,
+  });
+
+  return {
+    connectedLabels,
+    summaryMessage,
+  };
 }

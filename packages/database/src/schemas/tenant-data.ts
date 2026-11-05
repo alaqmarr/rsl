@@ -68,11 +68,14 @@ export const messages = sqliteTable(
     costPaise: integer("cost_paise").notNull().default(0),
     pricingCategory: text("pricing_category"), // utility | marketing | service
     externalMessageId: text("external_message_id"),
+    broadcastId: text("broadcast_id"),
+    errorDetail: text("error_detail"),
     createdAt: integer("created_at").notNull(),
   },
   (t) => [
     index("idx_messages_conv_ts").on(t.conversationId, t.createdAt),
     index("idx_messages_ts").on(t.createdAt),
+    index("idx_messages_ext_id").on(t.externalMessageId),
   ]
 );
 
@@ -152,21 +155,45 @@ export const campaigns = sqliteTable(
   {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
-    channel: text("channel").notNull(), // meta_ads | instagram | facebook | whatsapp_broadcast
-    objective: text("objective").notNull(), // messages | website_sales | lead_generation | awareness
+    channel: text("channel").notNull(), // meta_ads | instagram | facebook | google_ads | whatsapp_broadcast
+    objective: text("objective").notNull(), // messages | website_sales | lead_generation | awareness | search_leads | pmax_local | call_ads
+    billingMode: text("billing_mode").notNull().default("direct_client"), // direct_client | rsl_managed_vault
     status: text("status").notNull().default("active"), // active | paused | completed | draft
     dailyBudgetPaise: integer("daily_budget_paise").notNull().default(0),
+    lifetimeBudgetPaise: integer("lifetime_budget_paise").notNull().default(0),
+    vaultAllocatedPaise: integer("vault_allocated_paise").notNull().default(0),
     totalSpendPaise: integer("total_spend_paise").notNull().default(0),
     attributedRevenuePaise: integer("attributed_revenue_paise").notNull().default(0),
     impressions: integer("impressions").notNull().default(0),
     clicks: integer("clicks").notNull().default(0),
     conversions: integer("conversions").notNull().default(0),
+    externalAccountId: text("external_account_id"),
+    externalCampaignId: text("external_campaign_id"),
+    externalAdsetId: text("external_adset_id"),
+    externalCreativeId: text("external_creative_id"),
+    externalAdId: text("external_ad_id"),
+    headline: text("headline"),
+    primaryText: text("primary_text"),
+    callToAction: text("call_to_action"),
+    destinationUrl: text("destination_url"),
+    whatsappPhoneE164: text("whatsapp_phone_e164"),
+    mediaUrl: text("media_url"),
+    targetLocationsJson: text("target_locations_json").notNull().default("[]"),
+    targetKeywordsJson: text("target_keywords_json").notNull().default("[]"),
+    ageMin: integer("age_min").notNull().default(18),
+    ageMax: integer("age_max").notNull().default(65),
+    syncStatus: text("sync_status").notNull().default("local_draft"), // live_synced | paused_live | cap_exhausted | sandbox_simulated | api_error | local_draft
+    lastSyncMessage: text("last_sync_message"),
+    lastSyncedAt: integer("last_synced_at"),
     startDate: integer("start_date").notNull(),
     endDate: integer("end_date"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
-  (t) => [index("idx_campaigns_status").on(t.status)]
+  (t) => [
+    index("idx_campaigns_status").on(t.status),
+    index("idx_campaigns_ext_id").on(t.externalCampaignId),
+  ]
 );
 
 export const insightSnapshots = sqliteTable(
@@ -196,6 +223,12 @@ export const scheduledPosts = sqliteTable("scheduled_posts", {
   channel: text("channel").notNull(), // instagram_feed | instagram_reel | facebook_page | google_post
   caption: text("caption").notNull(),
   mediaUrl: text("media_url"),
+  mediaType: text("media_type").notNull().default("NONE"), // NONE | IMAGE | VIDEO
+  ctaUrl: text("cta_url"),
+  ctaType: text("cta_type"), // LEARN_MORE | BOOK | ORDER | SHOP | CALL
+  externalPostId: text("external_post_id"),
+  externalPermalink: text("external_permalink"),
+  lastError: text("last_error"),
   scheduledFor: integer("scheduled_for").notNull(),
   status: text("status").notNull().default("scheduled"), // draft | scheduled | published | failed
   publishedAt: integer("published_at"),
@@ -214,6 +247,10 @@ export const pixelEvents = sqliteTable(
     currency: text("currency").notNull().default("INR"),
     matchQualityScore: integer("match_quality_score").notNull().default(80), // 0-100
     customerHash: text("customer_hash"),
+    sourceUrl: text("source_url"),
+    orderRef: text("order_ref"),
+    capiStatus: text("capi_status").notNull().default("local_only"), // sent_live | sandbox_simulated | failed | local_only
+    capiResponseDetail: text("capi_response_detail"),
     occurredAt: integer("occurred_at").notNull(),
   },
   (t) => [index("idx_pixel_occurred").on(t.occurredAt)]

@@ -22,6 +22,7 @@ export type EntityTypePrefix =
   | "inv"   // GST Invoice
   | "pay"   // Payment
   | "ldg"   // Wallet Ledger Entry
+  | "adl"   // Ad Spend Vault Ledger Entry
   | "usg"   // Usage Event
   | "con"   // External Connection
   | "ast"   // Connected Asset

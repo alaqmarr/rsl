@@ -46,14 +46,19 @@ import {
   hasActiveEntitlement,
   normalizeBillingCycle,
   requireEntitlement,
+  submitAdSpendRechargeRequest,
   submitBundlePlanRequest,
   submitServicePlanRequest,
   submitWalletRechargeRequest,
+  verifyRazorpayCheckoutAndCreditWallet,
 } from "@rsl/billing";
 import {
   disconnectExternalConnection,
+  formatGoogleAdsCustomerId,
   linkExternalConnection,
+  normalizeGoogleAdsCustomerId,
   rotateWorkspaceWebhookVerifyToken,
+  selectGoogleAdsCustomer,
   selectGoogleBusinessLocation,
   updateExternalConnection,
   uploadFileToWorkspaceGoogleDrive,
@@ -66,10 +71,12 @@ import {
   resolveEndpointsFromHeaders,
   RslError,
   rupeesToPaise,
+  signHmac,
 } from "@rsl/core";
-import { controlSchema } from "@rsl/database";
+import { controlSchema, tenantDataSchema } from "@rsl/database";
 import { recordDocsFeedback } from "@rsl/docs";
 import {
+  createGoogleAdCampaign,
   generateSmartReviewDraft,
   recordGoogleReview,
   replyToGoogleReview,
@@ -97,7 +104,9 @@ import {
   recordCampaignDailySnapshot,
   recordWebsiteSalesEvent,
   scheduleSocialPost,
+  syncAllWorkspaceAdCampaignsInsights,
   toggleCampaignStatus,
+  updateCampaignBudget,
 } from "@rsl/meta";
 import {
   completePasswordReset,
@@ -539,9 +548,63 @@ export async function submitRechargeRequestAction(formData: FormData) {
   );
 }
 
+export async function submitAdSpendRechargeRequestAction(formData: FormData) {
+  const session = await requireWebSession();
+  const rupees = Number(formData.get("amountRupees") || 0);
+  const paymentMethod = (String(formData.get("paymentMethod") || "upi") === "bank_transfer"
+    ? "bank_transfer"
+    : "upi") as "upi" | "bank_transfer";
+  const utrOrReference = String(formData.get("utrOrReference") || "").trim();
+  const paise = rupeesToPaise(rupees);
+
+  try {
+    authorize(session.ctx, "billing:manage");
+    submitAdSpendRechargeRequest({
+      workspaceId: session.workspace.id,
+      amountPaise: paise,
+      utrOrReference,
+      paymentMethod,
+    });
+
+    appendActionLog({
+      workspaceId: session.workspace.id,
+      actorType: session.ctx.actorType,
+      actorId: session.user.id,
+      impersonatorId: session.impersonatorStaffId,
+      source: "web",
+      action: "billing.ad_vault.topup",
+      outcome: "success",
+      requestId: session.ctx.requestId,
+      correlationId: session.ctx.correlationId,
+      durationMs: 5,
+      summary: `Submitted ${formatInr(paise)} Managed Ad Spend Vault deposit (${paymentMethod.toUpperCase()} Ref: ${utrOrReference})`,
+    });
+
+    await sendBillingNotification({
+      workspaceId: session.workspace.id,
+      businessName: session.workspace.name,
+      recipientEmail: session.user.email,
+      headline: `Ad Spend Vault Deposit Received (${formatInr(paise)})`,
+      bodyText: `We have received your ${paymentMethod.toUpperCase()} reference (${utrOrReference}) for your 0-overdraft Managed Ad Spend Vault. Your ad funds will unlock immediately once verified.`,
+      walletBalanceFormatted: "Pending Verification",
+    }).catch(() => undefined);
+  } catch (err) {
+    return goWithError("/billing?tab=wallet", friendlyMessage(err));
+  }
+
+  return goWithNotice(
+    "/billing?tab=wallet",
+    `Ad Spend Vault deposit request for ${formatInr(paise)} submitted (Ref: ${utrOrReference}). Funds unlock for Meta & Google Ads once verified.`
+  );
+}
+
 export async function createOnlineRazorpayOrderAction(formData: FormData) {
   const session = await requireWebSession();
   const rupees = Number(formData.get("amountRupees") || 0);
+  const purpose =
+    String(formData.get("purpose") || "wallet_topup") === "ad_spend_topup"
+      ? ("ad_spend_topup" as const)
+      : ("wallet_topup" as const);
   const paise = rupeesToPaise(rupees);
 
   let orderOut: { orderId: string };
@@ -550,15 +613,119 @@ export async function createOnlineRazorpayOrderAction(formData: FormData) {
     orderOut = await createRazorpayOrderForWallet({
       workspaceId: session.workspace.id,
       amountPaise: paise,
+      purpose,
     });
   } catch (err) {
-    return goWithError("/billing", friendlyMessage(err));
+    return goWithError("/billing?tab=wallet", friendlyMessage(err));
   }
 
   return goWithNotice(
-    `/billing?orderId=${encodeURIComponent(orderOut.orderId)}`,
-    "Online payment order created. Complete payment to credit your wallet."
+    `/billing?tab=wallet&orderId=${encodeURIComponent(orderOut.orderId)}`,
+    "Online payment order created. Complete payment to credit your account."
   );
+}
+
+export async function createRazorpayCheckoutOrderJsonAction(input: {
+  amountRupees: number;
+  purpose?: "wallet_topup" | "ad_spend_topup";
+}): Promise<
+  | {
+      ok: true;
+      orderId: string;
+      keyId: string;
+      amountWithGstPaise: number;
+      purpose: "wallet_topup" | "ad_spend_topup";
+      businessName: string;
+      prefill: { name: string; email: string; contact: string };
+    }
+  | { ok: false; error: string }
+> {
+  try {
+    const session = await requireWebSession();
+    authorize(session.ctx, "billing:manage");
+    const purpose = input.purpose === "ad_spend_topup" ? "ad_spend_topup" : "wallet_topup";
+    const paise = rupeesToPaise(Number(input.amountRupees || 0));
+    const order = await createRazorpayOrderForWallet({
+      workspaceId: session.workspace.id,
+      amountPaise: paise,
+      purpose,
+    });
+    return {
+      ok: true,
+      orderId: order.orderId,
+      keyId: order.keyId,
+      amountWithGstPaise: order.amountWithGstPaise,
+      purpose: order.purpose,
+      businessName: session.workspace.name,
+      prefill: {
+        name: session.user.name || session.workspace.name,
+        email: session.user.email || "",
+        contact: session.workspace.businessPhone || "",
+      },
+    };
+  } catch (err) {
+    return { ok: false, error: friendlyMessage(err) };
+  }
+}
+
+export async function verifyRazorpayPaymentJsonAction(input: {
+  orderId: string;
+  paymentId: string;
+  signatureHex: string;
+}): Promise<
+  | {
+      ok: true;
+      balancePaise: number;
+      invoiceNumber?: string;
+      purpose: "wallet_topup" | "ad_spend_topup";
+      message: string;
+    }
+  | { ok: false; error: string }
+> {
+  try {
+    const session = await requireWebSession();
+    authorize(session.ctx, "billing:manage");
+    const out = verifyRazorpayCheckoutAndCreditWallet({
+      workspaceId: session.workspace.id,
+      orderId: String(input.orderId || "").trim(),
+      paymentId: String(input.paymentId || "").trim(),
+      signatureHex: String(input.signatureHex || "").trim(),
+      actorId: session.user.id,
+    });
+
+    appendActionLog({
+      workspaceId: session.workspace.id,
+      actorType: session.ctx.actorType,
+      actorId: session.user.id,
+      impersonatorId: session.impersonatorStaffId,
+      source: "web",
+      action:
+        out.purpose === "ad_spend_topup"
+          ? "billing.ad_vault.razorpay_verified"
+          : "billing.wallet.razorpay_verified",
+      outcome: "success",
+      requestId: session.ctx.requestId,
+      correlationId: session.ctx.correlationId,
+      durationMs: 6,
+      summary: `Verified Razorpay payment ${input.paymentId} (${out.purpose}) — Voucher ${out.invoiceNumber || "issued"}`,
+    });
+
+    revalidatePath("/billing");
+    revalidatePath("/campaigns");
+
+    return {
+      ok: true,
+      balancePaise: out.balancePaise,
+      invoiceNumber: out.invoiceNumber,
+      purpose: out.purpose,
+      message:
+        out.purpose === "ad_spend_topup"
+          ? `Ad Spend Vault credited! New available ad balance: ${formatInr(out.balancePaise, { showDecimals: true })}`
+          : `Prepaid Wallet credited! New wallet balance: ${formatInr(out.balancePaise, { showDecimals: true })}`,
+    };
+  } catch (err) {
+    return { ok: false, error: friendlyMessage(err) };
+  }
 }
 
 /**
@@ -1537,34 +1704,241 @@ export async function removeSuppressionAction(formData: FormData) {
 // Campaigns, Social Posts, Pixel & Reviews
 // ==========================================
 
+async function resolveUploadedMediaFromFormData(params: {
+  formData: FormData;
+  workspaceId: string;
+  actorId: string;
+}): Promise<{
+  mediaUrl?: string;
+  mediaType: "none" | "image" | "video";
+}> {
+  const explicitUrl = String(params.formData.get("mediaUrl") || "").trim();
+  const explicitType = String(params.formData.get("mediaType") || "").trim();
+  const maybeFile = params.formData.get("mediaFile");
+
+  if (maybeFile instanceof File && maybeFile.size > 0) {
+    if (maybeFile.size > 25 * 1024 * 1024) {
+      throw new RslError("RSL-VAL-1001", "Uploaded creative file must be 25 MB or smaller.");
+    }
+    const mime = (maybeFile.type || "image/jpeg").toLowerCase();
+    const isVideo = mime.startsWith("video/") || /\.(mp4|mov|webm)$/i.test(maybeFile.name);
+    const bytes = Buffer.from(await maybeFile.arrayBuffer());
+    const stored = await putWorkspaceObject({
+      workspaceId: params.workspaceId,
+      category: "media",
+      fileName: maybeFile.name || (isVideo ? "creative.mp4" : "creative.jpg"),
+      mimeType: mime,
+      bytes,
+      actorId: params.actorId,
+    });
+    const ep = resolveEndpointsFromHeaders(await headers());
+    const sig = signHmac(
+      `media:${params.workspaceId}:${stored.id}`,
+      getEnv().KMS_MASTER_KEY
+    );
+    return {
+      mediaUrl: `${ep.effectiveAppBaseUrl}/api/media/${encodeURIComponent(params.workspaceId)}/${encodeURIComponent(stored.id)}?sig=${encodeURIComponent(sig)}`,
+      mediaType: isVideo ? "video" : "image",
+    };
+  }
+
+  if (explicitUrl) {
+    const inferredVideo =
+      explicitType === "video" || /\.(mp4|mov|webm)(\?|$)/i.test(explicitUrl);
+    return {
+      mediaUrl: explicitUrl,
+      mediaType: inferredVideo ? "video" : "image",
+    };
+  }
+
+  return { mediaType: "none" };
+}
+
 export async function createCampaignAction(formData: FormData) {
   const session = await requireWebSession();
-  await enforceFeaturePaidEntitlement(session.workspace.id, "meta.ads", "/campaigns");
+  const channelRaw = String(formData.get("channel") || "meta_ads").trim();
+  const billingMode =
+    String(formData.get("billingMode") || "direct_client") === "rsl_managed_vault"
+      ? "rsl_managed_vault"
+      : "direct_client";
+
+  const requiredServiceKey = channelRaw === "google_ads" ? "google.ads" : "meta.ads";
+  await enforceFeaturePaidEntitlement(session.workspace.id, requiredServiceKey, "/campaigns");
+
+  let uploadedMedia: { mediaUrl?: string; mediaType: "none" | "image" | "video" };
+  try {
+    uploadedMedia = await resolveUploadedMediaFromFormData({
+      formData,
+      workspaceId: session.workspace.id,
+      actorId: session.user.id,
+    });
+  } catch (err) {
+    return goWithError(
+      "/campaigns",
+      err instanceof Error ? err.message : "Could not upload creative file."
+    );
+  }
+
+  const targetLocationsRaw = String(formData.get("targetLocations") || "").trim();
+  const targetLocations = targetLocationsRaw
+    ? targetLocationsRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : ["India"];
+
+  const targetKeywordsRaw = String(formData.get("targetKeywords") || "").trim();
+  const targetKeywords = targetKeywordsRaw
+    ? targetKeywordsRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
+
+  const allowDraftWhenDisconnected = formData.get("allowDraftWhenDisconnected") === "on";
+  const vaultAllocationRupees = Number(formData.get("vaultAllocationRupees") || 0);
+
+  if (channelRaw === "google_ads") {
+    const gObjectiveRaw = String(formData.get("googleObjective") || formData.get("objective") || "search_leads");
+    const googleObjective = (
+      ["search_leads", "performance_max", "call_ads", "website_sales"].includes(gObjectiveRaw)
+        ? gObjectiveRaw
+        : "search_leads"
+    ) as "search_leads" | "performance_max" | "call_ads" | "website_sales";
+
+    const res = await createGoogleAdCampaign(session.ctx, {
+      name: String(formData.get("name") || ""),
+      objective: googleObjective,
+      billingMode,
+      dailyBudgetRupees: Number(formData.get("dailyBudgetRupees") || 0),
+      vaultAllocationRupees: vaultAllocationRupees > 0 ? vaultAllocationRupees : undefined,
+      headline: String(formData.get("headline") || "") || undefined,
+      primaryText: String(formData.get("primaryText") || "") || undefined,
+      callToAction: String(formData.get("callToAction") || "") || undefined,
+      destinationUrl: String(formData.get("destinationUrl") || "") || undefined,
+      whatsappPhoneE164: String(formData.get("whatsappPhoneE164") || "") || undefined,
+      mediaUrl: uploadedMedia.mediaUrl,
+      targetLocations,
+      targetKeywords,
+      startDateIso: String(formData.get("startDateIso") || new Date().toISOString().slice(0, 10)),
+      allowDraftWhenDisconnected,
+    });
+    if (!res.ok) return goWithError("/campaigns", res.error.message);
+    return goWithNotice(
+      "/campaigns",
+      res.data.syncStatus === "local_draft"
+        ? "Google Ads campaign saved as local draft — connect Google Ads on Connected Channels to push live."
+        : "Google Ads campaign launched!"
+    );
+  }
+
+  const mObjectiveRaw = String(formData.get("objective") || "messages");
+  const metaObjective = (
+    ["messages", "website_sales", "lead_generation", "awareness"].includes(mObjectiveRaw)
+      ? mObjectiveRaw
+      : "messages"
+  ) as "messages" | "website_sales" | "lead_generation" | "awareness";
+
   const res = await createAdCampaign(session.ctx, {
     name: String(formData.get("name") || ""),
-    channel: String(formData.get("channel") || "meta_ads") as "meta_ads" | "instagram" | "facebook",
-    objective: String(formData.get("objective") || "messages") as "messages" | "website_sales" | "lead_generation" | "awareness",
+    channel: (["meta_ads", "instagram", "facebook"].includes(channelRaw)
+      ? channelRaw
+      : "meta_ads") as "meta_ads" | "instagram" | "facebook",
+    objective: metaObjective,
+    billingMode,
     dailyBudgetRupees: Number(formData.get("dailyBudgetRupees") || 0),
+    vaultAllocationRupees: vaultAllocationRupees > 0 ? vaultAllocationRupees : undefined,
+    headline: String(formData.get("headline") || "") || undefined,
+    primaryText: String(formData.get("primaryText") || "") || undefined,
+    callToAction: String(formData.get("callToAction") || "") || undefined,
+    destinationUrl: String(formData.get("destinationUrl") || "") || undefined,
+    whatsappPhoneE164: String(formData.get("whatsappPhoneE164") || "") || undefined,
+    mediaUrl: uploadedMedia.mediaUrl,
+    targetLocations,
+    ageMin: Number(formData.get("ageMin") || 18),
+    ageMax: Number(formData.get("ageMax") || 55),
     startDateIso: String(formData.get("startDateIso") || new Date().toISOString().slice(0, 10)),
+    allowDraftWhenDisconnected,
   });
   if (!res.ok) return goWithError("/campaigns", res.error.message);
-  return goWithNotice("/campaigns", "Ad campaign created.");
+  return goWithNotice(
+    "/campaigns",
+    res.data.syncStatus === "local_draft"
+      ? "Meta campaign saved as local draft — connect your Meta Ad Account on Connected Channels to push live."
+      : "Meta Ads campaign launched!"
+  );
 }
 
 export async function toggleCampaignAction(formData: FormData) {
   const session = await requireWebSession();
-  await enforceFeaturePaidEntitlement(session.workspace.id, "meta.ads", "/campaigns");
+  const campaignId = String(formData.get("campaignId") || "");
+  const channelHint = String(formData.get("channel") || "");
+  const requiredKey = channelHint === "google_ads" ? "google.ads" : "meta.ads";
+  if (
+    !hasActiveEntitlement(session.workspace.id, "meta.ads") &&
+    !hasActiveEntitlement(session.workspace.id, "google.ads")
+  ) {
+    await enforceFeaturePaidEntitlement(session.workspace.id, requiredKey, "/campaigns");
+  }
   const res = await toggleCampaignStatus(session.ctx, {
-    campaignId: String(formData.get("campaignId") || ""),
+    campaignId,
     status: String(formData.get("status") || "paused") as "active" | "paused" | "completed",
   });
   if (!res.ok) return goWithError("/campaigns", res.error.message);
-  return goWithNotice("/campaigns", "Updated campaign status.");
+  const released = (res.data as { releasedPaise?: number }).releasedPaise ?? 0;
+  return goWithNotice(
+    "/campaigns",
+    released > 0
+      ? `Campaign completed and ${formatInr(released, { showDecimals: true })} unspent funds refunded to your Ad Spend Vault.`
+      : "Updated campaign status."
+  );
+}
+
+export async function updateCampaignBudgetAction(formData: FormData) {
+  const session = await requireWebSession();
+  if (
+    !hasActiveEntitlement(session.workspace.id, "meta.ads") &&
+    !hasActiveEntitlement(session.workspace.id, "google.ads")
+  ) {
+    await enforceFeaturePaidEntitlement(session.workspace.id, "meta.ads", "/campaigns");
+  }
+  const extraVault = Number(formData.get("additionalVaultAllocationRupees") || 0);
+  const res = await updateCampaignBudget(session.ctx, {
+    campaignId: String(formData.get("campaignId") || ""),
+    dailyBudgetRupees: Number(formData.get("dailyBudgetRupees") || 0),
+    additionalVaultAllocationRupees: extraVault > 0 ? extraVault : undefined,
+  });
+  if (!res.ok) return goWithError("/campaigns", res.error.message);
+  return goWithNotice("/campaigns", "Updated campaign budget.");
+}
+
+export async function syncLiveAdsInsightsAction() {
+  const session = await requireWebSession();
+  if (
+    !hasActiveEntitlement(session.workspace.id, "meta.ads") &&
+    !hasActiveEntitlement(session.workspace.id, "google.ads")
+  ) {
+    await enforceFeaturePaidEntitlement(session.workspace.id, "meta.ads", "/campaigns");
+  }
+  const res = await syncAllWorkspaceAdCampaignsInsights(session.workspace.id);
+  revalidatePath("/campaigns");
+  revalidatePath("/analytics");
+  return goWithNotice(
+    "/campaigns",
+    res.syncedCampaigns > 0
+      ? `Synced live ad metrics for ${res.syncedCampaigns} campaign(s)${res.autoPausedVaultCampaigns > 0 ? ` (${res.autoPausedVaultCampaigns} auto-paused at Vault cap)` : ""}.`
+      : "Checked Meta & Google Ads APIs — no new live campaign snapshots reported yet."
+  );
 }
 
 export async function recordCampaignSnapshotAction(formData: FormData) {
   const session = await requireWebSession();
-  await enforceFeaturePaidEntitlement(session.workspace.id, "meta.ads", "/campaigns");
+  if (
+    !hasActiveEntitlement(session.workspace.id, "meta.ads") &&
+    !hasActiveEntitlement(session.workspace.id, "google.ads")
+  ) {
+    await enforceFeaturePaidEntitlement(session.workspace.id, "meta.ads", "/campaigns");
+  }
   const res = await recordCampaignDailySnapshot(session.ctx, {
     campaignId: String(formData.get("campaignId") || ""),
     dayKey: String(formData.get("dayKey") || new Date().toISOString().slice(0, 10)),
@@ -1575,7 +1949,12 @@ export async function recordCampaignSnapshotAction(formData: FormData) {
     conversions: Number(formData.get("conversions") || 0),
   });
   if (!res.ok) return goWithError("/campaigns", res.error.message);
-  return goWithNotice("/campaigns", "Daily campaign results saved.");
+  return goWithNotice(
+    "/campaigns",
+    res.data.capReached
+      ? "Daily metrics saved — campaign auto-paused at 100% of Managed Ad Spend Vault cap."
+      : "Daily campaign results saved."
+  );
 }
 
 export async function schedulePostAction(formData: FormData) {
@@ -1592,14 +1971,42 @@ export async function schedulePostAction(formData: FormData) {
         ? "google.reviews"
         : "meta.instagram";
   await enforceFeaturePaidEntitlement(session.workspace.id, requiredKey, "/campaigns");
+
+  let uploadedMedia: { mediaUrl?: string; mediaType: "none" | "image" | "video" };
+  try {
+    uploadedMedia = await resolveUploadedMediaFromFormData({
+      formData,
+      workspaceId: session.workspace.id,
+      actorId: session.user.id,
+    });
+  } catch (err) {
+    return goWithError(
+      "/campaigns",
+      err instanceof Error ? err.message : "Could not upload social post media."
+    );
+  }
+
+  const publishNow = formData.get("publishNow") === "on";
   const res = await scheduleSocialPost(session.ctx, {
     channel,
     caption: String(formData.get("caption") || ""),
     scheduledForIso: String(formData.get("scheduledForIso") || new Date().toISOString()),
-    publishNow: formData.get("publishNow") === "on",
+    publishNow,
+    mediaUrl: uploadedMedia.mediaUrl,
+    mediaType: uploadedMedia.mediaType,
+    ctaUrl: String(formData.get("ctaUrl") || "") || undefined,
+    ctaType: String(formData.get("ctaType") || "") || undefined,
+    requireLiveConnection: publishNow && formData.get("requireLiveConnection") === "on",
   });
   if (!res.ok) return goWithError("/campaigns", res.error.message);
-  return goWithNotice("/campaigns", "Social post saved.");
+  return goWithNotice(
+    "/campaigns",
+    publishNow
+      ? res.data.externalPostId
+        ? `Published live to ${channel.replace(/_/g, " ")}!`
+        : "Social post saved as published (connect channel on Connected Channels for live external posting)."
+      : "Social post scheduled — background publisher will post automatically at scheduled time."
+  );
 }
 
 export async function publishScheduledPostAction(formData: FormData) {
@@ -1608,7 +2015,12 @@ export async function publishScheduledPostAction(formData: FormData) {
     postId: String(formData.get("postId") || ""),
   });
   if (!res.ok) return goWithError("/campaigns", res.error.message);
-  return goWithNotice("/campaigns", "Scheduled post published immediately.");
+  return goWithNotice(
+    "/campaigns",
+    res.data.externalPostId
+      ? "Published live to connected channel!"
+      : "Scheduled post marked published."
+  );
 }
 
 export async function deleteScheduledPostAction(formData: FormData) {
@@ -1625,16 +2037,24 @@ export async function recordPixelEventAction(formData: FormData) {
   await enforceFeaturePaidEntitlement(session.workspace.id, "meta.pixel", "/campaigns");
   const res = await recordWebsiteSalesEvent(session.ctx, {
     eventId: String(formData.get("eventId") || ""),
-    eventName: String(formData.get("eventName") || "Purchase") as "Purchase" | "Lead" | "AddToCart" | "ViewContent",
+    eventName: String(formData.get("eventName") || "Purchase") as
+      | "Purchase"
+      | "Lead"
+      | "AddToCart"
+      | "ViewContent",
     valueRupees: Number(formData.get("valueRupees") || 0),
     customerIdentifier: String(formData.get("customerIdentifier") || "") || undefined,
+    sourceUrl: String(formData.get("sourceUrl") || "") || undefined,
+    orderRef: String(formData.get("orderRef") || "") || undefined,
   });
   if (!res.ok) return goWithError("/campaigns", res.error.message);
   return goWithNotice(
     "/campaigns",
     res.data.deduplicated
       ? "Order ID already recorded — duplicate entry skipped."
-      : "Website order event recorded."
+      : res.data.capiStatus === "sent_live"
+        ? "Website conversion recorded and dispatched live to Meta Conversions API (CAPI)!"
+        : "Website conversion event recorded."
   );
 }
 
@@ -2669,14 +3089,15 @@ export async function switchWorkspaceJsonAction(formData: FormData): Promise<{
 const CHANNEL_DEFAULTS: Record<
   ConnectionChannelKind,
   {
-    provider: "whatsapp" | "meta" | "google" | "gdrive";
+    provider: "whatsapp" | "meta" | "google" | "gdrive" | "google_ads";
     assetType?:
       | "fb_page"
       | "ig_account"
       | "ad_account"
       | "pixel"
       | "waba_phone"
-      | "gbp_location";
+      | "gbp_location"
+      | "google_ad_customer";
     scopes: string[];
   }
 > = {
@@ -2715,6 +3136,11 @@ const CHANNEL_DEFAULTS: Record<
     provider: "meta",
     assetType: "ad_account",
     scopes: ["ads_read", "ads_management", "business_management"],
+  },
+  google_ads: {
+    provider: "google_ads",
+    assetType: "google_ad_customer",
+    scopes: ["https://www.googleapis.com/auth/adwords"],
   },
   google_business: {
     provider: "google",
@@ -2758,6 +3184,13 @@ export async function connectChannelJsonAction(formData: FormData): Promise<{
     const igHandle = String(formData.get("igHandle") || "").trim() || undefined;
     const adAccountId = String(formData.get("adAccountId") || "").trim() || undefined;
     const pixelId = String(formData.get("pixelId") || "").trim() || undefined;
+    const rawCustomerId = String(formData.get("customerId") || "").trim();
+    const customerId = rawCustomerId ? normalizeGoogleAdsCustomerId(rawCustomerId) : undefined;
+    const formattedCustomerId = customerId ? formatGoogleAdsCustomerId(customerId) : undefined;
+    const rawLoginCustomerId = String(formData.get("loginCustomerId") || "").trim();
+    const loginCustomerId = rawLoginCustomerId
+      ? normalizeGoogleAdsCustomerId(rawLoginCustomerId)
+      : undefined;
     const locationId = String(formData.get("locationId") || "").trim() || undefined;
     const accountId = String(formData.get("accountId") || "").trim() || undefined;
     const storeName = String(formData.get("storeName") || "").trim() || undefined;
@@ -2772,12 +3205,13 @@ export async function connectChannelJsonAction(formData: FormData): Promise<{
       pageId ||
       adAccountId ||
       pixelId ||
+      customerId ||
       locationId ||
       folderId ||
       "";
 
     const assetName =
-      displayPhone || igHandle || pageName || storeName || driveEmail || displayName;
+      displayPhone || igHandle || pageName || storeName || formattedCustomerId || driveEmail || displayName;
 
     const linked = await linkExternalConnection(session.ctx, {
       provider: cfg.provider,
@@ -2801,6 +3235,9 @@ export async function connectChannelJsonAction(formData: FormData): Promise<{
         igHandle,
         adAccountId,
         pixelId,
+        customerId,
+        formattedCustomerId,
+        loginCustomerId,
         locationId,
         accountId,
         storeName,
@@ -2874,6 +3311,8 @@ export async function updateConnectionJsonAction(formData: FormData): Promise<{
       "igHandle",
       "adAccountId",
       "pixelId",
+      "customerId",
+      "loginCustomerId",
       "locationId",
       "accountId",
       "storeName",
@@ -3016,6 +3455,33 @@ export async function selectGoogleBusinessLocationJsonAction(formData: FormData)
         synced.ok && synced.data.ok
           ? `Active location set to '${selected.data.storeName || selected.data.displayName}'. ${synced.data.message}`
           : `Active location set to '${selected.data.storeName || selected.data.displayName}'.`,
+    };
+  } catch (err) {
+    return { ok: false, message: friendlyMessage(err) };
+  }
+}
+
+export async function selectGoogleAdsCustomerJsonAction(formData: FormData): Promise<{
+  ok: boolean;
+  message: string;
+}> {
+  try {
+    const session = await requireWebSession();
+    const connectionId = String(formData.get("connectionId") || "").trim();
+    const customerId = String(formData.get("customerId") || "").trim();
+    const selected = await selectGoogleAdsCustomer(session.ctx, {
+      connectionId,
+      customerId,
+    });
+    if (!selected.ok) {
+      return { ok: false, message: selected.error.message };
+    }
+    revalidatePath("/connections");
+    revalidatePath("/campaigns");
+    revalidatePath("/settings/tokens");
+    return {
+      ok: true,
+      message: `Active Google Ads account set to '${selected.data.displayName}' (${selected.data.formattedCustomerId}).`,
     };
   } catch (err) {
     return { ok: false, message: friendlyMessage(err) };

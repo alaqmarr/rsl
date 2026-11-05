@@ -3,25 +3,29 @@ import http from "node:http";
 import * as Sentry from "@sentry/node";
 import { Worker } from "bullmq";
 import { Cron } from "croner";
-import { and, eq, lte, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { createSignedEncryptedBackup, optimizeTenantDatabase } from "@rsl/backup";
-import { sweepAutomaticBillingReminders } from "@rsl/billing";
+import { hasActiveEntitlement, sweepAutomaticBillingReminders } from "@rsl/billing";
+import { uploadFileToWorkspaceGoogleDrive } from "@rsl/connections";
 import { getEnv } from "@rsl/core";
 import { controlSchema, tenantDataSchema } from "@rsl/database";
 import { anchorTenantLogsForToday, appendActionLog, getDiagnosticLogger } from "@rsl/logging";
+import {
+  sweepDueScheduledPostsAsync,
+  syncAllWorkspaceAdCampaignsInsights,
+} from "@rsl/meta";
 import {
   ensureSslProvisionProcessorRegistered,
   getRedisConnection,
   isRedisConfigured,
   JobEnvelopeSchema,
-  markSendGuardOutcome,
   processDueSqliteOutboxForTenant,
   QUEUE_REGISTRY,
   registerJobProcessor,
-  reserveSendGuard,
   sweepDueSslProvisioningJobs,
   type WorkerLane,
 } from "@rsl/queue";
+import { putWorkspaceObject } from "@rsl/storage";
 import {
   closeAllHandlesForShutdown,
   controlDb,
@@ -37,6 +41,7 @@ import {
 import {
   ensureWhatsAppBroadcastProcessorRegistered,
   executeWhatsAppTemplateSend,
+  sendWhatsAppDirectTextJob,
 } from "@rsl/whatsapp";
 
 const env = getEnv();
@@ -67,6 +72,49 @@ function resolveWorkerHealthPort(): number {
     throw new Error(`Worker health port ${raw} violates mandatory 4500-4600 port range policy.`);
   }
   return raw;
+}
+
+async function createAndUploadOffsiteWorkspaceBackup(params: {
+  workspaceId: string;
+  actorType: "user" | "system" | "staff";
+  actorId: string;
+  correlationId: string;
+  requestId: string;
+  label: string;
+}): Promise<void> {
+  const res = await createSignedEncryptedBackup(
+    {
+      workspaceId: params.workspaceId,
+      actorType: params.actorType,
+      actorId: params.actorId,
+      roleSlug: "owner",
+      correlationId: params.correlationId,
+      requestId: params.requestId,
+    },
+    {
+      destinationLabel: params.label,
+    }
+  );
+  if (!res.ok) return;
+
+  const bundleBytes = Buffer.from(res.data.bundleBufferBase64, "base64");
+  const fileName = `${res.data.backupId}.rslbackup`;
+
+  await putWorkspaceObject({
+    workspaceId: params.workspaceId,
+    category: "backup_archive",
+    fileName,
+    mimeType: "application/json",
+    bytes: bundleBytes,
+    actorId: params.actorId,
+  }).catch(() => undefined);
+
+  await uploadFileToWorkspaceGoogleDrive({
+    workspaceId: params.workspaceId,
+    fileName,
+    mimeType: "application/json",
+    bytes: bundleBytes,
+  }).catch(() => undefined);
 }
 
 function registerStandardJobHandlers() {
@@ -192,39 +240,33 @@ function registerStandardJobHandlers() {
     });
   });
 
+  // 3. Direct 24h WhatsApp Text Worker Processor (Live Cloud API)
   registerJobProcessor("whatsapp.send", async (envelope) => {
-    const recipient = String(envelope.payload.to ?? envelope.payload.phoneE164 ?? "unknown");
-    const guard = reserveSendGuard({
+    const recipient = String(envelope.payload.to ?? envelope.payload.phoneE164 ?? "");
+    const body = String(envelope.payload.body ?? envelope.payload.text ?? "");
+    if (!recipient || !body) return;
+
+    await sendWhatsAppDirectTextJob({
       workspaceId: envelope.tenantId,
+      recipientPhone: recipient,
+      body,
       idempotencyKey: envelope.idempotencyKey,
-      channel: "whatsapp",
-      recipient,
-    });
-    if (!guard.allowed) {
-      logger.info({ tenantId: envelope.tenantId, state: guard.existingState }, "Duplicate send skipped");
-      return;
-    }
-    markSendGuardOutcome({
-      workspaceId: envelope.tenantId,
-      idempotencyKey: envelope.idempotencyKey,
-      state: "sent",
     });
   });
 
+  // 4. Signed Encrypted Backup + Off-Site R2 & Google Drive Sync
   registerJobProcessor("backup.snapshot", async (envelope) => {
-    await createSignedEncryptedBackup(
-      {
-        workspaceId: envelope.tenantId,
-        actorType: envelope.actor.type,
-        actorId: envelope.actor.id,
-        roleSlug: "owner",
-        correlationId: envelope.correlationId,
-        requestId: envelope.requestId,
-      },
-      {
-        destinationLabel: String(envelope.payload.label ?? "Scheduled Nightly Backup"),
-      }
-    );
+    await createAndUploadOffsiteWorkspaceBackup({
+      workspaceId: envelope.tenantId,
+      actorType:
+        envelope.actor.type === "user" || envelope.actor.type === "staff"
+          ? envelope.actor.type
+          : "system",
+      actorId: envelope.actor.id,
+      correlationId: envelope.correlationId,
+      requestId: envelope.requestId,
+      label: String(envelope.payload.label ?? "Scheduled Nightly Cloud & Google Drive Backup"),
+    });
   });
 
   registerJobProcessor("db.optimize", async (envelope) => {
@@ -267,6 +309,76 @@ async function sweepActiveTenantOutboxes() {
   }
 }
 
+async function sweepDueSocialPostsAcrossTenants() {
+  const activeTenants = controlDb()
+    .select()
+    .from(controlSchema.tenantRegistry)
+    .where(eq(controlSchema.tenantRegistry.status, "active"))
+    .all();
+
+  for (const tenant of activeTenants) {
+    try {
+      const publishedCount = await sweepDueScheduledPostsAsync(tenant.tenantId);
+      if (publishedCount > 0) {
+        appendActionLog({
+          workspaceId: tenant.tenantId,
+          actorType: "system",
+          actorId: "worker_scheduler",
+          source: "worker",
+          action: "posts.published",
+          outcome: "success",
+          requestId: `post_sweep_${Date.now()}`,
+          correlationId: `post_sweep_${Date.now()}`,
+          durationMs: 25,
+          summary: `Published ${publishedCount} scheduled social post(s) live on schedule`,
+        });
+      }
+    } catch (error) {
+      Sentry.captureException(error, { tags: { tenantId: tenant.tenantId, job: "social.posts.sweep" } });
+    }
+  }
+}
+
+async function syncAdCampaignSpendAndVaultCapsAcrossTenants() {
+  const activeTenants = controlDb()
+    .select()
+    .from(controlSchema.tenantRegistry)
+    .where(eq(controlSchema.tenantRegistry.status, "active"))
+    .all();
+
+  for (const tenant of activeTenants) {
+    try {
+      await syncAllWorkspaceAdCampaignsInsights(tenant.tenantId);
+    } catch (error) {
+      Sentry.captureException(error, { tags: { tenantId: tenant.tenantId, job: "ads.insights.sync" } });
+    }
+  }
+}
+
+async function runNightlyOffsiteBackups() {
+  const activeTenants = controlDb()
+    .select()
+    .from(controlSchema.tenantRegistry)
+    .where(eq(controlSchema.tenantRegistry.status, "active"))
+    .all();
+
+  for (const tenant of activeTenants) {
+    try {
+      if (!hasActiveEntitlement(tenant.tenantId, "backup.export")) continue;
+      await createAndUploadOffsiteWorkspaceBackup({
+        workspaceId: tenant.tenantId,
+        actorType: "system",
+        actorId: "worker_nightly_backup",
+        correlationId: `bk_${Date.now()}`,
+        requestId: `bk_${Date.now()}`,
+        label: "Nightly Automated R2 & Google Drive Backup",
+      });
+    } catch (error) {
+      Sentry.captureException(error, { tags: { tenantId: tenant.tenantId, job: "nightly.backup" } });
+    }
+  }
+}
+
 async function runScheduledMaintenance() {
   const activeTenants = controlDb()
     .select()
@@ -292,40 +404,7 @@ async function runScheduledMaintenance() {
         workspaceId: tenant.tenantId,
         actorId: "worker_reminders",
       });
-
-      const now = Date.now();
-      const tDb = tenantDataDb({ workspaceId: tenant.tenantId });
-      const duePosts = tDb
-        .select()
-        .from(tenantDataSchema.scheduledPosts)
-        .where(
-          and(
-            eq(tenantDataSchema.scheduledPosts.status, "scheduled"),
-            lte(tenantDataSchema.scheduledPosts.scheduledFor, now)
-          )
-        )
-        .all();
-
-      for (const post of duePosts) {
-        tDb
-          .update(tenantDataSchema.scheduledPosts)
-          .set({ status: "published", publishedAt: now })
-          .where(eq(tenantDataSchema.scheduledPosts.id, post.id))
-          .run();
-
-        appendActionLog({
-          workspaceId: tenant.tenantId,
-          actorType: "system",
-          actorId: "worker_scheduler",
-          source: "worker",
-          action: "posts.published",
-          outcome: "success",
-          requestId: `post_${post.id}`,
-          correlationId: `post_${post.id}`,
-          durationMs: 5,
-          summary: `Published scheduled ${post.channel.replace(/_/g, " ")} post on schedule`,
-        });
-      }
+      await sweepDueScheduledPostsAsync(tenant.tenantId);
     } catch (error) {
       Sentry.captureException(error, { tags: { tenantId: tenant.tenantId } });
     }
@@ -471,6 +550,15 @@ async function startWorker() {
     })
   );
 
+  // Publish due scheduled Facebook, Instagram & Google Business posts every minute
+  if (lanes.has("realtime") || lanes.has("maintenance")) {
+    jobs.push(
+      new Cron("* * * * *", { protect: true }, async () => {
+        await sweepDueSocialPostsAcrossTenants();
+      })
+    );
+  }
+
   if (lanes.has("maintenance")) {
     setImmediate(() => {
       try {
@@ -480,10 +568,24 @@ async function startWorker() {
       }
     });
 
+    // Hourly live Meta & Google Ads insights sync + 0-overdraft Managed Vault auto-pause guard
+    jobs.push(
+      new Cron("15 * * * *", { protect: true }, async () => {
+        await syncAdCampaignSpendAndVaultCapsAcrossTenants();
+      })
+    );
+
     // Checkpoint WAL & refresh disk usage every 30 minutes
     jobs.push(
       new Cron("*/30 * * * *", { protect: true }, async () => {
         await runScheduledMaintenance();
+      })
+    );
+
+    // Nightly encrypted off-site backups to Cloudflare R2 & Google Drive at 02:30 IST
+    jobs.push(
+      new Cron("30 2 * * *", { timezone: "Asia/Kolkata", protect: true }, async () => {
+        await runNightlyOffsiteBackups();
       })
     );
 

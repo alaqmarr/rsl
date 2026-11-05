@@ -11,6 +11,7 @@ import {
   connectChannelJsonAction,
   disconnectConnectionJsonAction,
   rotateMetaVerifyTokenJsonAction,
+  selectGoogleAdsCustomerJsonAction,
   selectGoogleBusinessLocationJsonAction,
   syncGoogleBusinessProfileJsonAction,
   updateConnectionJsonAction,
@@ -37,9 +38,22 @@ export interface GoogleOAuthClientStatus {
   isReady: boolean;
   enableDriveOAuth: boolean;
   enableGbpOAuth: boolean;
+  enableGoogleAdsOAuth?: boolean;
   consentAppName: string;
   publishingStatus: "production" | "testing";
   defaultDriveFolderName: string;
+}
+
+export interface MetaOAuthClientStatus {
+  isReady: boolean;
+  enableMetaOAuth: boolean;
+  isManagedAdsReady: boolean;
+  graphVersion: string;
+}
+
+export interface GoogleAdsClientStatus {
+  isReady: boolean;
+  isManagedAdsReady: boolean;
 }
 
 export interface WorkspaceBusinessSummary {
@@ -59,6 +73,8 @@ export interface ConnectionsHubProps {
   webhookVerifyToken: string;
   canManage: boolean;
   googleOAuth?: GoogleOAuthClientStatus;
+  metaOAuth?: MetaOAuthClientStatus;
+  googleAdsStatus?: GoogleAdsClientStatus;
   workspaceBusiness?: WorkspaceBusinessSummary;
 }
 
@@ -263,6 +279,35 @@ const CHANNEL_BLUEPRINTS: ChannelBlueprint[] = [
     ],
   },
   {
+    kind: "google_ads",
+    shortLabel: "Google Ads",
+    title: "Google Ads Account (Search, Performance Max & Local Store Ads)",
+    badgeText: "Search & PMax",
+    summary:
+      "Connect your Google Ads Customer ID (xxx-xxx-xxxx) in 1 click to launch Search, Performance Max, and Call/Lead ads directly from RSL Console — or run ads via RSL Managed Vault.",
+    webhookMode: "none",
+    webhookFields: [],
+    requiredScopes: ["https://www.googleapis.com/auth/adwords"],
+    steps: [
+      {
+        title: "1. Click 'Connect Google Ads' on the Left",
+        detail:
+          "Sign in with the Google account that has Admin or Standard access to your Google Ads account (ads.google.com). RapidShift Labs automatically discovers your 10-digit Customer IDs.",
+      },
+      {
+        title: "2. Direct Billing vs RapidShift Managed Ad Spend Vault",
+        detail:
+          "In Direct Client Mode, Google bills your saved UPI Autopay / card inside ads.google.com while RSL creates & optimizes campaigns. If you don't have a Google Ads account yet, you can also fund the 0-overdraft Managed Ad Spend Vault on Plans & Wallet.",
+      },
+      {
+        title: "3. Multi-Account / MCC Switcher",
+        detail:
+          "If your Google login manages an MCC or multiple client Customer IDs, pick the exact 10-digit Customer ID (e.g. 123-456-7890) from the dropdown right after signing in.",
+        codeHint: "https://www.googleapis.com/auth/adwords",
+      },
+    ],
+  },
+  {
     kind: "google_business",
     shortLabel: "Google Business",
     title: "Google Business Profile (Store Reviews & Replies)",
@@ -337,6 +382,7 @@ const CHANNEL_LABEL_BY_KIND: Record<ConnectionChannelKind, string> = {
   instagram_business: "Instagram Business",
   facebook_page: "Facebook Page",
   meta_ads_pixel: "Meta Ads & Pixel",
+  google_ads: "Google Ads Studio",
   google_business: "Google Business Profile",
   google_drive: "Google Drive Backup",
 };
@@ -349,6 +395,8 @@ export function ConnectionsHub({
   webhookVerifyToken: initialVerifyToken,
   canManage,
   googleOAuth,
+  metaOAuth,
+  googleAdsStatus,
   workspaceBusiness,
 }: ConnectionsHubProps) {
   const router = useRouter();
@@ -583,10 +631,37 @@ export function ConnectionsHub({
     });
   }
 
+  function handleSelectGoogleAdsCustomer(connId: string, nextCustomerId: string) {
+    if (!nextCustomerId) return;
+    setPendingCardAction(`custgads:${connId}`);
+    startCardTransition(async () => {
+      const fd = new FormData();
+      fd.set("connectionId", connId);
+      fd.set("customerId", nextCustomerId);
+      const res = await selectGoogleAdsCustomerJsonAction(fd);
+      setPendingCardAction(null);
+      if (res.ok) {
+        sileo.success({
+          title: "Google Ads Account Updated",
+          description: res.message,
+          duration: 5000,
+        });
+      } else {
+        sileo.error({
+          title: "Could Not Switch Google Ads Account",
+          description: res.message,
+          duration: 5500,
+        });
+      }
+      router.refresh();
+    });
+  }
+
   const activeCallbackUrl =
     activeBlueprint.webhookMode === "whatsapp" ? whatsappWebhookUrl : metaWebhookUrl;
   const activeDriveConn = connections.find((c) => c.channelKind === "google_drive");
   const activeGbpConn = connections.find((c) => c.channelKind === "google_business");
+  const activeGoogleAdsConn = connections.find((c) => c.channelKind === "google_ads");
 
   return (
     <div className="w-full space-y-6">
@@ -651,7 +726,7 @@ export function ConnectionsHub({
       </div>
 
       {/* Channel Selector Tabs */}
-      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
         {CHANNEL_BLUEPRINTS.map((bp) => {
           const isSelected = bp.kind === selectedKind;
           const connectedCount = countByKind[bp.kind] ?? 0;
@@ -970,8 +1045,157 @@ export function ConnectionsHub({
                   );
                 })()}
 
+                {selectedKind === "google_ads" && activeGoogleAdsConn && (() => {
+                  const gadsMeta = activeGoogleAdsConn.metadata;
+                  const customers = gadsMeta.availableAdCustomers ?? [];
+                  const isSwitchingCust = pendingCardAction === `custgads:${activeGoogleAdsConn.id}`;
+                  const isVerifiedAds = gadsMeta.adsDiscoveryStatus === "verified_customers";
+
+                  return (
+                    <div className="space-y-3.5 rounded-2xl border border-sky-300/90 bg-gradient-to-br from-sky-50/90 via-white to-sky-50/40 p-4 text-[13px] shadow-2xs">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <span className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white shadow-2xs ring-1 ring-sky-200">
+                            <GoogleGLogo className="h-5 w-5" />
+                          </span>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h4 className="text-base font-bold text-slate-900">
+                                {activeGoogleAdsConn.displayName}
+                              </h4>
+                              <StatusPill
+                                label={
+                                  isVerifiedAds
+                                    ? "Google Ads Active"
+                                    : gadsMeta.adsDiscoveryStatus === "dev_token_missing"
+                                      ? "OAuth Active • Dev Token Pending"
+                                      : "Google Ads Connected"
+                                }
+                                tone={isVerifiedAds ? "emerald" : "amber"}
+                              />
+                            </div>
+                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
+                              {gadsMeta.formattedCustomerId && (
+                                <span>
+                                  Customer ID:{" "}
+                                  <strong className="font-mono text-slate-900">
+                                    {gadsMeta.formattedCustomerId}
+                                  </strong>
+                                </span>
+                              )}
+                              {gadsMeta.currencyCode && (
+                                <span>
+                                  • Currency: <strong>{gadsMeta.currencyCode}</strong>
+                                </span>
+                              )}
+                              {gadsMeta.driveEmail && (
+                                <span>
+                                  • Login: <strong>{gadsMeta.driveEmail}</strong>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {customers.length > 1 && (
+                        <div className="rounded-xl border border-sky-200/80 bg-white p-3">
+                          <label
+                            htmlFor="gads-customer-select"
+                            className="block text-xs font-semibold text-slate-900"
+                          >
+                            Active Google Ads Customer ID ({customers.length} accounts discovered)
+                          </label>
+                          <div className="mt-1.5 flex items-center gap-2">
+                            <select
+                              id="gads-customer-select"
+                              disabled={isSwitchingCust}
+                              value={gadsMeta.customerId || customers[0]?.customerId || ""}
+                              onChange={(e) =>
+                                handleSelectGoogleAdsCustomer(activeGoogleAdsConn.id, e.target.value)
+                              }
+                              className="rsl-input bg-white text-xs"
+                            >
+                              {customers.map((cust) => (
+                                <option key={cust.customerId} value={cust.customerId}>
+                                  {cust.descriptiveName} ({cust.formattedCustomerId} •{" "}
+                                  {cust.currencyCode || "INR"})
+                                </option>
+                              ))}
+                            </select>
+                            {isSwitchingCust && <IosSpinner size="xs" />}
+                          </div>
+                        </div>
+                      )}
+
+                      {gadsMeta.adsDiscoveryDetail && (
+                        <div className="rounded-xl border border-zinc-200/80 bg-white/95 p-3 text-xs text-slate-700">
+                          {gadsMeta.adsDiscoveryDetail}
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                        <Link href="/campaigns" className="rsl-btn-primary py-1.5 text-xs">
+                          Open Ads Studio →
+                        </Link>
+                        <ConnectToGoogleDriveButton
+                          purpose="google_ads"
+                          returnTo="/connections?tab=google_ads"
+                          label="Switch Google Ads Login"
+                          variant="white"
+                          size="sm"
+                        />
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {!selectedKind.startsWith("google") && (
+                  <div className="rounded-2xl border border-sky-200 bg-sky-50/75 p-4 text-[13px]">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-0.5 text-[11px] font-bold text-sky-900 ring-1 ring-sky-200">
+                        1-Click Facebook / Meta OAuth
+                      </span>
+                      {selectedKind === "meta_ads_pixel" && metaOAuth?.isManagedAdsReady && (
+                        <span className="text-[11px] font-semibold text-emerald-800">
+                          ✓ RSL Managed Vault Also Ready
+                        </span>
+                      )}
+                    </div>
+                    <h4 className="mt-2 text-sm font-bold text-slate-900">
+                      Connect {activeBlueprint.shortLabel} in 1 Click with Facebook Login
+                    </h4>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-700">
+                      Sign in directly on Facebook to auto-discover your Pages, Instagram Business handle, Meta Ad Accounts (`act_...`), Pixels, and WABAs — or paste a Permanent System User Token below.
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                      {metaOAuth?.enableMetaOAuth ? (
+                        <a
+                          href={`/api/oauth/meta/start?purpose=${encodeURIComponent(selectedKind)}&returnTo=${encodeURIComponent(`/connections?tab=${selectedKind}`)}`}
+                          className="rsl-btn-primary inline-flex items-center gap-2 text-xs font-semibold"
+                        >
+                          <span>Connect with Facebook / Meta →</span>
+                        </a>
+                      ) : (
+                        <span className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/90 px-3 py-1.5 text-xs font-semibold text-zinc-600">
+                          <span>1-Click Facebook Login pending Meta App ID setup — use System User Token below</span>
+                        </span>
+                      )}
+                      {selectedKind === "meta_ads_pixel" && (
+                        <Link
+                          href="/campaigns"
+                          className="text-xs font-semibold text-sky-800 hover:underline"
+                        >
+                          Or launch ads via RSL Managed Vault →
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {selectedKind.startsWith("google") &&
-                  !(selectedKind === "google_business" && activeGbpConn) && (
+                  !(selectedKind === "google_business" && activeGbpConn) &&
+                  !(selectedKind === "google_ads" && activeGoogleAdsConn) && (
                   <div className="rounded-2xl border border-emerald-200 bg-emerald-50/75 p-4 text-[13px]">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200">
@@ -984,33 +1208,61 @@ export function ConnectionsHub({
                     <h4 className="mt-2.5 text-sm font-bold text-slate-900">
                       {selectedKind === "google_drive"
                         ? "Connect Your Google Drive Automatically in 2 Clicks"
-                        : "Connect Google Business Profile with Google Sign-In"}
+                        : selectedKind === "google_ads"
+                          ? "Connect Your Google Ads Account in 1 Click"
+                          : "Connect Google Business Profile with Google Sign-In"}
                     </h4>
                     <p className="mt-1 text-xs leading-relaxed text-slate-700">
                       {selectedKind === "google_drive"
                         ? `No Google Cloud Console, no Service Account JSONs, and no manual Folder IDs needed. Sign in on Google's official screen — RapidShift Labs automatically creates '${googleOAuth?.defaultDriveFolderName || "RapidShift Labs Backups"}' in your Drive using the privacy-safe drive.file scope.`
-                        : "Sign in with the Google account that manages your verified Google Business Profile listing. Storefront locations, business details, and customer reviews sync automatically."}
+                        : selectedKind === "google_ads"
+                          ? "Sign in with your Google Ads login to auto-discover your 10-digit Customer ID (xxx-xxx-xxxx) and create Search, Performance Max, and Call/Lead ads directly from RSL Console."
+                          : "Sign in with the Google account that manages your verified Google Business Profile listing. Storefront locations, business details, and customer reviews sync automatically."}
                     </p>
 
                     <div className="mt-3.5 flex flex-wrap items-center gap-3">
                       <ConnectToGoogleDriveButton
-                        purpose={selectedKind === "google_drive" ? "google_drive" : "google_business"}
+                        purpose={
+                          selectedKind === "google_drive"
+                            ? "google_drive"
+                            : selectedKind === "google_ads"
+                              ? "google_ads"
+                              : "google_business"
+                        }
                         returnTo={`/connections?tab=${selectedKind}`}
                         label={
                           selectedKind === "google_drive"
                             ? "Connect to Google Drive"
-                            : "Connect Google Business Profile"
+                            : selectedKind === "google_ads"
+                              ? "Connect Google Ads"
+                              : "Connect Google Business Profile"
+                        }
+                        configured={
+                          selectedKind === "google_drive"
+                            ? googleOAuth?.enableDriveOAuth ?? true
+                            : selectedKind === "google_ads"
+                              ? googleOAuth?.enableGoogleAdsOAuth ?? googleOAuth?.isReady ?? true
+                              : googleOAuth?.enableGbpOAuth ?? true
                         }
                       />
                       <span className="text-[11px] text-emerald-900/80">
                         Auto-renews tokens • Zero JSON files required
                       </span>
+                      {selectedKind === "google_ads" && googleAdsStatus?.isManagedAdsReady && (
+                        <Link
+                          href="/campaigns"
+                          className="text-xs font-semibold text-emerald-800 hover:underline"
+                        >
+                          Or run via RSL Managed Vault →
+                        </Link>
+                      )}
                     </div>
 
                     {((selectedKind === "google_drive" && !googleOAuth?.enableDriveOAuth) ||
+                      (selectedKind === "google_ads" && !googleOAuth?.enableGoogleAdsOAuth) ||
                       (selectedKind === "google_business" && !googleOAuth?.enableGbpOAuth)) && (
                       <p className="mt-2.5 text-[11px] font-medium text-amber-900">
-                        Google 1-click sign-in is being configured on this platform. Please try again shortly or contact support.
+                        Google 1-click sign-in is being configured on this platform. Please try again shortly or use Manual Token Override below.
                       </p>
                     )}
                   </div>
@@ -1212,6 +1464,39 @@ export function ConnectionsHub({
                           className="rsl-input font-mono"
                         />
                       </div>
+                    </div>
+                  </>
+                )}
+
+                {selectedKind === "google_ads" && (
+                  <>
+                    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+                      <div className="min-w-0">
+                        <label className="rsl-label">Google Ads Account Label *</label>
+                        <input
+                          name="displayName"
+                          required
+                          placeholder="e.g. Radiant Industrial Google Ads"
+                          className="rsl-input"
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <label className="rsl-label">10-Digit Customer ID * (xxx-xxx-xxxx)</label>
+                        <input
+                          name="customerId"
+                          required
+                          placeholder="e.g. 123-456-7890"
+                          className="rsl-input font-mono"
+                        />
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <label className="rsl-label">MCC Login Customer ID (Optional — if managed under MCC)</label>
+                      <input
+                        name="loginCustomerId"
+                        placeholder="e.g. 998-877-6655"
+                        className="rsl-input font-mono"
+                      />
                     </div>
                   </>
                 )}

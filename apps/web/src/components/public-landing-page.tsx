@@ -252,7 +252,7 @@ export function PublicLandingPage({
         <section id="features" className="space-y-6 scroll-mt-24">
           <div>
             <div className="text-xs font-bold tracking-wider text-emerald-700 uppercase">
-              Complete 15-Tool Business Suite
+              Complete 16-Tool Business Suite
             </div>
             <h2 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
               Everything your accounts, inventory, sales, and customer support teams need — isolated per company.

@@ -192,6 +192,18 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     sortOrder: 11,
   },
   {
+    key: "google.ads",
+    name: "Google Search, Performance Max & Local Ad Campaigns",
+    plainSummary: "Launch, pause, and track return per ₹1 spent across Google Search, Maps, and Performance Max ads.",
+    category: "Google",
+    dependsOn: [],
+    pricingModel: "flat_monthly",
+    meteredUnit: "ad accounts",
+    defaultMonthlyPaise: 39900,
+    defaultUnitPaise: 0,
+    sortOrder: 12,
+  },
+  {
     key: "backup.export",
     name: "Encrypted Customer Backups & Export",
     plainSummary: "Save signed, encrypted copies of your business data to your own Drive, S3, or R2 folder.",
@@ -201,7 +213,7 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     meteredUnit: "backup runs",
     defaultMonthlyPaise: 14900,
     defaultUnitPaise: 0,
-    sortOrder: 12,
+    sortOrder: 13,
   },
   {
     key: "storage.managed",
@@ -213,7 +225,7 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     meteredUnit: "GB stored",
     defaultMonthlyPaise: 9900,
     defaultUnitPaise: 1500,
-    sortOrder: 13,
+    sortOrder: 14,
   },
   {
     key: "backup.custom",
@@ -225,7 +237,7 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     meteredUnit: "storage adapters",
     defaultMonthlyPaise: 99900,
     defaultUnitPaise: 0,
-    sortOrder: 14,
+    sortOrder: 15,
   },
   {
     key: "api.access",
@@ -237,7 +249,7 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     meteredUnit: "requests / month",
     defaultMonthlyPaise: 29900,
     defaultUnitPaise: 0,
-    sortOrder: 15,
+    sortOrder: 16,
   },
 ] as const;
 
@@ -367,6 +379,17 @@ export const PLAN_FEATURE_DETAILS: Record<string, PlanFeatureDetail> = {
     ],
     billingHighlights: "Requires Google Business Reviews & Replies. Monthly base plus per-draft usage.",
   },
+  "google.ads": {
+    tagline: "Launch Google Search, Performance Max & Local Store Ads directly from your RSL console.",
+    whoItsFor: "Local stores, manufacturers, service providers, and D2C brands capturing high-intent Google buyers.",
+    includedFeatures: [
+      "Create Google Search keyword ads, Performance Max campaigns, and Local Store / Call ads",
+      "Choose Direct Google Ads Account billing OR fund campaigns via RSL's 0-overdraft Managed Ad Spend Vault",
+      "Live daily Google Ads spend, clicks, impressions, and conversion value sync (GAQL)",
+      "One-click campaign pause/resume and daily Rupee budget controls",
+    ],
+    billingHighlights: "Flat monthly management plan (ad spend is billed directly by Google or funded via your Ad Spend Vault).",
+  },
   "backup.export": {
     tagline: "Download password-protected backups of your business records or save to your own cloud.",
     whoItsFor: "Compliance-conscious businesses keeping independent off-site copies of their records.",
@@ -466,11 +489,11 @@ export const DEFAULT_BUNDLE_CATALOG: readonly DefaultBundleCatalogItem[] = [
   },
   {
     key: "social_growth_pack",
-    name: "Meta Ads, Social Publishing & Sales Pixel Suite",
-    tagline: "Run Facebook & Instagram posts, track real website orders, and measure Rupee ROI on ads.",
+    name: "Meta & Google Ads, Social Publishing & Sales Pixel Suite",
+    tagline: "Run Meta & Google Ads, schedule social posts, track real website orders, and measure Rupee ROI.",
     description:
-      "Unlocks Facebook Pages, Instagram Feed & Reels, Website Order Pixel deduplication, Meta Ad Campaigns, and Google Business Reviews.",
-    includedKeys: ["meta.pages", "meta.instagram", "meta.pixel", "meta.ads", "google.reviews"],
+      "Unlocks Facebook Pages, Instagram Feed & Reels, Website Order Pixel + CAPI deduplication, Meta Ad Campaigns, Google Search/PMax Ads, and Google Business Reviews.",
+    includedKeys: ["meta.pages", "meta.instagram", "meta.pixel", "meta.ads", "google.ads", "google.reviews"],
     monthlyAmountPaise: 59900,
     quarterlyAmountPaise: 159900,
     yearlyAmountPaise: 549900,
@@ -505,16 +528,16 @@ export const DEFAULT_BUNDLE_CATALOG: readonly DefaultBundleCatalogItem[] = [
   },
   {
     key: "all_features",
-    name: "Complete RSL All-in-One Software Package (All 15 Tools)",
+    name: "Complete RSL All-in-One Software Package (All 16 Tools)",
     tagline:
-      "Every feature across Tally Prime Suite, WhatsApp Auto-Billing, Inbox, Meta Ads, Google Reviews, Cloud Backups & API (~₹750/mo billed yearly).",
+      "Every feature across Tally Prime Suite, WhatsApp Auto-Billing, Inbox, Meta & Google Ads, Google Reviews, Cloud Backups & API (~₹750/mo billed yearly).",
     description:
-      "Full-platform access unlocking all 15 RSL Marketing & Tally Prime Suite tools with zero locked modules — customizable per client.",
+      "Full-platform access unlocking all 16 RSL Marketing & Tally Prime Suite tools with zero locked modules — customizable per client.",
     includedKeys: SERVICE_CATALOG.map((s) => s.key),
     monthlyAmountPaise: 99900,
     quarterlyAmountPaise: 269900,
     yearlyAmountPaise: 899900,
-    badgeLabel: "Entire 15-Tool Business Suite",
+    badgeLabel: "Entire 16-Tool Business Suite",
     sortOrder: 7,
   },
 ];
@@ -562,11 +585,17 @@ export function ensureServiceCatalogSeeded(): void {
     .from(controlSchema.planBundles)
     .where(eq(controlSchema.planBundles.key, "tally_business_suite"))
     .get();
+  const googleAdsRow = db
+    .select({ key: controlSchema.services.key })
+    .from(controlSchema.services)
+    .where(eq(controlSchema.services.key, "google.ads"))
+    .get();
 
   if (
     (svcCount?.c ?? 0) >= SERVICE_CATALOG.length &&
     (bundleCount?.c ?? 0) >= DEFAULT_BUNDLE_CATALOG.length &&
-    Boolean(tallySuiteRow)
+    Boolean(tallySuiteRow) &&
+    Boolean(googleAdsRow)
   ) {
     return;
   }
@@ -680,6 +709,61 @@ export function ensureServiceCatalogSeeded(): void {
           updatedAt: now,
         })
         .where(eq(controlSchema.planBundles.key, b.key))
+        .run();
+    } else if (
+      !googleAdsRow &&
+      existingBundle.workspaceId === null &&
+      (b.key === "all_features" || b.key === "social_growth_pack")
+    ) {
+      let existingKeys: string[] = [];
+      try {
+        existingKeys = JSON.parse(existingBundle.includedKeysJson) as string[];
+      } catch {
+        existingKeys = [];
+      }
+      if (!existingKeys.includes("google.ads")) {
+        const mergedKeys = [...existingKeys, "google.ads"];
+        db.update(controlSchema.planBundles)
+          .set({
+            name: b.key === "all_features" ? b.name : existingBundle.name,
+            badgeLabel: b.key === "all_features" ? b.badgeLabel : existingBundle.badgeLabel,
+            includedKeysJson: JSON.stringify(mergedKeys),
+            updatedAt: now,
+          })
+          .where(eq(controlSchema.planBundles.key, b.key))
+          .run();
+      }
+    }
+  }
+
+  if (!googleAdsRow) {
+    const activeAllFeaturesRows = db
+      .select()
+      .from(controlSchema.entitlements)
+      .where(
+        and(
+          eq(controlSchema.entitlements.bundleKey, "all_features"),
+          eq(controlSchema.entitlements.status, "active")
+        )
+      )
+      .all();
+    const seenWorkspaces = new Set<string>();
+    for (const ent of activeAllFeaturesRows) {
+      if (seenWorkspaces.has(ent.workspaceId)) continue;
+      seenWorkspaces.add(ent.workspaceId);
+      db.insert(controlSchema.entitlements)
+        .values({
+          id: newId(),
+          workspaceId: ent.workspaceId,
+          serviceKey: "google.ads",
+          status: "active",
+          billingCycle: ent.billingCycle,
+          bundleKey: "all_features",
+          activatedAt: now,
+          expiresAt: ent.expiresAt,
+          updatedAt: now,
+        })
+        .onConflictDoNothing()
         .run();
     }
   }
@@ -1786,22 +1870,40 @@ export function approveWalletRechargeRequest(params: {
     throw new RslError("RSL-VAL-1001", "Recharge request not found or already processed.");
   }
 
+  const isAdSpendVault = payment.purpose === "ad_spend_topup";
   const inv = createAdvanceReceiptVoucher({
     workspaceId: payment.workspaceId,
-    description: `Prepaid Wallet Deposit (${payment.provider.toUpperCase()} Ref: ${payment.externalPaymentId ?? payment.id})`,
+    description: isAdSpendVault
+      ? `Managed Ad Spend Vault Deposit (${payment.provider.toUpperCase()} Ref: ${payment.externalPaymentId ?? payment.id})`
+      : `Prepaid Wallet Deposit (${payment.provider.toUpperCase()} Ref: ${payment.externalPaymentId ?? payment.id})`,
     amountPaise: payment.amountPaise,
-    externalRefKey: `wallet_recharge:${payment.id}`,
+    externalRefKey: `${isAdSpendVault ? "ad_vault_recharge" : "wallet_recharge"}:${payment.id}`,
   });
 
-  const credited = creditWallet({
-    workspaceId: payment.workspaceId,
-    amountPaise: payment.amountPaise,
-    description: `Verified ${payment.provider.toUpperCase()} recharge (Ref: ${payment.externalPaymentId ?? "—"})`,
-    idempotencyKey: `verified_payment:${payment.id}`,
-    actorId: params.staffId,
-    entryType: "credit",
-    createInvoice: false,
-  });
+  let nextBalancePaise = 0;
+  if (isAdSpendVault) {
+    const creditedVault = creditAdSpendVault({
+      workspaceId: payment.workspaceId,
+      amountPaise: payment.amountPaise,
+      description: `Verified ${payment.provider.toUpperCase()} Ad Spend Vault top-up (Ref: ${payment.externalPaymentId ?? "—"})`,
+      idempotencyKey: `verified_ad_payment:${payment.id}`,
+      actorId: params.staffId,
+      paymentId: payment.id,
+      entryType: "deposit",
+    });
+    nextBalancePaise = creditedVault.availablePaise;
+  } else {
+    const credited = creditWallet({
+      workspaceId: payment.workspaceId,
+      amountPaise: payment.amountPaise,
+      description: `Verified ${payment.provider.toUpperCase()} recharge (Ref: ${payment.externalPaymentId ?? "—"})`,
+      idempotencyKey: `verified_payment:${payment.id}`,
+      actorId: params.staffId,
+      entryType: "credit",
+      createInvoice: false,
+    });
+    nextBalancePaise = credited.balancePaise;
+  }
 
   db.update(controlSchema.payments)
     .set({
@@ -1815,7 +1917,7 @@ export function approveWalletRechargeRequest(params: {
     workspaceId: payment.workspaceId,
     amountPaise: payment.amountPaise,
     invoiceNumber: inv.invoiceNumber,
-    balancePaise: credited.balancePaise,
+    balancePaise: nextBalancePaise,
   };
 }
 
@@ -1844,7 +1946,13 @@ export function rejectWalletRechargeRequest(params: {
 export async function createRazorpayOrderForWallet(params: {
   workspaceId: string;
   amountPaise: number;
-}): Promise<{ orderId: string; keyId: string; amountWithGstPaise: number }> {
+  purpose?: "wallet_topup" | "ad_spend_topup";
+}): Promise<{
+  orderId: string;
+  keyId: string;
+  amountWithGstPaise: number;
+  purpose: "wallet_topup" | "ad_spend_topup";
+}> {
   const rzp = getPlatformRazorpayConfig();
   if (!rzp.isReady) {
     throw new RslError(
@@ -1852,11 +1960,18 @@ export async function createRazorpayOrderForWallet(params: {
       "Online gateway checkout is not enabled yet. Please pay via UPI / Bank Transfer and submit your UTR reference below."
     );
   }
-  if (!Number.isInteger(params.amountPaise) || params.amountPaise < 10000) {
-    throw new RslError("RSL-VAL-1001", "Minimum wallet recharge is ₹100.");
+  const purpose = params.purpose === "ad_spend_topup" ? "ad_spend_topup" : "wallet_topup";
+  const minPaise = purpose === "ad_spend_topup" ? 50000 : 10000;
+  if (!Number.isInteger(params.amountPaise) || params.amountPaise < minPaise) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      purpose === "ad_spend_topup"
+        ? "Minimum Ad Spend Vault top-up is ₹500."
+        : "Minimum wallet recharge is ₹100."
+    );
   }
 
-  // Prepaid wallet deposits are collected at 0% GST (Advance Receipt Voucher); GST applies upon service consumption (P0-06)
+  // Prepaid wallet & Ad Spend Vault deposits are collected at 0% GST (Advance Receipt Voucher); GST applies upon service consumption (P0-06)
   const amountWithGstPaise = params.amountPaise;
   const authHeader = Buffer.from(`${rzp.keyId}:${rzp.keySecret}`).toString("base64");
   const resp = await fetch("https://api.razorpay.com/v1/orders", {
@@ -1872,6 +1987,7 @@ export async function createRazorpayOrderForWallet(params: {
       notes: {
         workspaceId: params.workspaceId,
         walletCreditPaise: String(params.amountPaise),
+        purpose,
       },
     }),
   });
@@ -1890,7 +2006,7 @@ export async function createRazorpayOrderForWallet(params: {
       externalOrderId: data.id,
       amountPaise: params.amountPaise,
       currency: "INR",
-      purpose: "wallet_topup",
+      purpose,
       status: "pending",
       createdAt: Date.now(),
     })
@@ -1900,6 +2016,7 @@ export async function createRazorpayOrderForWallet(params: {
     orderId: data.id,
     keyId: rzp.keyId,
     amountWithGstPaise,
+    purpose,
   };
 }
 
@@ -1909,7 +2026,11 @@ export function verifyRazorpayCheckoutAndCreditWallet(params: {
   paymentId: string;
   signatureHex: string;
   actorId: string;
-}): { balancePaise: number; invoiceNumber?: string } {
+}): {
+  balancePaise: number;
+  invoiceNumber?: string;
+  purpose: "wallet_topup" | "ad_spend_topup";
+} {
   const secret = getPlatformRazorpayConfig().keySecret;
   if (!secret) {
     throw new RslError("RSL-VAL-1001", "Payment gateway secret is not configured.");
@@ -1935,22 +2056,43 @@ export function verifyRazorpayCheckoutAndCreditWallet(params: {
     throw new RslError("RSL-VAL-1001", "Matching payment order not found.");
   }
 
+  const purpose: "wallet_topup" | "ad_spend_topup" =
+    orderRow.purpose === "ad_spend_topup" ? "ad_spend_topup" : "wallet_topup";
+
   const inv = createAdvanceReceiptVoucher({
     workspaceId: params.workspaceId,
-    description: `Online Prepaid Wallet Deposit (Payment ${params.paymentId})`,
+    description:
+      purpose === "ad_spend_topup"
+        ? `Online Managed Ad Spend Vault Deposit (Payment ${params.paymentId})`
+        : `Online Prepaid Wallet Deposit (Payment ${params.paymentId})`,
     amountPaise: orderRow.amountPaise,
     externalRefKey: `rzp_payment:${params.paymentId}`,
   });
 
-  const credited = creditWallet({
-    workspaceId: params.workspaceId,
-    amountPaise: orderRow.amountPaise,
-    description: `Razorpay Wallet Recharge (${params.paymentId})`,
-    idempotencyKey: `rzp_payment:${params.paymentId}`,
-    actorId: params.actorId,
-    entryType: "credit",
-    createInvoice: false,
-  });
+  let nextBalancePaise = 0;
+  if (purpose === "ad_spend_topup") {
+    const creditedVault = creditAdSpendVault({
+      workspaceId: params.workspaceId,
+      amountPaise: orderRow.amountPaise,
+      description: `Razorpay Ad Spend Vault Deposit (${params.paymentId})`,
+      idempotencyKey: `rzp_payment:${params.paymentId}`,
+      actorId: params.actorId,
+      paymentId: orderRow.id,
+      entryType: "deposit",
+    });
+    nextBalancePaise = creditedVault.availablePaise;
+  } else {
+    const credited = creditWallet({
+      workspaceId: params.workspaceId,
+      amountPaise: orderRow.amountPaise,
+      description: `Razorpay Wallet Recharge (${params.paymentId})`,
+      idempotencyKey: `rzp_payment:${params.paymentId}`,
+      actorId: params.actorId,
+      entryType: "credit",
+      createInvoice: false,
+    });
+    nextBalancePaise = credited.balancePaise;
+  }
 
   db.update(controlSchema.payments)
     .set({
@@ -1962,9 +2104,280 @@ export function verifyRazorpayCheckoutAndCreditWallet(params: {
     .run();
 
   return {
-    balancePaise: credited.balancePaise,
+    balancePaise: nextBalancePaise,
     invoiceNumber: inv.invoiceNumber,
+    purpose,
   };
+}
+
+// ============================================================================
+// Isolated 0-Overdraft RSL Managed Ad Spend Vault (Meta & Google Ads)
+// ============================================================================
+
+export interface AdSpendVaultSummary {
+  availablePaise: number;
+  totalDepositedPaise: number;
+  netAllocatedToCampaignsPaise: number;
+  recentEntries: Array<typeof controlSchema.adSpendLedger.$inferSelect>;
+}
+
+export function getAdSpendVaultBalancePaise(workspaceId: string): number {
+  const row = controlDb()
+    .select({ total: sql<number>`coalesce(sum(${controlSchema.adSpendLedger.amountPaise}), 0)` })
+    .from(controlSchema.adSpendLedger)
+    .where(eq(controlSchema.adSpendLedger.workspaceId, workspaceId))
+    .get();
+  return Math.max(0, Number(row?.total ?? 0));
+}
+
+export function listAdSpendVaultLedger(workspaceId: string, limit = 30) {
+  return controlDb()
+    .select()
+    .from(controlSchema.adSpendLedger)
+    .where(eq(controlSchema.adSpendLedger.workspaceId, workspaceId))
+    .orderBy(desc(controlSchema.adSpendLedger.createdAt))
+    .limit(limit)
+    .all();
+}
+
+export function getAdSpendVaultSummary(workspaceId: string): AdSpendVaultSummary {
+  const db = controlDb();
+  const rows = db
+    .select()
+    .from(controlSchema.adSpendLedger)
+    .where(eq(controlSchema.adSpendLedger.workspaceId, workspaceId))
+    .orderBy(desc(controlSchema.adSpendLedger.createdAt))
+    .all();
+
+  let rawSum = 0;
+  let totalDepositedPaise = 0;
+  let allocatedGross = 0;
+  let releasedGross = 0;
+
+  for (const r of rows) {
+    rawSum += r.amountPaise;
+    if (r.entryType === "deposit" || (r.entryType === "staff_adjustment" && r.amountPaise > 0)) {
+      totalDepositedPaise += r.amountPaise;
+    } else if (r.entryType === "allocate") {
+      allocatedGross += Math.abs(r.amountPaise);
+    } else if (r.entryType === "release" || r.entryType === "refund") {
+      releasedGross += Math.max(0, r.amountPaise);
+    }
+  }
+
+  return {
+    availablePaise: Math.max(0, rawSum),
+    totalDepositedPaise,
+    netAllocatedToCampaignsPaise: Math.max(0, allocatedGross - releasedGross),
+    recentEntries: rows.slice(0, 30),
+  };
+}
+
+export function submitAdSpendRechargeRequest(params: {
+  workspaceId: string;
+  amountPaise: number;
+  utrOrReference: string;
+  paymentMethod: "upi" | "bank_transfer";
+}): { paymentId: string } {
+  if (!Number.isInteger(params.amountPaise) || params.amountPaise < 50000) {
+    throw new RslError("RSL-VAL-1001", "Minimum Managed Ad Spend Vault deposit is ₹500.");
+  }
+  const ref = params.utrOrReference.trim();
+  if (ref.length < 4) {
+    throw new RslError("RSL-VAL-1001", "Enter your UPI or Bank UTR transaction reference number.");
+  }
+
+  const db = controlDb();
+  const duplicate = db
+    .select()
+    .from(controlSchema.payments)
+    .where(
+      and(
+        eq(controlSchema.payments.workspaceId, params.workspaceId),
+        eq(controlSchema.payments.externalPaymentId, ref)
+      )
+    )
+    .get();
+  if (duplicate) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "A payment request with this UTR / Reference number has already been submitted."
+    );
+  }
+
+  const paymentId = newId("pay", params.workspaceId);
+  db.insert(controlSchema.payments)
+    .values({
+      id: paymentId,
+      workspaceId: params.workspaceId,
+      provider: params.paymentMethod,
+      externalPaymentId: ref,
+      amountPaise: params.amountPaise,
+      currency: "INR",
+      purpose: "ad_spend_topup",
+      status: "pending_verification",
+      createdAt: Date.now(),
+    })
+    .run();
+
+  return { paymentId };
+}
+
+export function creditAdSpendVault(params: {
+  workspaceId: string;
+  amountPaise: number;
+  description: string;
+  idempotencyKey: string;
+  actorId: string;
+  paymentId?: string;
+  campaignId?: string;
+  externalCampaignId?: string;
+  provider?: "vault" | "meta_ads" | "google_ads";
+  entryType?: "deposit" | "release" | "refund" | "staff_adjustment";
+}): { availablePaise: number } {
+  if (!Number.isInteger(params.amountPaise) || params.amountPaise <= 0) {
+    throw new RslError("RSL-VAL-1001", "Ad Spend Vault credit must be a positive Rupee amount.");
+  }
+
+  const db = controlDb();
+  const raw = db.$client;
+
+  const tx = raw.transaction(() => {
+    const existing = db
+      .select()
+      .from(controlSchema.adSpendLedger)
+      .where(
+        and(
+          eq(controlSchema.adSpendLedger.workspaceId, params.workspaceId),
+          eq(controlSchema.adSpendLedger.idempotencyKey, params.idempotencyKey)
+        )
+      )
+      .get();
+
+    if (!existing) {
+      db.insert(controlSchema.adSpendLedger)
+        .values({
+          id: newId("adl", params.workspaceId),
+          workspaceId: params.workspaceId,
+          entryType: params.entryType ?? "deposit",
+          amountPaise: params.amountPaise,
+          currency: "INR",
+          provider: params.provider ?? "vault",
+          campaignId: params.campaignId ?? null,
+          externalCampaignId: params.externalCampaignId ?? null,
+          paymentId: params.paymentId ?? null,
+          description: params.description,
+          idempotencyKey: params.idempotencyKey,
+          actorId: params.actorId,
+          createdAt: Date.now(),
+        })
+        .run();
+    }
+
+    return {
+      availablePaise: getAdSpendVaultBalancePaise(params.workspaceId),
+    };
+  });
+
+  return raw.inTransaction ? tx() : tx.immediate();
+}
+
+/**
+ * Atomically allocates pre-funded Rupee budget from the workspace's 0-Overdraft Managed Ad Spend Vault.
+ * Throws RSL-BILL-1003 if available Ad Spend Vault balance is less than `amountPaise` (ZERO overdraft permitted).
+ */
+export function allocateAdSpendToCampaign(params: {
+  workspaceId: string;
+  amountPaise: number;
+  provider: "meta_ads" | "google_ads";
+  campaignId: string;
+  campaignName: string;
+  externalCampaignId?: string;
+  idempotencyKey: string;
+  actorId: string;
+}): { availablePaise: number; allocatedPaise: number } {
+  if (!Number.isInteger(params.amountPaise) || params.amountPaise <= 0) {
+    throw new RslError("RSL-VAL-1001", "Campaign ad spend allocation must be greater than ₹0.");
+  }
+
+  const db = controlDb();
+  const raw = db.$client;
+
+  const tx = raw.transaction(() => {
+    const existing = db
+      .select()
+      .from(controlSchema.adSpendLedger)
+      .where(
+        and(
+          eq(controlSchema.adSpendLedger.workspaceId, params.workspaceId),
+          eq(controlSchema.adSpendLedger.idempotencyKey, params.idempotencyKey)
+        )
+      )
+      .get();
+
+    if (existing) {
+      return {
+        availablePaise: getAdSpendVaultBalancePaise(params.workspaceId),
+        allocatedPaise: Math.abs(existing.amountPaise),
+      };
+    }
+
+    const available = getAdSpendVaultBalancePaise(params.workspaceId);
+    if (available < params.amountPaise) {
+      throw new RslError(
+        "RSL-BILL-1003",
+        `Insufficient Ad Spend Vault balance (${formatInr(available, { showDecimals: true })}) to fund ${formatInr(params.amountPaise, { showDecimals: true })} for '${params.campaignName}'. Managed Ad Spend has 0 overdraft — deposit ad funds on Plans & Wallet or switch to Direct Client Ad Account billing.`
+      );
+    }
+
+    db.insert(controlSchema.adSpendLedger)
+      .values({
+        id: newId("adl", params.workspaceId),
+        workspaceId: params.workspaceId,
+        entryType: "allocate",
+        amountPaise: -Math.abs(params.amountPaise),
+        currency: "INR",
+        provider: params.provider,
+        campaignId: params.campaignId,
+        externalCampaignId: params.externalCampaignId ?? null,
+        description: `Allocated ${formatInr(params.amountPaise, { showDecimals: true })} to ${params.provider === "google_ads" ? "Google Ads" : "Meta Ads"} campaign '${params.campaignName}'`,
+        idempotencyKey: params.idempotencyKey,
+        actorId: params.actorId,
+        createdAt: Date.now(),
+      })
+      .run();
+
+    return {
+      availablePaise: getAdSpendVaultBalancePaise(params.workspaceId),
+      allocatedPaise: params.amountPaise,
+    };
+  });
+
+  return raw.inTransaction ? tx() : tx.immediate();
+}
+
+export function releaseUnusedCampaignAdSpend(params: {
+  workspaceId: string;
+  unspentAmountPaise: number;
+  provider: "meta_ads" | "google_ads";
+  campaignId: string;
+  campaignName: string;
+  idempotencyKey: string;
+  actorId: string;
+}): { availablePaise: number } {
+  if (!Number.isInteger(params.unspentAmountPaise) || params.unspentAmountPaise <= 0) {
+    return { availablePaise: getAdSpendVaultBalancePaise(params.workspaceId) };
+  }
+  return creditAdSpendVault({
+    workspaceId: params.workspaceId,
+    amountPaise: params.unspentAmountPaise,
+    provider: params.provider,
+    campaignId: params.campaignId,
+    entryType: "release",
+    description: `Released unspent ${formatInr(params.unspentAmountPaise, { showDecimals: true })} from paused campaign '${params.campaignName}'`,
+    idempotencyKey: params.idempotencyKey,
+    actorId: params.actorId,
+  });
 }
 
 // ============================================================================
@@ -2936,9 +3349,9 @@ export const PLAN_BUNDLES = {
     suggestedRupees: 2299,
   },
   social_growth_pack: {
-    label: "Meta Ads, Social Publishing & Sales Pixel Suite",
-    description: "Facebook Pages, Instagram DMs, Website Sales Tracking, Meta Ads, and Google Reviews",
-    keys: ["meta.pages", "meta.instagram", "meta.pixel", "meta.ads", "google.reviews"],
+    label: "Meta & Google Ads, Social Publishing & Sales Pixel Suite",
+    description: "Facebook Pages, Instagram DMs, Website Sales Tracking, Meta Ads, Google Ads, and Google Reviews",
+    keys: ["meta.pages", "meta.instagram", "meta.pixel", "meta.ads", "google.ads", "google.reviews"],
     suggestedRupees: 3999,
   },
   google_reputation_pack: {
@@ -2954,7 +3367,7 @@ export const PLAN_BUNDLES = {
     suggestedRupees: 1999,
   },
   all_features: {
-    label: "Complete RSL All-in-One Software Package (All 15 Tools)",
+    label: "Complete RSL All-in-One Software Package (All 16 Tools)",
     description: "Unlocks every feature plan across WhatsApp, Tally, Social, Google, Storage, and API",
     keys: SERVICE_CATALOG.map((s) => s.key),
     suggestedRupees: 7999,

@@ -4,12 +4,14 @@ import {
   Clock,
   Landmark,
   Layers,
+  Megaphone,
   QrCode,
   ReceiptText,
   Wallet,
 } from "lucide-react";
 import {
   BILLING_CYCLE_META,
+  getAdSpendVaultSummary,
   getPlatformBillingSettings,
   getWalletAvailableSpendPaise,
   getWalletBalancePaise,
@@ -31,8 +33,9 @@ import { AccessRestrictedState, MetricCard, PageHeader, SectionCard, StatusPill 
 import { FlashBanner } from "@/components/flash-banner";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
 import { PlanActivationModal } from "@/components/plan-activation-modal";
+import { RazorpayCheckoutButton } from "@/components/razorpay-checkout-button";
 import {
-  createOnlineRazorpayOrderAction,
+  submitAdSpendRechargeRequestAction,
   submitRechargeRequestAction,
 } from "@/lib/actions";
 import { requireWebSession } from "@/lib/session";
@@ -46,7 +49,8 @@ const FEATURE_PAGE_BY_KEY: Record<string, { href: string; label: string }> = {
   "meta.pages": { href: "/campaigns", label: "Open Social Posts →" },
   "meta.instagram": { href: "/campaigns", label: "Open Instagram Posts →" },
   "meta.pixel": { href: "/campaigns", label: "Open Sales Tracking →" },
-  "meta.ads": { href: "/campaigns", label: "Open Ad Campaigns →" },
+  "meta.ads": { href: "/campaigns", label: "Open Meta Ad Campaigns →" },
+  "google.ads": { href: "/campaigns", label: "Open Google Ads Studio →" },
   "google.reviews": { href: "/reviews", label: "Open Google Reviews →" },
   "google.autoreply": { href: "/reviews", label: "Open Review Replies →" },
   "backup.export": { href: "/backups", label: "Open Backups →" },
@@ -97,6 +101,7 @@ export default async function BillingAndWalletPage({
   const planRequests = listWorkspacePlanRequests(session.workspace.id, 25);
   const ledger = listLedgerEntries(session.workspace.id, 40);
   const rechargeRequests = listWorkspaceRechargeRequests(session.workspace.id, 15);
+  const adVault = getAdSpendVaultSummary(session.workspace.id);
   const razorpayReady = isRazorpayCheckoutConfigured();
   const billingSettings = getPlatformBillingSettings();
 
@@ -213,7 +218,7 @@ export default async function BillingAndWalletPage({
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard
           label="Prepaid Wallet Balance"
           value={formatInr(walletBalancePaise, { showDecimals: true })}
@@ -228,6 +233,17 @@ export default async function BillingAndWalletPage({
           }
           accent={isOverdraftExhausted ? "ruby" : walletBalancePaise < 0 ? "amber" : "emerald"}
           icon={<Wallet className="h-4 w-4" />}
+        />
+        <MetricCard
+          label="Ad Spend Vault (0-Overdraft)"
+          value={formatInr(adVault.availablePaise, { showDecimals: true })}
+          sublabel={
+            adVault.netAllocatedToCampaignsPaise > 0
+              ? `${formatInr(adVault.netAllocatedToCampaignsPaise, { showDecimals: true })} reserved in active campaigns`
+              : "Optional — Direct Client Ad Accounts need ₹0 deposit"
+          }
+          accent="sky"
+          icon={<Megaphone className="h-4 w-4" />}
         />
         <MetricCard
           label="Unlocked Tools"
@@ -300,7 +316,7 @@ export default async function BillingAndWalletPage({
               },
               {
                 key: "wallet",
-                label: `Prepaid Wallet & Passbook`,
+                label: `Prepaid Wallet & Ad Spend Vault`,
               },
               {
                 key: "invoices",
@@ -867,8 +883,9 @@ export default async function BillingAndWalletPage({
         </div>
       )}
 
-      {/* TAB 2: PREPAID WALLET & PASSBOOK */}
+      {/* TAB 2: PREPAID WALLET & AD SPEND VAULT */}
       {activeTab === "wallet" && (
+        <div className="space-y-6">
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.15fr_1.35fr]">
           <SectionCard
             title="Recharge Your Prepaid Messaging Wallet"
@@ -1011,32 +1028,22 @@ export default async function BillingAndWalletPage({
             </form>
 
             {razorpayReady && (
-              <form
-                action={createOnlineRazorpayOrderAction}
-                className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200/80 pt-4 text-[13px]"
-              >
-                <div>
+              <div className="mt-4 border-t border-zinc-200/80 pt-4 text-[13px]">
+                <div className="mb-2.5">
                   <div className="font-semibold text-slate-900">
                     Instant Online Payment (Cards / NetBanking / UPI)
                   </div>
                   <div className="text-xs text-zinc-500">
-                    Credits your wallet automatically upon gateway confirmation.
+                    Opens secure Razorpay checkout popup and credits your wallet immediately on verification.
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    name="amountRupees"
-                    type="number"
-                    min="100"
-                    defaultValue="2500"
-                    className="rsl-input w-32 tabular-nums"
-                    style={{ width: "8rem" }}
-                  />
-                  <SubmitButton pendingText="Opening..." className="rsl-btn-secondary">
-                    Pay Online Now
-                  </SubmitButton>
-                </div>
-              </form>
+                <RazorpayCheckoutButton
+                  purpose="wallet_topup"
+                  defaultRupees={2500}
+                  minRupees={100}
+                  buttonLabel="Pay Online Now"
+                />
+              </div>
             )}
             </>
             )}
@@ -1093,6 +1100,174 @@ export default async function BillingAndWalletPage({
               </div>
             )}
           </SectionCard>
+        </div>
+
+        {/* Managed Ad Spend Vault (0-Overdraft) — Meta & Google Ads */}
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.15fr_1.35fr]">
+          <SectionCard
+            title="Managed Ad Spend Vault (0-Overdraft — Meta & Google Ads)"
+            subtitle="Optional prepaid ad budget vault for businesses running Meta or Google Ads through RapidShift's Managed Ad Account / MCC. If you connect your own Meta Ad Account or Google Ads Customer ID (Direct Client Mode), ₹0 vault deposit is required."
+          >
+            <div className="mb-4 rounded-xl border border-sky-200/90 bg-sky-50/70 p-3.5 text-xs text-sky-950">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-bold">
+                  Available Ad Spend Vault: {formatInr(adVault.availablePaise, { showDecimals: true })}
+                </span>
+                <span className="font-semibold tabular-nums">
+                  Overdraft Limit: ₹0.00 (Strict Hard Cutoff)
+                </span>
+              </div>
+              <p className="mt-1 leading-relaxed">
+                Total Deposited: <strong>{formatInr(adVault.totalDepositedPaise, { showDecimals: true })}</strong> •
+                Allocated to Active Managed Campaigns:{" "}
+                <strong>{formatInr(adVault.netAllocatedToCampaignsPaise, { showDecimals: true })}</strong>.
+                Managed campaigns set hard Meta <code className="rounded bg-white/80 px-1 py-0.5 font-mono">spend_cap</code> and Google Ads budget limits and auto-pause at 100% of allocated vault funds so ad spend can never go negative.
+              </p>
+            </div>
+
+            {!canManageBilling ? (
+              <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-4 text-xs text-zinc-600">
+                Read-only billing view — ask the Business Owner or Accounts &amp; Billing manager to deposit Managed Ad Spend funds.
+              </div>
+            ) : (
+              <>
+                <form action={submitAdSpendRechargeRequestAction} className="space-y-4 text-xs">
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
+                    <div>
+                      <label htmlFor="ad-vault-rupees" className="rsl-label">
+                        Ad Deposit (₹ INR, min ₹500)
+                      </label>
+                      <input
+                        id="ad-vault-rupees"
+                        name="amountRupees"
+                        type="number"
+                        min="500"
+                        step="100"
+                        defaultValue="5000"
+                        required
+                        className="rsl-input min-h-10 tabular-nums"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="ad-vault-method" className="rsl-label">
+                        Payment Method
+                      </label>
+                      <select
+                        id="ad-vault-method"
+                        name="paymentMethod"
+                        defaultValue="upi"
+                        className="rsl-input min-h-10"
+                      >
+                        <option value="upi">UPI Payment</option>
+                        <option value="bank_transfer">Bank Transfer (NEFT / IMPS)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="ad-vault-utr" className="rsl-label">
+                        UTR / Transaction Ref # *
+                      </label>
+                      <input
+                        id="ad-vault-utr"
+                        name="utrOrReference"
+                        required
+                        minLength={4}
+                        placeholder="12-digit UPI or bank UTR"
+                        className="rsl-input min-h-10 font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-3.5">
+                    <span className="text-xs text-zinc-500">
+                      Isolated from your WhatsApp wallet — 100% earmarked for Managed Meta &amp; Google Ad budgets.
+                    </span>
+                    <SubmitButton pendingText="Submitting..." className="rsl-btn-primary">
+                      Submit Ad Vault UTR
+                    </SubmitButton>
+                  </div>
+                </form>
+
+                {razorpayReady && (
+                  <div className="mt-4 border-t border-zinc-200/80 pt-4 text-[13px]">
+                    <div className="mb-2.5">
+                      <div className="font-semibold text-slate-900">
+                        Instant Online Ad Spend Deposit (Razorpay)
+                      </div>
+                      <div className="text-xs text-zinc-500">
+                        Fund your 0-overdraft Ad Spend Vault immediately via UPI, Card, or NetBanking.
+                      </div>
+                    </div>
+                    <RazorpayCheckoutButton
+                      purpose="ad_spend_topup"
+                      defaultRupees={5000}
+                      minRupees={500}
+                      buttonLabel="Deposit Ad Funds Online"
+                    />
+                  </div>
+                )}
+              </>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            title="Ad Spend Vault Ledger"
+            subtitle="Immutable audit trail of Managed Ad Spend deposits, campaign allocations, and unspent releases"
+            action={
+              <ActionLink href="/campaigns" spinnerSize="xs" className="rsl-btn-secondary text-xs">
+                Open Ads Studio →
+              </ActionLink>
+            }
+            noPadding
+          >
+            {adVault.recentEntries.length === 0 ? (
+              <div className="p-6 text-[13px] text-zinc-500">
+                No Managed Ad Spend Vault entries yet. Connect your own Meta/Google Ads account on{" "}
+                <ActionLink href="/connections" spinnerSize="xs" className="font-semibold text-emerald-700 underline">
+                  Connected Channels
+                </ActionLink>{" "}
+                for direct billing, or deposit ad funds on the left to launch ads under RapidShift Managed Vault mode.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-[13px]">
+                  <thead className="border-b border-zinc-200/80 bg-zinc-50/70 text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
+                    <tr>
+                      <th className="px-5 py-3 sm:px-6">Description &amp; Channel</th>
+                      <th className="px-4 py-3">Entry Type</th>
+                      <th className="px-5 py-3 text-right sm:px-6">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-100 bg-white">
+                    {adVault.recentEntries.map((entry) => (
+                      <tr key={entry.id} className="hover:bg-zinc-50/60">
+                        <td className="px-5 py-3 sm:px-6">
+                          <div className="font-medium text-slate-900">{entry.description}</div>
+                          <div className="text-xs text-zinc-500 tabular-nums">
+                            {new Date(entry.createdAt).toLocaleString("en-IN")}
+                            {entry.provider && entry.provider !== "vault"
+                              ? ` • ${entry.provider.replace(/_/g, " ").toUpperCase()}`
+                              : ""}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 capitalize text-zinc-600">
+                          {entry.entryType.replace(/_/g, " ")}
+                        </td>
+                        <td
+                          className={`px-5 py-3 text-right font-semibold tabular-nums sm:px-6 ${
+                            entry.amountPaise >= 0 ? "text-emerald-700" : "text-sky-800"
+                          }`}
+                        >
+                          {entry.amountPaise >= 0 ? "+" : ""}
+                          {formatInr(entry.amountPaise, { showDecimals: true })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </SectionCard>
+        </div>
         </div>
       )}
 

@@ -792,5 +792,33 @@ export const sslCertificates = sqliteTable(
   ]
 );
 
+// Isolated 0-Overdraft RSL Managed Ad Spend Vault Ledger (strictly separate from customer_wallet)
+export const adSpendLedger = sqliteTable(
+  "ad_spend_ledger",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    entryType: text("entry_type").notNull(), // deposit | allocate | release | refund | staff_adjustment
+    amountPaise: integer("amount_paise").notNull(), // positive = deposit/release/refund, negative = allocate/adjustment
+    currency: text("currency").notNull().default("INR"),
+    provider: text("provider").notNull().default("vault"), // vault | meta_ads | google_ads
+    campaignId: text("campaign_id"),
+    externalCampaignId: text("external_campaign_id"),
+    paymentId: text("payment_id"),
+    description: text("description").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    actorId: text("actor_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_ad_spend_ledger_idempotency").on(t.workspaceId, t.idempotencyKey),
+    index("idx_ad_spend_ledger_ws_ts").on(t.workspaceId, t.createdAt),
+    index("idx_ad_spend_ledger_campaign").on(t.workspaceId, t.campaignId),
+  ]
+);
+
+
 
 

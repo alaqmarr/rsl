@@ -47,7 +47,7 @@ describe("Phase 15 Suite (Active Tools State Consistency, Zero Redundant Upsells
     });
 
     const services = listServicesWithWorkspaceState(wsId);
-    expect(services.length).toBe(15);
+    expect(services.length).toBe(16);
     expect(services.every((s) => s.isUnlocked)).toBe(true);
     expect(services.every((s) => s.isComplimentaryFreeAccess)).toBe(true);
 
@@ -128,8 +128,8 @@ describe("Phase 15 Suite (Active Tools State Consistency, Zero Redundant Upsells
     expect(clientRow).toBeDefined();
     expect(clientRow.hasFreeAllTools).toBe(true);
     expect(clientRow.freeAccessRemainingDays).toBeGreaterThanOrEqual(179);
-    expect(clientRow.effectiveUnlockedCount).toBe(15);
+    expect(clientRow.effectiveUnlockedCount).toBe(16);
     expect(adminAnalytics.totals.freeAccessClientsCount).toBeGreaterThanOrEqual(1);
-    expect(adminAnalytics.totals.effectiveUnlockedToolsCount).toBeGreaterThanOrEqual(16);
+    expect(adminAnalytics.totals.effectiveUnlockedToolsCount).toBeGreaterThanOrEqual(17);
   });
 });

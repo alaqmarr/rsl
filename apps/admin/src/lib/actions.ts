@@ -65,6 +65,7 @@ import {
   controlDb,
   platformLogsDb,
   recordPlatformCredentialVerification,
+  savePlatformGoogleAdsConfig,
   savePlatformGoogleOAuthConfig,
   savePlatformManagedR2Config,
   savePlatformMetaAppConfig,
@@ -2166,13 +2167,14 @@ export async function staffSaveGoogleOAuthCredentialsAction(formData: FormData) 
       ).trim(),
       enableDriveOAuth: formData.get("enableDriveOAuth") === "on",
       enableGbpOAuth: formData.get("enableGbpOAuth") === "on",
+      enableGoogleAdsOAuth: formData.get("enableGoogleAdsOAuth") === "on",
       staffId: staff.id,
     });
 
     logStaffCredentialAction(
       staff.id,
       "platform.credentials.google_oauth.saved",
-      `Updated Google OAuth 2.0 Web Client (${saved.consentAppName}, Drive=${saved.enableDriveOAuth ? "ON" : "OFF"}, GBP=${saved.enableGbpOAuth ? "ON" : "OFF"}) in control.db`
+      `Updated Google OAuth 2.0 Web Client (${saved.consentAppName}, Drive=${saved.enableDriveOAuth ? "ON" : "OFF"}, GBP=${saved.enableGbpOAuth ? "ON" : "OFF"}, Ads=${saved.enableGoogleAdsOAuth ? "ON" : "OFF"}) in control.db`
     );
 
     return flashAdminRedirect(
@@ -2323,25 +2325,63 @@ export async function staffSaveMetaAppCredentialsAction(formData: FormData) {
       configId: String(formData.get("configId") || "").trim(),
       webhookVerifyToken: String(formData.get("webhookVerifyToken") || "").trim() || undefined,
       graphVersion: String(formData.get("graphVersion") || "v21.0").trim(),
+      enableMetaOAuth: formData.get("enableMetaOAuth") === "on",
+      managedAdAccountId: String(formData.get("managedAdAccountId") || "").trim(),
+      managedPageId: String(formData.get("managedPageId") || "").trim(),
+      managedSystemToken: String(formData.get("managedSystemToken") || "").trim() || undefined,
       staffId: staff.id,
     });
 
     logStaffCredentialAction(
       staff.id,
       "platform.credentials.meta.saved",
-      `Updated Meta Platform App credentials (App ID ${saved.appId}, Graph ${saved.graphVersion}) in control.db`
+      `Updated Meta Platform App credentials (App ID ${saved.appId}, Graph ${saved.graphVersion}, Managed BM=${saved.isManagedAdsReady ? "READY" : "OFF"}) in control.db`
     );
 
     return flashAdminRedirect(
       "/credentials",
       "notice",
-      `Meta / WhatsApp Platform App (${saved.appId}) encrypted and active for HMAC webhook verification.`
+      `Meta / WhatsApp Platform App (${saved.appId}) encrypted and active for 1-Click OAuth, HMAC webhooks & Managed Ad Spend.`
     );
   } catch (err) {
     return flashAdminRedirect(
       "/credentials",
       "error",
       err instanceof Error ? err.message : "Failed to save Meta App credentials."
+    );
+  }
+}
+
+export async function staffSaveGoogleAdsCredentialsAction(formData: FormData) {
+  const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+
+  try {
+    const saved = savePlatformGoogleAdsConfig({
+      enabled: formData.get("enabled") === "on",
+      developerToken: String(formData.get("developerToken") || "").trim() || undefined,
+      loginCustomerId: String(formData.get("loginCustomerId") || "").trim(),
+      managedCustomerId: String(formData.get("managedCustomerId") || "").trim(),
+      managedRefreshToken: String(formData.get("managedRefreshToken") || "").trim() || undefined,
+      apiVersion: String(formData.get("apiVersion") || "v18").trim(),
+      staffId: staff.id,
+    });
+
+    logStaffCredentialAction(
+      staff.id,
+      "platform.credentials.google_ads.saved",
+      `Updated Google Ads Developer Token & MCC (${saved.loginCustomerId || "direct"}, Managed MCC=${saved.isManagedAdsReady ? "READY" : "OFF"}) in control.db`
+    );
+
+    return flashAdminRedirect(
+      "/credentials",
+      "notice",
+      `Google Ads API Developer Token (${saved.apiVersion}) encrypted and active in control.db.`
+    );
+  } catch (err) {
+    return flashAdminRedirect(
+      "/credentials",
+      "error",
+      err instanceof Error ? err.message : "Failed to save Google Ads credentials."
     );
   }
 }
@@ -2383,6 +2423,7 @@ export async function staffClearPlatformCredentialAction(formData: FormData) {
   const providerKey = String(formData.get("providerKey") || "").trim() as PlatformCredentialProviderKey;
   const allowedKeys: PlatformCredentialProviderKey[] = [
     "google_oauth",
+    "google_ads",
     "smtp_email",
     "cloudflare_r2",
     "meta_app",

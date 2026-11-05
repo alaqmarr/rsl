@@ -739,6 +739,30 @@ export const CONTROL_MIGRATIONS: SqlMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_ssl_certs_status_renew ON ssl_certificates(status, renew_after);
     `,
   },
+  {
+    version: 9,
+    name: "0009_ad_spend_vault_and_ads_oauth",
+    sql: `
+      CREATE TABLE IF NOT EXISTS ad_spend_ledger (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        entry_type TEXT NOT NULL,
+        amount_paise INTEGER NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'INR',
+        provider TEXT NOT NULL DEFAULT 'vault',
+        campaign_id TEXT,
+        external_campaign_id TEXT,
+        payment_id TEXT,
+        description TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        actor_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_ad_spend_ledger_idempotency ON ad_spend_ledger(workspace_id, idempotency_key);
+      CREATE INDEX IF NOT EXISTS idx_ad_spend_ledger_ws_ts ON ad_spend_ledger(workspace_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_ad_spend_ledger_campaign ON ad_spend_ledger(workspace_id, campaign_id);
+    `,
+  },
 ];
 
 export const INGRESS_MIGRATIONS: SqlMigration[] = [
@@ -1352,6 +1376,50 @@ export const TENANT_DATA_MIGRATIONS: SqlMigration[] = [
       );
       CREATE INDEX IF NOT EXISTS idx_bill_settlements_bill ON tally_bill_settlements(bill_voucher_id);
       CREATE INDEX IF NOT EXISTS idx_bill_settlements_src ON tally_bill_settlements(settlement_voucher_id);
+    `,
+  },
+  {
+    version: 6,
+    name: "0006_live_ads_creatives_posts_capi_and_webhooks",
+    sql: `
+      ALTER TABLE messages ADD COLUMN broadcast_id TEXT;
+      ALTER TABLE messages ADD COLUMN error_detail TEXT;
+      CREATE INDEX IF NOT EXISTS idx_messages_ext_id ON messages(external_message_id);
+
+      ALTER TABLE campaigns ADD COLUMN billing_mode TEXT NOT NULL DEFAULT 'direct_client';
+      ALTER TABLE campaigns ADD COLUMN lifetime_budget_paise INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE campaigns ADD COLUMN vault_allocated_paise INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE campaigns ADD COLUMN external_account_id TEXT;
+      ALTER TABLE campaigns ADD COLUMN external_campaign_id TEXT;
+      ALTER TABLE campaigns ADD COLUMN external_adset_id TEXT;
+      ALTER TABLE campaigns ADD COLUMN external_creative_id TEXT;
+      ALTER TABLE campaigns ADD COLUMN external_ad_id TEXT;
+      ALTER TABLE campaigns ADD COLUMN headline TEXT;
+      ALTER TABLE campaigns ADD COLUMN primary_text TEXT;
+      ALTER TABLE campaigns ADD COLUMN call_to_action TEXT;
+      ALTER TABLE campaigns ADD COLUMN destination_url TEXT;
+      ALTER TABLE campaigns ADD COLUMN whatsapp_phone_e164 TEXT;
+      ALTER TABLE campaigns ADD COLUMN media_url TEXT;
+      ALTER TABLE campaigns ADD COLUMN target_locations_json TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE campaigns ADD COLUMN target_keywords_json TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE campaigns ADD COLUMN age_min INTEGER NOT NULL DEFAULT 18;
+      ALTER TABLE campaigns ADD COLUMN age_max INTEGER NOT NULL DEFAULT 65;
+      ALTER TABLE campaigns ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'local_draft';
+      ALTER TABLE campaigns ADD COLUMN last_sync_message TEXT;
+      ALTER TABLE campaigns ADD COLUMN last_synced_at INTEGER;
+      CREATE INDEX IF NOT EXISTS idx_campaigns_ext_id ON campaigns(external_campaign_id);
+
+      ALTER TABLE scheduled_posts ADD COLUMN media_type TEXT NOT NULL DEFAULT 'NONE';
+      ALTER TABLE scheduled_posts ADD COLUMN cta_url TEXT;
+      ALTER TABLE scheduled_posts ADD COLUMN cta_type TEXT;
+      ALTER TABLE scheduled_posts ADD COLUMN external_post_id TEXT;
+      ALTER TABLE scheduled_posts ADD COLUMN external_permalink TEXT;
+      ALTER TABLE scheduled_posts ADD COLUMN last_error TEXT;
+
+      ALTER TABLE pixel_events ADD COLUMN source_url TEXT;
+      ALTER TABLE pixel_events ADD COLUMN order_ref TEXT;
+      ALTER TABLE pixel_events ADD COLUMN capi_status TEXT NOT NULL DEFAULT 'local_only';
+      ALTER TABLE pixel_events ADD COLUMN capi_response_detail TEXT;
     `,
   },
 ];

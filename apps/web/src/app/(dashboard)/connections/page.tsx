@@ -10,7 +10,12 @@ import { resolveEndpointsFromHeaders } from "@rsl/core";
 import { controlSchema } from "@rsl/database";
 import { syncGoogleBusinessReviewsForWorkspace } from "@rsl/google";
 import { canRoleAccessWebRoute, canRolePerform, formatRoleLabel } from "@rsl/rbac";
-import { controlDb, getPublicGoogleOAuthStatus } from "@rsl/tenancy";
+import {
+  controlDb,
+  getPublicGoogleAdsStatus,
+  getPublicGoogleOAuthStatus,
+  getPublicMetaOAuthStatus,
+} from "@rsl/tenancy";
 import { AccessRestrictedState, PageHeader, SectionCard, StatusPill } from "@rsl/ui";
 import { ConnectionsHub } from "@/components/connections-hub";
 import { FlashBanner } from "@/components/flash-banner";
@@ -23,6 +28,7 @@ const VALID_CHANNEL_KINDS = new Set<ConnectionChannelKind>([
   "instagram_business",
   "facebook_page",
   "meta_ads_pixel",
+  "google_ads",
   "google_business",
   "google_drive",
 ]);
@@ -81,6 +87,8 @@ export default async function ConnectedAccountsPage({
     .get();
 
   const googleOAuth = getPublicGoogleOAuthStatus();
+  const metaOAuth = getPublicMetaOAuthStatus();
+  const googleAdsStatus = getPublicGoogleAdsStatus();
   const canManage = canRolePerform(session.roleSlug, "connections:manage", session.workspace.id);
   const webhookVerifyToken = canManage
     ? getOrCreateWorkspaceWebhookVerifyToken(session.workspace.id)
@@ -162,6 +170,8 @@ export default async function ConnectedAccountsPage({
         webhookVerifyToken={webhookVerifyToken}
         canManage={canManage}
         googleOAuth={googleOAuth}
+        metaOAuth={metaOAuth}
+        googleAdsStatus={googleAdsStatus}
         workspaceBusiness={{
           name: wsDetails?.name || session.workspace.name,
           industry: wsDetails?.industry || undefined,

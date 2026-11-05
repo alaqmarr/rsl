@@ -1,7 +1,12 @@
 import crypto from "node:crypto";
 import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
-import { createAdvanceReceiptVoucher, creditWallet, verifyRazorpaySignature } from "@rsl/billing";
+import {
+  createAdvanceReceiptVoucher,
+  creditAdSpendVault,
+  creditWallet,
+  verifyRazorpaySignature,
+} from "@rsl/billing";
 import { newId } from "@rsl/core";
 import { controlSchema, ingressSchema } from "@rsl/database";
 import { controlDb, ingressDb } from "@rsl/tenancy";
@@ -48,7 +53,11 @@ export async function POST(req: NextRequest) {
           id?: string;
           order_id?: string;
           amount?: number;
-          notes?: { workspaceId?: string; walletCreditPaise?: string };
+          notes?: {
+            workspaceId?: string;
+            walletCreditPaise?: string;
+            purpose?: string;
+          };
         };
       };
     };
@@ -59,24 +68,38 @@ export async function POST(req: NextRequest) {
     const workspaceId = entity?.notes?.workspaceId;
     const paymentId = entity?.id;
     const creditPaise = Number(entity?.notes?.walletCreditPaise || 0);
+    const isAdSpendTopup = entity?.notes?.purpose === "ad_spend_topup";
 
     if (workspaceId && paymentId && creditPaise > 0) {
       const inv = createAdvanceReceiptVoucher({
         workspaceId,
-        description: `Online Prepaid Wallet Deposit (${paymentId})`,
+        description: isAdSpendTopup
+          ? `Online Managed Ad Spend Vault Deposit (${paymentId})`
+          : `Online Prepaid Wallet Deposit (${paymentId})`,
         amountPaise: creditPaise,
         externalRefKey: `rzp_payment:${paymentId}`,
       });
 
-      creditWallet({
-        workspaceId,
-        amountPaise: creditPaise,
-        description: `Verified Razorpay Wallet Recharge (${paymentId})`,
-        idempotencyKey: `rzp_payment:${paymentId}`,
-        actorId: "razorpay_webhook",
-        entryType: "credit",
-        createInvoice: false,
-      });
+      if (isAdSpendTopup) {
+        creditAdSpendVault({
+          workspaceId,
+          amountPaise: creditPaise,
+          description: `Verified Razorpay Ad Spend Vault Deposit (${paymentId})`,
+          idempotencyKey: `rzp_payment:${paymentId}`,
+          actorId: "razorpay_webhook",
+          entryType: "deposit",
+        });
+      } else {
+        creditWallet({
+          workspaceId,
+          amountPaise: creditPaise,
+          description: `Verified Razorpay Wallet Recharge (${paymentId})`,
+          idempotencyKey: `rzp_payment:${paymentId}`,
+          actorId: "razorpay_webhook",
+          entryType: "credit",
+          createInvoice: false,
+        });
+      }
 
       if (entity?.order_id) {
         controlDb()

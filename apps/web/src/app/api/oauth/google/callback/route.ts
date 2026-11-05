@@ -161,6 +161,13 @@ export async function GET(req: NextRequest) {
       return buildAppRedirect(appBaseUrl, returnTo, "notice", successMsg);
     }
 
+    if (parsedState.purpose === "google_ads") {
+      const adsMsg = result.formattedCustomerId
+        ? `Google Ads '${result.displayName}' connected via Google Sign-In! ${result.adsDiscoveryDetail || ""}`.trim()
+        : `Google Ads (${result.email}) connected! ${result.adsDiscoveryDetail || ""}`.trim();
+      return buildAppRedirect(appBaseUrl, returnTo, "notice", adsMsg);
+    }
+
     let successMsg = result.storeName
       ? `Google Business Profile '${result.storeName}' (${result.email}) connected!`
       : `Google Business Profile (${result.email}) connected!`;

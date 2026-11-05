@@ -10,8 +10,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@rsl/api-keys": "workspace:*",
+    "@rsl/billing": "workspace:*",
+    "@rsl/connections": "workspace:*",
     "@rsl/core": "workspace:*",
     "@rsl/database": "workspace:*",
+    "@rsl/google": "workspace:*",
     "@rsl/logging": "workspace:*",
     "@rsl/rbac": "workspace:*",
     "@rsl/tenancy": "workspace:*",

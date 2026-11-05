@@ -291,6 +291,9 @@ importers:
       '@rsl/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@rsl/connections':
+        specifier: workspace:*
+        version: link:../../packages/connections
       '@rsl/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -300,9 +303,15 @@ importers:
       '@rsl/logging':
         specifier: workspace:*
         version: link:../../packages/logging
+      '@rsl/meta':
+        specifier: workspace:*
+        version: link:../../packages/meta
       '@rsl/queue':
         specifier: workspace:*
         version: link:../../packages/queue
+      '@rsl/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
       '@rsl/tally':
         specifier: workspace:*
         version: link:../../packages/tally
@@ -585,6 +594,9 @@ importers:
       '@rsl/billing':
         specifier: workspace:*
         version: link:../billing
+      '@rsl/connections':
+        specifier: workspace:*
+        version: link:../connections
       '@rsl/core':
         specifier: workspace:*
         version: link:../core
@@ -639,12 +651,24 @@ importers:
 
   packages/meta:
     dependencies:
+      '@rsl/api-keys':
+        specifier: workspace:*
+        version: link:../api-keys
+      '@rsl/billing':
+        specifier: workspace:*
+        version: link:../billing
+      '@rsl/connections':
+        specifier: workspace:*
+        version: link:../connections
       '@rsl/core':
         specifier: workspace:*
         version: link:../core
       '@rsl/database':
         specifier: workspace:*
         version: link:../database
+      '@rsl/google':
+        specifier: workspace:*
+        version: link:../google
       '@rsl/logging':
         specifier: workspace:*
         version: link:../logging

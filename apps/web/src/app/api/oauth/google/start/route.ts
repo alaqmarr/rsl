@@ -51,7 +51,11 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const rawPurpose = (sp.get("purpose") || "google_drive").trim();
   const purpose: GoogleOAuthPurpose =
-    rawPurpose === "google_business" ? "google_business" : "google_drive";
+    rawPurpose === "google_business"
+      ? "google_business"
+      : rawPurpose === "google_ads"
+        ? "google_ads"
+        : "google_drive";
   const returnTo = sanitizeReturnTo(
     sp.get("returnTo") || (purpose === "google_drive" ? "/backups" : "/connections")
   );

@@ -19,6 +19,7 @@ export const API_SCOPES = [
   { key: "whatsapp:read", label: "Read WhatsApp Business templates" },
   { key: "whatsapp:write", label: "Create WhatsApp templates and send template messages" },
   { key: "messages:write", label: "Send approved WhatsApp notifications" },
+  { key: "pixel:write", label: "Ingest website sales pixel & Meta CAPI events" },
   { key: "analytics:read", label: "Read business analytics summaries" },
 ] as const;
 

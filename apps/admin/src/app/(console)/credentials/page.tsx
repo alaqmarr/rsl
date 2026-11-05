@@ -14,6 +14,7 @@ import {
 import { AdminCopyButton, SubmitButton } from "@/components/ios-feedback";
 import {
   staffClearPlatformCredentialAction,
+  staffSaveGoogleAdsCredentialsAction,
   staffSaveGoogleOAuthCredentialsAction,
   staffSaveManagedR2CredentialsAction,
   staffSaveMetaAppCredentialsAction,
@@ -65,10 +66,11 @@ export default async function AdminPlatformCredentialsPage({
       : `https://app.${endpoints.primaryDomain}`;
   const googleRedirectUri = `${googleOrigin}/api/oauth/google/callback`;
   const googleScopesText =
-    "openid, email, profile, https://www.googleapis.com/auth/drive.file, https://www.googleapis.com/auth/business.manage";
+    "openid, email, profile, https://www.googleapis.com/auth/drive.file, https://www.googleapis.com/auth/business.manage, https://www.googleapis.com/auth/adwords";
 
   const dbActiveCount = [
     snap.google.source,
+    snap.googleAds.source,
     snap.smtp.source,
     snap.r2.source,
     snap.meta.source,
@@ -119,7 +121,7 @@ export default async function AdminPlatformCredentialsPage({
         />
         <MetricCard
           label="DB-Controlled Providers"
-          value={`${dbActiveCount} / 5`}
+          value={`${dbActiveCount} / 6`}
           sublabel="Encrypted with KMS envelope keys in control.db"
           accent="emerald"
         />
@@ -446,6 +448,15 @@ export default async function AdminPlatformCredentialsPage({
               />
               <span>Enable 1-Click Google Business Profile Sign-In (<code className="font-mono">business.manage</code>)</span>
             </label>
+            <label className="inline-flex items-center gap-2 font-medium text-slate-700">
+              <input
+                type="checkbox"
+                name="enableGoogleAdsOAuth"
+                defaultChecked={snap.google.enableGoogleAdsOAuth}
+                className="h-4 w-4 rounded border-zinc-300 text-emerald-600"
+              />
+              <span>Enable 1-Click Google Ads OAuth (<code className="font-mono">adwords</code>)</span>
+            </label>
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
@@ -758,10 +769,10 @@ export default async function AdminPlatformCredentialsPage({
           )}
         </SectionCard>
 
-        {/* 4. Meta / WhatsApp Platform App */}
+        {/* 4. Meta / WhatsApp Platform App & Managed BM */}
         <SectionCard
-          title="4. Meta / WhatsApp Cloud Platform App"
-          subtitle="Platform-level Meta App Secret for X-Hub-Signature-256 webhook verification & Embedded Signup"
+          title="4. Meta / WhatsApp Platform App & Managed BM"
+          subtitle="Powers 1-Click Facebook/Meta OAuth, X-Hub-Signature-256 webhooks, and optional RSL Managed Ad Spend Vault"
           action={sourcePill(snap.meta.source, snap.meta.isReady)}
         >
           <form action={staffSaveMetaAppCredentialsAction} className="space-y-3.5 text-xs">
@@ -831,16 +842,73 @@ export default async function AdminPlatformCredentialsPage({
               </div>
             </div>
 
+            <div className="rounded-xl border border-zinc-200/80 bg-zinc-50/70 p-3 space-y-2.5">
+              <div className="font-bold text-slate-900">
+                Optional — RSL Managed Ad Spend Vault (Master Business Manager Account)
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div>
+                  <label className="mb-1 block font-semibold text-zinc-700">
+                    Master Ad Account (<code className="font-mono">act_...</code>)
+                  </label>
+                  <input
+                    name="managedAdAccountId"
+                    defaultValue={snap.meta.managedAdAccountId}
+                    placeholder="act_1234567890"
+                    className="adm-input bg-white font-mono text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block font-semibold text-zinc-700">
+                    Default Master Page ID
+                  </label>
+                  <input
+                    name="managedPageId"
+                    defaultValue={snap.meta.managedPageId}
+                    placeholder="Optional Page ID"
+                    className="adm-input bg-white font-mono text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block font-semibold text-zinc-700">
+                    BM System User Token{" "}
+                    {snap.meta.maskedManagedSystemToken ? `(${snap.meta.maskedManagedSystemToken})` : ""}
+                  </label>
+                  <input
+                    name="managedSystemToken"
+                    type="password"
+                    placeholder={
+                      snap.meta.maskedManagedSystemToken
+                        ? "Leave blank to keep saved token"
+                        : "EAAG... System User Token"
+                    }
+                    className="adm-input bg-white font-mono text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+
             <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-              <label className="inline-flex items-center gap-2 font-semibold text-slate-800">
-                <input
-                  type="checkbox"
-                  name="enabled"
-                  defaultChecked={snap.meta.enabled}
-                  className="h-4 w-4 rounded border-zinc-300 text-emerald-600"
-                />
-                <span>Verify Webhook HMAC with App Secret</span>
-              </label>
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="inline-flex items-center gap-2 font-semibold text-slate-800">
+                  <input
+                    type="checkbox"
+                    name="enabled"
+                    defaultChecked={snap.meta.enabled}
+                    className="h-4 w-4 rounded border-zinc-300 text-emerald-600"
+                  />
+                  <span>Verify Webhook HMAC</span>
+                </label>
+                <label className="inline-flex items-center gap-2 font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    name="enableMetaOAuth"
+                    defaultChecked={snap.meta.enableMetaOAuth}
+                    className="h-4 w-4 rounded border-zinc-300 text-emerald-600"
+                  />
+                  <span>Enable 1-Click Facebook / Meta OAuth</span>
+                </label>
+              </div>
               <SubmitButton className="adm-btn-primary" pendingText="Saving Meta App...">
                 Save Meta App Credentials
               </SubmitButton>
@@ -858,9 +926,101 @@ export default async function AdminPlatformCredentialsPage({
         </SectionCard>
       </div>
 
-      {/* 5. Razorpay Automated Gateway */}
+      {/* 4B. Google Ads Developer Token & Managed MCC */}
       <SectionCard
-        title="5. Razorpay Automated Checkout Gateway (Optional — Alongside Manual UPI QR / UTR)"
+        title="5. Google Ads API Developer Token & Master MCC (Direct Client Ads + Managed Ad Spend Vault)"
+        subtitle="Paste your Google Ads Manager (MCC) Developer Token from Tools → API Center so clients can connect their own Google Ads accounts OR fund RSL Managed Google Search & Performance Max campaigns"
+        action={sourcePill(snap.googleAds.source, snap.googleAds.isReady)}
+      >
+        <form action={staffSaveGoogleAdsCredentialsAction} className="space-y-3.5 text-xs">
+          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <label className="mb-1 block font-semibold text-zinc-700">
+                Developer Token{" "}
+                {snap.googleAds.maskedDeveloperToken ? `(${snap.googleAds.maskedDeveloperToken})` : "*"}
+              </label>
+              <input
+                name="developerToken"
+                type="password"
+                placeholder={
+                  snap.googleAds.maskedDeveloperToken
+                    ? "Leave blank to keep saved Developer Token"
+                    : "Google Ads MCC Developer Token"
+                }
+                className="adm-input font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block font-semibold text-zinc-700">
+                RSL Manager MCC ID (<code className="font-mono">login-customer-id</code>)
+              </label>
+              <input
+                name="loginCustomerId"
+                defaultValue={snap.googleAds.loginCustomerId}
+                placeholder="123-456-7890"
+                className="adm-input font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block font-semibold text-zinc-700">
+                Managed Vault Customer ID (Optional)
+              </label>
+              <input
+                name="managedCustomerId"
+                defaultValue={snap.googleAds.managedCustomerId}
+                placeholder="987-654-3210"
+                className="adm-input font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block font-semibold text-zinc-700">
+                Managed MCC Refresh Token{" "}
+                {snap.googleAds.maskedManagedRefreshToken
+                  ? `(${snap.googleAds.maskedManagedRefreshToken})`
+                  : "(Optional)"}
+              </label>
+              <input
+                name="managedRefreshToken"
+                type="password"
+                placeholder={
+                  snap.googleAds.maskedManagedRefreshToken
+                    ? "Leave blank to keep saved token"
+                    : "1//0g... MCC OAuth Refresh Token"
+                }
+                className="adm-input font-mono text-xs"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <label className="inline-flex items-center gap-2 font-semibold text-slate-800">
+              <input
+                type="checkbox"
+                name="enabled"
+                defaultChecked={snap.googleAds.enabled}
+                className="h-4 w-4 rounded border-zinc-300 text-emerald-600"
+              />
+              <span>Enable Live Google Ads REST API (v18)</span>
+            </label>
+            <SubmitButton className="adm-btn-primary" pendingText="Saving Google Ads...">
+              Save Google Ads API Credentials
+            </SubmitButton>
+          </div>
+        </form>
+
+        {snap.googleAds.source === "database" && (
+          <form action={staffClearPlatformCredentialAction} className="mt-3 border-t border-zinc-100 pt-3">
+            <input type="hidden" name="providerKey" value="google_ads" />
+            <SubmitButton className="adm-btn-secondary py-1 text-[11px]" pendingText="Clearing...">
+              Remove Database Override
+            </SubmitButton>
+          </form>
+        )}
+      </SectionCard>
+
+      {/* 6. Razorpay Automated Gateway */}
+      <SectionCard
+        title="6. Razorpay Automated Checkout Gateway (Optional — Alongside Manual UPI QR / UTR)"
         subtitle="Leave unconfigured if collecting zero-fee UPI QR & NEFT UTR transfers; add Razorpay keys anytime to unlock instant automated wallet top-up checkout"
         action={sourcePill(snap.razorpay.source, snap.razorpay.isReady)}
       >
