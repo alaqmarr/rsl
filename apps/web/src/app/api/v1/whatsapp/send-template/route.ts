@@ -1,8 +1,11 @@
+import { and, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { authenticatePublicApiKey } from "@rsl/api-keys";
 import { requireEntitlement } from "@rsl/billing";
-import { newEntityId, RslError } from "@rsl/core";
+import { decryptEnvelope, newEntityId, RslError } from "@rsl/core";
+import { controlSchema, tenantDataSchema } from "@rsl/database";
 import { enqueueJob } from "@rsl/queue";
+import { controlDb, tenantDataDb } from "@rsl/tenancy";
 
 export async function POST(req: NextRequest) {
   try {
@@ -30,6 +33,61 @@ export async function POST(req: NextRequest) {
       throw new RslError(
         "RSL-VAL-1001",
         "Provide templateName (or templateId) and recipientPhone to send a WhatsApp template."
+      );
+    }
+
+    const wabaConn = controlDb()
+      .select()
+      .from(controlSchema.connections)
+      .where(
+        and(
+          eq(controlSchema.connections.workspaceId, auth.workspaceId),
+          eq(controlSchema.connections.provider, "whatsapp")
+        )
+      )
+      .get();
+
+    if (!wabaConn || wabaConn.status !== "healthy") {
+      throw new RslError(
+        "RSL-VAL-1001",
+        "WhatsApp Business Account is not connected for this workspace. Connect WhatsApp first — ₹0.00 deducted."
+      );
+    }
+
+    const dataDb = tenantDataDb({ workspaceId: auth.workspaceId });
+    const tmpl =
+      dataDb
+        .select()
+        .from(tenantDataSchema.whatsappTemplates)
+        .where(eq(tenantDataSchema.whatsappTemplates.id, templateIdOrName))
+        .get() ??
+      dataDb
+        .select()
+        .from(tenantDataSchema.whatsappTemplates)
+        .where(eq(tenantDataSchema.whatsappTemplates.name, templateIdOrName))
+        .get();
+
+    if (!tmpl || tmpl.approvalStatus !== "APPROVED") {
+      throw new RslError(
+        "RSL-VAL-1001",
+        tmpl
+          ? `Template '${tmpl.name}' has status '${tmpl.approvalStatus}'. Only Meta-approved ('APPROVED') templates can be sent — ₹0.00 deducted.`
+          : `Template '${templateIdOrName}' was not found or is not approved — ₹0.00 deducted.`
+      );
+    }
+
+    let rawToken = decryptEnvelope(wabaConn.encryptedTokens);
+    try {
+      const parsed = JSON.parse(rawToken) as { accessToken?: string };
+      if (typeof parsed.accessToken === "string") rawToken = parsed.accessToken;
+    } catch {
+      // Plaintext token fallback
+    }
+    const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(rawToken.trim());
+    if (!isSandbox && !tmpl.metaTemplateId) {
+      throw new RslError(
+        "RSL-VAL-1001",
+        `Template '${tmpl.name}' has not been verified on Meta WhatsApp Manager yet — ₹0.00 deducted.`
       );
     }
 

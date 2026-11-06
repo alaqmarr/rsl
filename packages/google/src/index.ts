@@ -557,16 +557,6 @@ export const generateSmartReviewDraft = defineAction({
       );
     }
 
-    consumeUsage({
-      workspaceId: ctx.workspaceId,
-      serviceKey: "google.autoreply",
-      quantity: 1,
-      unitCostPaise,
-      dedupeKey: `review_draft:${review.id}:${Math.floor(Date.now() / 3000)}`,
-      description: `Smart reply draft for ${review.reviewerName} (${review.rating}★)`,
-      actorId: ctx.actorId,
-    });
-
     const draftText = buildSmartReplyDraftText({
       reviewerName: review.reviewerName,
       locationName: review.locationName,
@@ -581,6 +571,16 @@ export const generateSmartReviewDraft = defineAction({
       })
       .where(eq(tenantDataSchema.reviews.id, review.id))
       .run();
+
+    consumeUsage({
+      workspaceId: ctx.workspaceId,
+      serviceKey: "google.autoreply",
+      quantity: 1,
+      unitCostPaise,
+      dedupeKey: `review_draft:${review.id}:${Math.floor(Date.now() / 3000)}`,
+      description: `Smart reply draft for ${review.reviewerName} (${review.rating}★)`,
+      actorId: ctx.actorId,
+    });
 
     return { reviewId: review.id, draftText };
   },

@@ -30,11 +30,50 @@ async function dispatchOutboundConversationMessageLive(params: {
     });
     if (!creds.ok || !creds.accessToken) {
       return {
-        ok: true,
+        ok: false,
         mode: "disconnected",
         externalMessageId: null,
-        deliveryStatus: "delivered",
+        deliveryStatus: "sent",
+        error: "Connect your WhatsApp Business Account under Connected Channels first — ₹0.00 deducted.",
       };
+    }
+
+    const dataDb = tenantDataDb({ workspaceId: params.workspaceId });
+    let tmplRow: typeof tenantDataSchema.whatsappTemplates.$inferSelect | undefined;
+    if (params.templateName) {
+      tmplRow =
+        dataDb
+          .select()
+          .from(tenantDataSchema.whatsappTemplates)
+          .where(eq(tenantDataSchema.whatsappTemplates.name, params.templateName))
+          .get() ??
+        dataDb
+          .select()
+          .from(tenantDataSchema.whatsappTemplates)
+          .where(eq(tenantDataSchema.whatsappTemplates.id, params.templateName))
+          .get();
+
+      if (!tmplRow || tmplRow.approvalStatus !== "APPROVED") {
+        return {
+          ok: false,
+          mode: creds.mode,
+          externalMessageId: null,
+          deliveryStatus: "sent",
+          error: tmplRow
+            ? `Template '${tmplRow.name}' is currently '${tmplRow.approvalStatus}'. Only Meta-approved ('APPROVED') templates can be sent — ₹0.00 deducted.`
+            : `Template '${params.templateName}' was not found or is not approved — ₹0.00 deducted.`,
+        };
+      }
+
+      if (creds.mode === "live" && !tmplRow.metaTemplateId) {
+        return {
+          ok: false,
+          mode: "live",
+          externalMessageId: null,
+          deliveryStatus: "sent",
+          error: `Template '${tmplRow.name}' has not been verified on Meta WhatsApp Manager yet — ₹0.00 deducted.`,
+        };
+      }
     }
 
     if (creds.mode === "sandbox") {
@@ -55,7 +94,7 @@ async function dispatchOutboundConversationMessageLive(params: {
         mode: "live",
         externalMessageId: null,
         deliveryStatus: "sent",
-        error: "Contact does not have a valid WhatsApp phone number (+91...).",
+        error: "Contact does not have a valid WhatsApp phone number (+91...) — ₹0.00 deducted.",
       };
     }
 
@@ -82,29 +121,49 @@ async function dispatchOutboundConversationMessageLive(params: {
         mode: "live",
         externalMessageId: null,
         deliveryStatus: "sent",
-        error: "WhatsApp Phone Number ID is missing on Connected Channels.",
+        error: "WhatsApp Phone Number ID is missing on Connected Channels — ₹0.00 deducted.",
       };
     }
 
-    const dataDb = tenantDataDb({ workspaceId: params.workspaceId });
     const logsDb = tenantLogsDb({ workspaceId: params.workspaceId });
     const started = Date.now();
 
     let apiBody: Record<string, unknown>;
-    if (params.templateName) {
-      const tmplRow = dataDb
-        .select()
-        .from(tenantDataSchema.whatsappTemplates)
-        .where(eq(tenantDataSchema.whatsappTemplates.name, params.templateName))
-        .get();
+    if (params.templateName && tmplRow) {
+      const bodySlotNums = Array.from(
+        new Set(Array.from(tmplRow.bodyText.matchAll(/\{\{(\d+)\}\}/g)).map((m) => Number(m[1])))
+      ).sort((a, b) => a - b);
+      let sampleVals: Record<string, string> = {};
+      try {
+        sampleVals = JSON.parse(tmplRow.sampleValuesJson || "{}") as Record<string, string>;
+      } catch {
+        sampleVals = {};
+      }
+      const components =
+        bodySlotNums.length > 0
+          ? [
+              {
+                type: "body",
+                parameters: bodySlotNums.map((slotNum, idx) => ({
+                  type: "text",
+                  text:
+                    idx === 0
+                      ? params.contact?.name || sampleVals[String(slotNum)] || "Customer"
+                      : sampleVals[String(slotNum)] || params.body.trim().slice(0, 60) || "Update",
+                })),
+              },
+            ]
+          : [];
+
       apiBody = {
         messaging_product: "whatsapp",
         recipient_type: "individual",
         to: toDigits,
         type: "template",
         template: {
-          name: params.templateName,
-          language: { code: tmplRow?.language || "en_IN" },
+          name: tmplRow.name,
+          language: { code: tmplRow.language || "en_IN" },
+          ...(components.length > 0 ? { components } : {}),
         },
       };
     } else {
@@ -150,7 +209,7 @@ async function dispatchOutboundConversationMessageLive(params: {
 
       const resBody = (await resp.json().catch(() => ({}))) as {
         messages?: Array<{ id?: string }>;
-        error?: { message?: string };
+        error?: { message?: string; error_user_msg?: string };
       };
 
       if (!resp.ok) {
@@ -159,14 +218,25 @@ async function dispatchOutboundConversationMessageLive(params: {
           mode: "live",
           externalMessageId: null,
           deliveryStatus: "sent",
-          error: `WhatsApp Cloud API rejected message (HTTP ${resp.status}): ${resBody.error?.message || "Verify 24h window or template status."}`,
+          error: `WhatsApp Cloud API rejected message (HTTP ${resp.status}): ${resBody.error?.error_user_msg || resBody.error?.message || "Verify 24h window or template status."} — ₹0.00 deducted.`,
+        };
+      }
+
+      const confirmedMsgId = resBody.messages?.[0]?.id?.trim();
+      if (!confirmedMsgId) {
+        return {
+          ok: false,
+          mode: "live",
+          externalMessageId: null,
+          deliveryStatus: "sent",
+          error: "WhatsApp Cloud API did not return a confirmed message ID (wamid) — ₹0.00 deducted.",
         };
       }
 
       return {
         ok: true,
         mode: "live",
-        externalMessageId: resBody.messages?.[0]?.id || `wamid.live_${Date.now()}`,
+        externalMessageId: confirmedMsgId,
         deliveryStatus: "sent",
       };
     } catch (err) {
@@ -175,7 +245,7 @@ async function dispatchOutboundConversationMessageLive(params: {
         mode: "live",
         externalMessageId: null,
         deliveryStatus: "sent",
-        error: err instanceof Error ? err.message : "Network error reaching WhatsApp Cloud API.",
+        error: `${err instanceof Error ? err.message : "Network error reaching WhatsApp Cloud API."} — ₹0.00 deducted.`,
       };
     }
   }
@@ -608,7 +678,35 @@ export const replyToConversation = defineAction({
       }
     }
 
-    const templateCostPaise = conv.channel === "whatsapp" && input.templateName ? 85 : 0;
+    let matchedTemplate: typeof tenantDataSchema.whatsappTemplates.$inferSelect | undefined;
+    if (conv.channel === "whatsapp" && input.templateName) {
+      matchedTemplate =
+        db
+          .select()
+          .from(tenantDataSchema.whatsappTemplates)
+          .where(eq(tenantDataSchema.whatsappTemplates.name, input.templateName))
+          .get() ??
+        db
+          .select()
+          .from(tenantDataSchema.whatsappTemplates)
+          .where(eq(tenantDataSchema.whatsappTemplates.id, input.templateName))
+          .get();
+      if (!matchedTemplate || matchedTemplate.approvalStatus !== "APPROVED") {
+        throw new RslError(
+          "RSL-VAL-1001",
+          matchedTemplate
+            ? `Template '${matchedTemplate.name}' is currently '${matchedTemplate.approvalStatus}'. Select a Meta-approved ('APPROVED') template.`
+            : `Template '${input.templateName}' is missing or not approved by Meta.`
+        );
+      }
+    }
+
+    const templateCostPaise =
+      conv.channel === "whatsapp" && matchedTemplate
+        ? matchedTemplate.category === "marketing"
+          ? 95
+          : 85
+        : 0;
     if (templateCostPaise > 0 && !canDebitWalletUsage(getWalletBalancePaise(ctx.workspaceId), templateCostPaise)) {
       throw new RslError("RSL-BILL-1003");
     }
@@ -630,7 +728,7 @@ export const replyToConversation = defineAction({
       channel: conv.channel as "whatsapp" | "instagram" | "facebook" | "google_review",
       contact,
       body: input.body,
-      templateName: input.templateName,
+      templateName: matchedTemplate?.name ?? input.templateName,
       correlationId: ctx.correlationId,
     });
 
@@ -650,7 +748,7 @@ export const replyToConversation = defineAction({
         quantity: 1,
         unitCostPaise: templateCostPaise,
         dedupeKey: guardKey,
-        description: `WhatsApp template reply '${input.templateName}' to ${contact?.name ?? conv.contactId}`,
+        description: `WhatsApp template reply '${matchedTemplate?.name ?? input.templateName}' to ${contact?.name ?? conv.contactId}`,
         actorId: ctx.actorId,
       });
     }
@@ -672,11 +770,11 @@ export const replyToConversation = defineAction({
         senderType: input.templateName ? "template_automation" : "team_member",
         senderId: ctx.actorId,
         body: input.body.trim(),
-        templateName: input.templateName || null,
+        templateName: matchedTemplate?.name || input.templateName || null,
         deliveryStatus: liveOut.deliveryStatus,
         externalMessageId: liveOut.externalMessageId,
-        costPaise: input.templateName ? 85 : 0,
-        pricingCategory: input.templateName ? "utility" : "service",
+        costPaise: templateCostPaise,
+        pricingCategory: matchedTemplate ? matchedTemplate.category : input.templateName ? "utility" : "service",
         createdAt: now,
       })
       .run();

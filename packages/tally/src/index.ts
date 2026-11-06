@@ -4,7 +4,8 @@ import zlib from "node:zlib";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { dispatchWorkspaceWebhookEvent } from "@rsl/api-keys";
-import { canDebitWalletUsage, consumeUsage, getWalletBalancePaise } from "@rsl/billing";
+import { canDebitWalletUsage, getWalletBalancePaise } from "@rsl/billing";
+import { executeWhatsAppTemplateSend } from "@rsl/whatsapp";
 import {
   decryptEnvelope,
   encryptEnvelope,
@@ -2176,6 +2177,62 @@ export const recordTallyVoucher = defineAction({
   },
 });
 
+function extractWabaTokenFromEncrypted(encryptedBlob: string): string {
+  const decrypted = decryptEnvelope(encryptedBlob);
+  try {
+    const parsed = JSON.parse(decrypted) as { accessToken?: unknown };
+    if (parsed && typeof parsed.accessToken === "string") {
+      return parsed.accessToken.trim();
+    }
+  } catch {
+    // Plaintext envelope fallback
+  }
+  return decrypted.trim();
+}
+
+function assertTemplateIsMetaApproved(
+  workspaceId: string,
+  tmpl: typeof tenantDataSchema.whatsappTemplates.$inferSelect | undefined,
+  requestedLabel?: string
+): asserts tmpl is typeof tenantDataSchema.whatsappTemplates.$inferSelect {
+  if (!tmpl) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      requestedLabel
+        ? `WhatsApp template '${requestedLabel}' was not found. Install or create a Meta-approved template under WhatsApp & Templates first.`
+        : "Please select a valid Meta-approved WhatsApp message template first."
+    );
+  }
+  if (tmpl.approvalStatus !== "APPROVED") {
+    throw new RslError(
+      "RSL-VAL-1001",
+      `Template '${tmpl.name}' is currently '${tmpl.approvalStatus}'. Only Meta-approved ('APPROVED') WhatsApp templates can be used for automations and reminders.`
+    );
+  }
+
+  const wabaConn = controlDb()
+    .select()
+    .from(controlSchema.connections)
+    .where(
+      and(
+        eq(controlSchema.connections.workspaceId, workspaceId),
+        eq(controlSchema.connections.provider, "whatsapp")
+      )
+    )
+    .get();
+
+  if (wabaConn && wabaConn.status === "healthy") {
+    const token = extractWabaTokenFromEncrypted(wabaConn.encryptedTokens);
+    const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(token);
+    if (!isSandbox && !tmpl.metaTemplateId) {
+      throw new RslError(
+        "RSL-VAL-1001",
+        `Template '${tmpl.name}' has not been verified on Meta WhatsApp Manager yet. Submit or sync your templates under WhatsApp & Templates first.`
+      );
+    }
+  }
+}
+
 export const saveTallyReminderRule = defineAction({
   key: "tally.rule.created",
   permission: "tally:sync.manage",
@@ -2187,14 +2244,29 @@ export const saveTallyReminderRule = defineAction({
   }),
   summarize: (input) => `Saved payment reminder schedule '${input.name}'`,
   handler: (ctx, input) => {
+    const db = tenantDataDb(ctx);
+    const trimmedTemplate = input.templateName.trim();
+    let tmpl = db
+      .select()
+      .from(tenantDataSchema.whatsappTemplates)
+      .where(eq(tenantDataSchema.whatsappTemplates.name, trimmedTemplate))
+      .get();
+    if (!tmpl) {
+      tmpl = db
+        .select()
+        .from(tenantDataSchema.whatsappTemplates)
+        .where(eq(tenantDataSchema.whatsappTemplates.id, trimmedTemplate))
+        .get();
+    }
+    assertTemplateIsMetaApproved(ctx.workspaceId, tmpl, trimmedTemplate);
+
     const id = newId();
-    tenantDataDb(ctx)
-      .insert(tenantDataSchema.reminderRules)
+    db.insert(tenantDataSchema.reminderRules)
       .values({
         id,
         name: input.name.trim(),
         triggerDaysOffset: input.triggerDaysOffset,
-        templateName: input.templateName.trim(),
+        templateName: tmpl.name,
         maxRemindersPerBill: input.maxRemindersPerBill,
         quietHoursStart: 20,
         quietHoursEnd: 9,
@@ -2236,8 +2308,6 @@ async function executeQueuedTallyReminderJob(params: {
   correlationId: string;
 }): Promise<boolean> {
   const dataDb = tenantDataDb({ workspaceId: params.workspaceId });
-  const logsDb = tenantLogsDb({ workspaceId: params.workspaceId });
-  const ctrl = controlDb();
 
   const voucher = dataDb
     .select()
@@ -2253,143 +2323,75 @@ async function executeQueuedTallyReminderJob(params: {
     return false;
   }
 
-  const phone = voucher.partyPhoneE164;
-  if (!canDebitWalletUsage(getWalletBalancePaise(params.workspaceId), 85)) {
-    markSendGuardOutcome({
-      workspaceId: params.workspaceId,
-      idempotencyKey: params.dailyGuardKey,
-      state: "failed",
-    });
-    return false;
-  }
-
-  const guard = reserveSendGuard({
-    workspaceId: params.workspaceId,
-    idempotencyKey: params.guardKey,
-    channel: "whatsapp",
-    recipient: phone,
-  });
-  if (!guard.allowed) {
-    return false;
-  }
-
   const balancePaise = Math.max(0, voucher.amountPaise - voucher.paidAmountPaise);
   const dueStr = voucher.dueDate
     ? new Date(voucher.dueDate + 5.5 * 3600_000).toISOString().slice(0, 10)
     : "due";
-  const bodyText = `Namaste ${voucher.partyName}, this is a polite reminder that Invoice #${voucher.voucherNumber} has a pending balance of ${formatInr(balancePaise)} (due ${dueStr}). Kindly share details if already paid.`;
 
-  let externalId = `wa_rem_${newId("msg", params.workspaceId)}`;
+  const nativePdf = getNativeTallyVoucherPdf(params.workspaceId, voucher.id);
+  const signedPdfUrl = nativePdf
+    ? buildSignedTallyVoucherPdfUrl({
+        workspaceId: params.workspaceId,
+        voucherId: voucher.id,
+        filename: nativePdf.filename,
+      })
+    : null;
 
-  const wabaConn = ctrl
-    .select()
-    .from(controlSchema.connections)
-    .where(
-      and(
-        eq(controlSchema.connections.workspaceId, params.workspaceId),
-        eq(controlSchema.connections.provider, "whatsapp")
-      )
-    )
-    .get();
-  const wabaAsset = ctrl
-    .select()
-    .from(controlSchema.assets)
-    .where(
-      and(
-        eq(controlSchema.assets.workspaceId, params.workspaceId),
-        eq(controlSchema.assets.assetType, "waba_phone"),
-        eq(controlSchema.assets.active, true)
-      )
-    )
-    .get();
-
-  if (wabaConn && wabaConn.status === "healthy") {
-    const phoneNumberId = wabaAsset?.externalId || wabaConn.externalAccountId;
-    const started = Date.now();
-    try {
-      const accessToken = decryptEnvelope(wabaConn.encryptedTokens);
-      const resp = await fetch(
-        `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            messaging_product: "whatsapp",
-            recipient_type: "individual",
-            to: phone.replace(/^\+/, ""),
-            type: "template",
-            template: {
-              name: params.templateName,
-              language: { code: "en_IN" },
-              components: [
-                {
-                  type: "body",
-                  parameters: [
-                    { type: "text", text: voucher.partyName },
-                    { type: "text", text: voucher.voucherNumber },
-                    { type: "text", text: formatInr(balancePaise) },
-                    { type: "text", text: dueStr },
-                  ],
-                },
-              ],
-            },
-          }),
-        }
-      );
-
-      logsDb
-        .insert(tenantLogsSchema.providerCalls)
-        .values({
-          id: newEntityId("req", params.workspaceId),
-          ts: Date.now(),
-          provider: "whatsapp",
-          operation: "messages.send_reminder_template",
-          method: "POST",
-          status: resp.status,
-          latencyMs: Date.now() - started,
-          correlationId: params.correlationId,
-        })
-        .run();
-
-      if (!resp.ok) {
-        markSendGuardOutcome({
-          workspaceId: params.workspaceId,
-          idempotencyKey: params.dailyGuardKey,
-          state: "failed",
-        });
-        markSendGuardOutcome({
-          workspaceId: params.workspaceId,
-          idempotencyKey: params.guardKey,
-          state: "failed",
-        });
-        throw new Error(`Meta WhatsApp API returned HTTP ${resp.status} during reminder send`);
-      }
-
-      const out = (await resp.json()) as { messages?: Array<{ id: string }> };
-      if (out.messages?.[0]?.id) {
-        externalId = out.messages[0].id;
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith("Meta WhatsApp API returned HTTP")) {
-        throw err;
-      }
-      // Keep local sandbox dispatch intact when offline/placeholder token cannot reach internet
-    }
-  }
-
-  // Charge wallet ONLY after message dispatch succeeds (P0-03: prevents ghost billing)
-  consumeUsage({
+  const sendRes = await executeWhatsAppTemplateSend({
     workspaceId: params.workspaceId,
-    serviceKey: "tally.invoicing",
-    quantity: 1,
-    unitCostPaise: 85,
-    dedupeKey: params.guardKey,
-    description: `Scheduled payment reminder (${params.ruleName}) for Bill #${voucher.voucherNumber}`,
+    templateIdOrName: params.templateName,
+    recipientPhone: voucher.partyPhoneE164,
+    recipientName: voucher.partyName,
+    variables: {
+      partyName: voucher.partyName,
+      voucherNumber: voucher.voucherNumber,
+      amountFormatted: formatInr(voucher.amountPaise),
+      balanceFormatted: formatInr(balancePaise),
+      dueDateFormatted: dueStr,
+      voucherDateFormatted: formatHumanDate(voucher.voucherDate),
+      "1": voucher.partyName,
+      "2": voucher.voucherNumber,
+      "3": formatInr(balancePaise),
+      "4": dueStr,
+    },
+    idempotencyKey: params.guardKey,
     actorId: params.actorId,
+    linkedVoucherGuid: voucher.guid,
+    serviceKey: "tally.invoicing",
+    correlationId: params.correlationId,
+    pdfDocument:
+      nativePdf && signedPdfUrl
+        ? {
+            url: signedPdfUrl,
+            filename: nativePdf.filename,
+            caption: `Payment reminder — Bill #${voucher.voucherNumber}`,
+            sizeBytes: nativePdf.byteSize,
+          }
+        : undefined,
   });
+
+  if (!sendRes.sent) {
+    if (!sendRes.deduplicated) {
+      markSendGuardOutcome({
+        workspaceId: params.workspaceId,
+        idempotencyKey: params.dailyGuardKey,
+        state: "failed",
+      });
+      appendActionLog({
+        workspaceId: params.workspaceId,
+        actorType: params.actorId.startsWith("wrk") || params.actorId === "system" ? "system" : "user",
+        actorId: params.actorId,
+        source: "worker",
+        action: "tally.reminders.swept",
+        outcome: "skipped",
+        requestId: params.correlationId,
+        correlationId: params.correlationId,
+        durationMs: 10,
+        summary: `Overdue reminder skipped for Bill #${voucher.voucherNumber} (${sendRes.skippedReason || "provider error"}) — ₹0.00 deducted`,
+      });
+    }
+    return false;
+  }
 
   const now = Date.now();
   dataDb
@@ -2401,102 +2403,11 @@ async function executeQueuedTallyReminderJob(params: {
     .where(eq(tenantDataSchema.tallyVouchers.id, voucher.id))
     .run();
 
-  // Persist outbound reminder in Customer Inbox conversation & messages
-  let contact = dataDb
-    .select()
-    .from(tenantDataSchema.contacts)
-    .where(eq(tenantDataSchema.contacts.phoneE164, phone))
-    .get();
-  if (!contact) {
-    const cid = newEntityId("cnt", params.workspaceId, now);
-    dataDb
-      .insert(tenantDataSchema.contacts)
-      .values({
-        id: cid,
-        name: voucher.partyName,
-        phoneE164: phone,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .run();
-    contact = dataDb
-      .select()
-      .from(tenantDataSchema.contacts)
-      .where(eq(tenantDataSchema.contacts.id, cid))
-      .get()!;
-  }
-
-  let conv = dataDb
-    .select()
-    .from(tenantDataSchema.conversations)
-    .where(
-      and(
-        eq(tenantDataSchema.conversations.contactId, contact.id),
-        eq(tenantDataSchema.conversations.channel, "whatsapp")
-      )
-    )
-    .get();
-  if (!conv) {
-    const convId = newEntityId("cnv", params.workspaceId, now);
-    dataDb
-      .insert(tenantDataSchema.conversations)
-      .values({
-        id: convId,
-        contactId: contact.id,
-        channel: "whatsapp",
-        status: "open",
-        linkedVoucherGuid: voucher.guid,
-        lastMessagePreview: bodyText.slice(0, 140),
-        lastActivityAt: now,
-        createdAt: now,
-      })
-      .run();
-    conv = dataDb
-      .select()
-      .from(tenantDataSchema.conversations)
-      .where(eq(tenantDataSchema.conversations.id, convId))
-      .get()!;
-  } else {
-    dataDb
-      .update(tenantDataSchema.conversations)
-      .set({
-        linkedVoucherGuid: voucher.guid,
-        lastMessagePreview: bodyText.slice(0, 140),
-        lastActivityAt: now,
-      })
-      .where(eq(tenantDataSchema.conversations.id, conv.id))
-      .run();
-  }
-
-  dataDb
-    .insert(tenantDataSchema.messages)
-    .values({
-      id: newEntityId("msg", params.workspaceId, now),
-      conversationId: conv.id,
-      direction: "outbound",
-      senderType: "system",
-      senderId: params.actorId,
-      body: bodyText,
-      templateName: params.templateName,
-      deliveryStatus: "sent",
-      costPaise: 85,
-      pricingCategory: "utility",
-      externalMessageId: externalId,
-      createdAt: now,
-    })
-    .run();
-
   markSendGuardOutcome({
     workspaceId: params.workspaceId,
     idempotencyKey: params.dailyGuardKey,
     state: "confirmed",
-    externalId,
-  });
-  markSendGuardOutcome({
-    workspaceId: params.workspaceId,
-    idempotencyKey: params.guardKey,
-    state: "confirmed",
-    externalId,
+    externalId: sendRes.externalMessageId,
   });
 
   return true;
@@ -2569,6 +2480,41 @@ export async function sweepDueTallyPaymentReminders(params: {
         v.dueDate !== null
     );
 
+  // Never lock daily guards or dispatch reminders when WhatsApp Business Account is disconnected
+  const wabaConn = controlDb()
+    .select()
+    .from(controlSchema.connections)
+    .where(
+      and(
+        eq(controlSchema.connections.workspaceId, params.workspaceId),
+        eq(controlSchema.connections.provider, "whatsapp")
+      )
+    )
+    .get();
+  if (!wabaConn || wabaConn.status !== "healthy") {
+    return {
+      sentCount: 0,
+      skippedQuietHours: false,
+      evaluatedCount: openVouchers.length,
+    };
+  }
+  const wabaToken = extractWabaTokenFromEncrypted(wabaConn.encryptedTokens);
+  if (!wabaToken) {
+    return {
+      sentCount: 0,
+      skippedQuietHours: false,
+      evaluatedCount: openVouchers.length,
+    };
+  }
+  const isSandboxWaba = /^(rsl_sandbox_|sandbox_|test_)/i.test(wabaToken);
+
+  const allTemplates = dataDb.select().from(tenantDataSchema.whatsappTemplates).all();
+  const approvedTemplateByName = new Map(
+    allTemplates
+      .filter((t) => t.approvalStatus === "APPROVED" && (isSandboxWaba || Boolean(t.metaTemplateId)))
+      .map((t) => [t.name, t])
+  );
+
   const suppressions = new Set(
     logsDb
       .select()
@@ -2581,8 +2527,15 @@ export async function sweepDueTallyPaymentReminders(params: {
   let enqueuedCount = 0;
   let skippedQuietHours = false;
   let projectedSpendPaise = 0;
+  const enqueuedTargets: Array<{ voucherId: string; expectedSeq: number }> = [];
 
   for (const rule of activeRules) {
+    const approvedTmpl = approvedTemplateByName.get(rule.templateName);
+    if (!approvedTmpl) {
+      continue;
+    }
+    const unitCostPaise = approvedTmpl.category === "marketing" ? 95 : 85;
+
     const inQuietHours =
       rule.quietHoursStart > rule.quietHoursEnd
         ? istHour >= rule.quietHoursStart || istHour < rule.quietHoursEnd
@@ -2601,7 +2554,7 @@ export async function sweepDueTallyPaymentReminders(params: {
       const daysPastDue = Math.floor((now - (voucher.dueDate ?? now)) / 86_400_000);
       if (daysPastDue < rule.triggerDaysOffset) continue;
 
-      if (!canDebitWalletUsage(getWalletBalancePaise(params.workspaceId) - projectedSpendPaise, 85)) {
+      if (!canDebitWalletUsage(getWalletBalancePaise(params.workspaceId) - projectedSpendPaise, unitCostPaise)) {
         break;
       }
 
@@ -2632,24 +2585,37 @@ export async function sweepDueTallyPaymentReminders(params: {
           voucherGuid: voucher.guid,
           ruleId: rule.id,
           ruleName: rule.name,
-          templateName: rule.templateName,
+          templateName: approvedTmpl.name,
           nextSeq,
           dailyGuardKey,
           guardKey,
         },
       });
 
-      projectedSpendPaise += 85;
+      projectedSpendPaise += unitCostPaise;
       enqueuedCount++;
+      enqueuedTargets.push({ voucherId: voucher.id, expectedSeq: nextSeq });
     }
   }
 
+  let confirmedSentCount = enqueuedCount;
   if (enqueuedCount > 0 && !isRedisConfigured()) {
     await processDueSqliteOutboxForTenant(params.workspaceId);
+    confirmedSentCount = 0;
+    for (const target of enqueuedTargets) {
+      const updatedVoucher = dataDb
+        .select({ remindersSentCount: tenantDataSchema.tallyVouchers.remindersSentCount })
+        .from(tenantDataSchema.tallyVouchers)
+        .where(eq(tenantDataSchema.tallyVouchers.id, target.voucherId))
+        .get();
+      if (updatedVoucher && updatedVoucher.remindersSentCount >= target.expectedSeq) {
+        confirmedSentCount++;
+      }
+    }
   }
 
   return {
-    sentCount: enqueuedCount,
+    sentCount: confirmedSentCount,
     skippedQuietHours,
     evaluatedCount: openVouchers.length,
   };
@@ -2679,6 +2645,7 @@ export const sendTallyBillOnWhatsApp = defineAction({
   input: z.object({
     voucherId: z.string().min(10),
     sendKind: z.enum(["invoice", "reminder"]).default("reminder"),
+    templateName: z.string().optional(),
   }),
   summarize: (input) => `Sent Tally ${input.sendKind} on WhatsApp`,
   handler: async (ctx, input) => {
@@ -2717,50 +2684,6 @@ export const sendTallyBillOnWhatsApp = defineAction({
       throw new RslError("RSL-WA-1002");
     }
 
-    // Verify wallet balance including ₹200 overdraft allowance (-₹200.00 minimum) before reserving SendGuard
-    const currentBal = getWalletBalancePaise(ctx.workspaceId);
-    if (!canDebitWalletUsage(currentBal, 85)) {
-      throw new RslError(
-        "RSL-BILL-1003",
-        `Your prepaid wallet balance is ${formatInr(currentBal, { showDecimals: true })} (overdraft allowed down to -₹200.00). Please add funds to your wallet to send this WhatsApp ${input.sendKind}.`
-      );
-    }
-
-    // Section 17 idempotency key: tenantId + voucherGuid + sendKind (+ reminder sequence)
-    const seq = input.sendKind === "invoice" ? 0 : voucher.remindersSentCount + 1;
-    const guardKey = `${ctx.workspaceId}:${voucher.guid}:${input.sendKind}:${seq}`;
-
-    const guard = reserveSendGuard({
-      workspaceId: ctx.workspaceId,
-      idempotencyKey: guardKey,
-      channel: "whatsapp",
-      recipient: voucher.partyPhoneE164,
-    });
-    if (!guard.allowed) {
-      return { deduplicated: true, attachedTallyPdf: false, pdfFilename: null as string | null };
-    }
-
-    const nativePdf = getNativeTallyVoucherPdf(ctx.workspaceId, voucher.id);
-    const signedPdfUrl = nativePdf
-      ? buildSignedTallyVoucherPdfUrl({
-          workspaceId: ctx.workspaceId,
-          voucherId: voucher.id,
-          filename: nativePdf.filename,
-        })
-      : null;
-
-    let externalId = `wa_bill_${newId("msg", ctx.workspaceId)}`;
-    const balancePaise = Math.max(0, voucher.amountPaise - voucher.paidAmountPaise);
-    const bodyText =
-      input.sendKind === "invoice"
-        ? `Namaste ${voucher.partyName}, please find your Tally ${voucher.voucherType} #${voucher.voucherNumber} for ${formatInr(voucher.amountPaise)}.${
-            nativePdf ? `\n\n[Attached Tally PDF: ${nativePdf.filename}]` : ""
-          }`
-        : `Namaste ${voucher.partyName}, gentle reminder that Bill #${voucher.voucherNumber} has a pending balance of ${formatInr(balancePaise)}.${
-            nativePdf ? `\n\n[Attached Tally PDF: ${nativePdf.filename}]` : ""
-          }`;
-
-    // Dispatch exact native Tally PDF document or text reminder to Meta WhatsApp Cloud API when connected
     const wabaConn = ctrl
       .select()
       .from(controlSchema.connections)
@@ -2771,82 +2694,120 @@ export const sendTallyBillOnWhatsApp = defineAction({
         )
       )
       .get();
-    const wabaAsset = ctrl
-      .select()
-      .from(controlSchema.assets)
-      .where(
-        and(
-          eq(controlSchema.assets.workspaceId, ctx.workspaceId),
-          eq(controlSchema.assets.assetType, "waba_phone"),
-          eq(controlSchema.assets.active, true)
-        )
-      )
-      .get();
 
-    if (wabaConn && wabaConn.status === "healthy" && signedPdfUrl && nativePdf) {
-      const phoneNumberId = wabaAsset?.externalId || wabaConn.externalAccountId;
-      try {
-        const rawDec = decryptEnvelope(wabaConn.encryptedTokens);
-        let accessToken = rawDec;
-        try {
-          const parsedTok = JSON.parse(rawDec) as { accessToken?: string };
-          if (typeof parsedTok.accessToken === "string" && parsedTok.accessToken.length > 0) {
-            accessToken = parsedTok.accessToken;
-          }
-        } catch {
-          // Raw string token fallback
+    if (!wabaConn || wabaConn.status !== "healthy") {
+      throw new RslError(
+        "RSL-VAL-1001",
+        "Connect your WhatsApp Business Account under Connected Channels before sending Tally bills on WhatsApp (₹0.00 deducted)."
+      );
+    }
+
+    const wabaToken = extractWabaTokenFromEncrypted(wabaConn.encryptedTokens);
+    const isSandboxWaba = /^(rsl_sandbox_|sandbox_|test_)/i.test(wabaToken);
+
+    const allTemplates = dataDb.select().from(tenantDataSchema.whatsappTemplates).all();
+    let selectedTemplate: typeof tenantDataSchema.whatsappTemplates.$inferSelect | undefined;
+
+    if (input.templateName?.trim()) {
+      const target = input.templateName.trim();
+      selectedTemplate = allTemplates.find((t) => t.name === target || t.id === target);
+      assertTemplateIsMetaApproved(ctx.workspaceId, selectedTemplate, target);
+    } else {
+      const preferredNames =
+        input.sendKind === "invoice"
+          ? ["tally_tax_invoice_pdf", "tally_sales_bill_created"]
+          : ["tally_overdue_bill_reminder", "tally_sales_bill_created"];
+
+      const validApproved = allTemplates.filter(
+        (t) => t.approvalStatus === "APPROVED" && (isSandboxWaba || Boolean(t.metaTemplateId))
+      );
+
+      for (const pref of preferredNames) {
+        const match = validApproved.find((t) => t.name === pref);
+        if (match) {
+          selectedTemplate = match;
+          break;
         }
-        const resp = await fetch(
-          `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              messaging_product: "whatsapp",
-              recipient_type: "individual",
-              to: voucher.partyPhoneE164.replace(/^\+/, ""),
-              type: "document",
-              document: {
-                link: signedPdfUrl,
-                filename: nativePdf.filename,
-                caption: `Tally ${voucher.voucherType} #${voucher.voucherNumber} (${formatInr(voucher.amountPaise)})`,
-              },
-            }),
-          }
+      }
+      if (!selectedTemplate) {
+        selectedTemplate = validApproved[0];
+      }
+      if (!selectedTemplate) {
+        throw new RslError(
+          "RSL-VAL-1001",
+          "An approved Meta WhatsApp template is required before sending bills or reminders. Submit and approve a template under WhatsApp & Templates first (₹0.00 deducted)."
         );
-        if (resp.ok) {
-          const out = (await resp.json()) as { messages?: Array<{ id: string }> };
-          if (out.messages?.[0]?.id) externalId = out.messages[0].id;
-        } else {
-          markSendGuardOutcome({
-            workspaceId: ctx.workspaceId,
-            idempotencyKey: guardKey,
-            state: "failed",
-          });
-          throw new RslError(
-            "RSL-SYS-1001",
-            `WhatsApp Cloud API rejected bill dispatch with HTTP ${resp.status}.`
-          );
-        }
-      } catch (err) {
-        if (err instanceof RslError) throw err;
-        // Keep local message & guard state intact if sandbox token is offline
       }
     }
 
-    // Charge wallet strictly AFTER provider send succeeds (P0-03)
-    consumeUsage({
+    const unitCostPaise = selectedTemplate.category === "marketing" ? 95 : 85;
+    const currentBal = getWalletBalancePaise(ctx.workspaceId);
+    if (!canDebitWalletUsage(currentBal, unitCostPaise)) {
+      throw new RslError(
+        "RSL-BILL-1003",
+        `Your prepaid wallet balance is ${formatInr(currentBal, { showDecimals: true })} (overdraft allowed down to -₹200.00). Please add funds to your wallet to send this WhatsApp ${input.sendKind}.`
+      );
+    }
+
+    // Section 17 idempotency key: tenantId + voucherGuid + sendKind (+ reminder sequence)
+    const seq = input.sendKind === "invoice" ? 0 : voucher.remindersSentCount + 1;
+    const guardKey = `${ctx.workspaceId}:${voucher.guid}:${input.sendKind}:${seq}`;
+
+    const nativePdf = getNativeTallyVoucherPdf(ctx.workspaceId, voucher.id);
+    const signedPdfUrl = nativePdf
+      ? buildSignedTallyVoucherPdfUrl({
+          workspaceId: ctx.workspaceId,
+          voucherId: voucher.id,
+          filename: nativePdf.filename,
+        })
+      : null;
+
+    const balancePaise = Math.max(0, voucher.amountPaise - voucher.paidAmountPaise);
+    const dueStr = voucher.dueDate ? formatHumanDate(voucher.dueDate) : "due";
+
+    const sendRes = await executeWhatsAppTemplateSend({
       workspaceId: ctx.workspaceId,
-      serviceKey: "tally.invoicing",
-      quantity: 1,
-      unitCostPaise: 85,
-      dedupeKey: guardKey,
-      description: `WhatsApp ${input.sendKind}${nativePdf ? " + Tally PDF" : ""} for Bill #${voucher.voucherNumber} (${voucher.partyName})`,
+      templateIdOrName: selectedTemplate.id,
+      recipientPhone: voucher.partyPhoneE164,
+      recipientName: voucher.partyName,
+      variables: {
+        partyName: voucher.partyName,
+        voucherNumber: voucher.voucherNumber,
+        amountFormatted: formatInr(voucher.amountPaise),
+        balanceFormatted: formatInr(balancePaise),
+        dueDateFormatted: dueStr,
+        voucherDateFormatted: formatHumanDate(voucher.voucherDate),
+        "1": voucher.partyName,
+        "2": voucher.voucherNumber,
+        "3": input.sendKind === "invoice" ? formatInr(voucher.amountPaise) : formatInr(balancePaise),
+        "4": dueStr,
+      },
+      idempotencyKey: guardKey,
       actorId: ctx.actorId,
+      linkedVoucherGuid: voucher.guid,
+      serviceKey: "tally.invoicing",
+      correlationId: ctx.correlationId,
+      pdfDocument:
+        nativePdf && signedPdfUrl
+          ? {
+              url: signedPdfUrl,
+              filename: nativePdf.filename,
+              caption: `Tally ${voucher.voucherType} #${voucher.voucherNumber} (${formatInr(voucher.amountPaise)})`,
+              sizeBytes: nativePdf.byteSize,
+            }
+          : undefined,
     });
+
+    if (sendRes.deduplicated) {
+      return { deduplicated: true, attachedTallyPdf: false, pdfFilename: null as string | null };
+    }
+
+    if (!sendRes.sent) {
+      throw new RslError(
+        "RSL-VAL-1001",
+        sendRes.skippedReason || "WhatsApp Cloud API could not deliver this bill (₹0.00 deducted)."
+      );
+    }
 
     const now = Date.now();
     dataDb
@@ -2859,114 +2820,6 @@ export const sendTallyBillOnWhatsApp = defineAction({
       })
       .where(eq(tenantDataSchema.tallyVouchers.id, voucher.id))
       .run();
-
-    // Log outbound message + Tally PDF attachment in Customer Inbox
-    let contact = dataDb
-      .select()
-      .from(tenantDataSchema.contacts)
-      .where(eq(tenantDataSchema.contacts.phoneE164, voucher.partyPhoneE164))
-      .get();
-    if (!contact) {
-      const cid = newEntityId("cnt", ctx.workspaceId, now);
-      dataDb
-        .insert(tenantDataSchema.contacts)
-        .values({
-          id: cid,
-          name: voucher.partyName,
-          phoneE164: voucher.partyPhoneE164,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run();
-      contact = dataDb
-        .select()
-        .from(tenantDataSchema.contacts)
-        .where(eq(tenantDataSchema.contacts.id, cid))
-        .get()!;
-    }
-
-    let conv = dataDb
-      .select()
-      .from(tenantDataSchema.conversations)
-      .where(
-        and(
-          eq(tenantDataSchema.conversations.contactId, contact.id),
-          eq(tenantDataSchema.conversations.channel, "whatsapp")
-        )
-      )
-      .get();
-    if (!conv) {
-      const convId = newEntityId("cnv", ctx.workspaceId, now);
-      dataDb
-        .insert(tenantDataSchema.conversations)
-        .values({
-          id: convId,
-          contactId: contact.id,
-          channel: "whatsapp",
-          status: "open",
-          linkedVoucherGuid: voucher.guid,
-          lastMessagePreview: bodyText.slice(0, 140),
-          lastActivityAt: now,
-          createdAt: now,
-        })
-        .run();
-      conv = dataDb
-        .select()
-        .from(tenantDataSchema.conversations)
-        .where(eq(tenantDataSchema.conversations.id, convId))
-        .get()!;
-    } else {
-      dataDb
-        .update(tenantDataSchema.conversations)
-        .set({
-          linkedVoucherGuid: voucher.guid,
-          lastMessagePreview: bodyText.slice(0, 140),
-          lastActivityAt: now,
-        })
-        .where(eq(tenantDataSchema.conversations.id, conv.id))
-        .run();
-    }
-
-    const msgId = newEntityId("msg", ctx.workspaceId, now);
-    dataDb
-      .insert(tenantDataSchema.messages)
-      .values({
-        id: msgId,
-        conversationId: conv.id,
-        direction: "outbound",
-        senderType: "user",
-        senderId: ctx.actorId,
-        body: bodyText,
-        templateName: input.sendKind === "invoice" ? "tally_tax_invoice_pdf" : "tally_overdue_bill_reminder",
-        deliveryStatus: "sent",
-        costPaise: 85,
-        pricingCategory: "utility",
-        externalMessageId: externalId,
-        createdAt: now,
-      })
-      .run();
-
-    if (nativePdf && signedPdfUrl) {
-      dataDb
-        .insert(tenantDataSchema.messageAttachments)
-        .values({
-          id: newId(),
-          messageId: msgId,
-          fileName: nativePdf.filename,
-          mimeType: "application/pdf",
-          sizeBytes: nativePdf.byteSize,
-          storageKey: signedPdfUrl,
-          createdAt: now,
-        })
-        .run();
-    }
-
-    markSendGuardOutcome({
-      workspaceId: ctx.workspaceId,
-      idempotencyKey: guardKey,
-      state: "confirmed",
-      externalId,
-    });
 
     return {
       deduplicated: false,
@@ -4206,9 +4059,7 @@ export const createTallyAutomationRule = defineAction({
       .where(eq(tenantDataSchema.whatsappTemplates.id, input.templateId))
       .get();
 
-    if (!tmpl) {
-      throw new RslError("RSL-VAL-1001", "Please select a valid WhatsApp message template first.");
-    }
+    assertTemplateIsMetaApproved(ctx.workspaceId, tmpl);
 
     const now = Date.now();
     const id = newEntityId("taut", ctx.workspaceId, now);
@@ -4241,8 +4092,24 @@ export const toggleTallyAutomationRule = defineAction({
   }),
   summarize: (input) => `${input.active ? "Turned on" : "Paused"} Tally WhatsApp automation rule`,
   handler: (ctx, input) => {
-    tenantDataDb(ctx)
-      .update(tenantDataSchema.tallyAutomationRules)
+    const db = tenantDataDb(ctx);
+    if (input.active) {
+      const rule = db
+        .select()
+        .from(tenantDataSchema.tallyAutomationRules)
+        .where(eq(tenantDataSchema.tallyAutomationRules.id, input.ruleId))
+        .get();
+      if (!rule) {
+        throw new RslError("RSL-VAL-1001", "Automation rule not found.");
+      }
+      const tmpl = db
+        .select()
+        .from(tenantDataSchema.whatsappTemplates)
+        .where(eq(tenantDataSchema.whatsappTemplates.id, rule.templateId))
+        .get();
+      assertTemplateIsMetaApproved(ctx.workspaceId, tmpl, rule.templateName);
+    }
+    db.update(tenantDataSchema.tallyAutomationRules)
       .set({
         active: input.active,
         updatedAt: Date.now(),

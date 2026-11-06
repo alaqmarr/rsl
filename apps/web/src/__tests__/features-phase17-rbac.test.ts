@@ -17,6 +17,7 @@ import {
   staffGrantFreeAllToolsAccess,
   WALLET_OVERDRAFT_LIMIT_PAISE,
 } from "@rsl/billing";
+import { linkExternalConnection } from "@rsl/connections";
 import { formatInr, resolvePublicEndpoints } from "@rsl/core";
 import { tenantDataSchema } from "@rsl/database";
 import { enqueueWorkspaceSslProvisioning } from "@rsl/queue";
@@ -155,6 +156,15 @@ describe("Phase 17 Suite (Client SSL Queue, -₹200 Overdraft, Native Tally PDF 
     const { session } = createTestWorkspace("NativePdf");
     const wsId = session.workspace.id;
     staffGrantFreeAllToolsAccess({ workspaceId: wsId, durationDays: 30, staffId: "stf_pdf" });
+    await linkExternalConnection(session.ctx, {
+      provider: "whatsapp",
+      assetType: "waba_phone",
+      displayName: "Sandbox WhatsApp PDF",
+      externalAccountId: "waba_sb_p17",
+      accessToken: "rsl_sandbox_wa_p17_token",
+      scopesGranted: ["whatsapp_business_messaging"],
+      metadata: { channelKind: "whatsapp_cloud", wabaId: "waba_sb_p17", phoneNumberId: "waba_sb_p17" },
+    });
     await installStarterTallyTemplates(session.ctx, {});
 
     // Non-PDF bytes must be rejected strictly so fake/custom HTML or text can never masquerade as Tally's PDF

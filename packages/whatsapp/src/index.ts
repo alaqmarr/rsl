@@ -35,6 +35,71 @@ function extractConnectionAccessToken(encryptedBlob: string): string {
   return decrypted.trim();
 }
 
+function resolveWabaGraphId(conn: { externalAccountId: string; metadataJson: string | null }): string {
+  try {
+    const parsedMeta = JSON.parse(conn.metadataJson || "{}") as { wabaId?: string };
+    if (parsedMeta.wabaId && parsedMeta.wabaId.trim()) {
+      return parsedMeta.wabaId.trim();
+    }
+  } catch {
+    // Fall back to externalAccountId
+  }
+  return conn.externalAccountId;
+}
+
+function buildMetaTemplateSubmissionComponents(input: {
+  headerType: "NONE" | "TEXT" | "DOCUMENT" | "IMAGE";
+  headerText?: string | null;
+  bodyText: string;
+  footerText?: string | null;
+  buttons?: WhatsAppTemplateButton[];
+  vars: string[];
+  sampleValues: Record<string, string>;
+}): Array<Record<string, unknown>> {
+  const components: Array<Record<string, unknown>> = [];
+  if (input.headerType === "TEXT" && input.headerText?.trim()) {
+    const headerVars = extractTemplateVariables([input.headerText]);
+    const headerExamples = headerVars.map((v) => input.sampleValues[v.replace(/[{}]/g, "")] || "Sample");
+    components.push({
+      type: "HEADER",
+      format: "TEXT",
+      text: input.headerText.trim(),
+      ...(headerExamples.length > 0 ? { example: { header_text: headerExamples } } : {}),
+    });
+  } else if (input.headerType === "DOCUMENT") {
+    components.push({ type: "HEADER", format: "DOCUMENT" });
+  } else if (input.headerType === "IMAGE") {
+    components.push({ type: "HEADER", format: "IMAGE" });
+  }
+
+  const bodyVars = extractTemplateVariables([input.bodyText]);
+  const bodyExamples = bodyVars.map((v) => input.sampleValues[v.replace(/[{}]/g, "")] || "Sample");
+  components.push({
+    type: "BODY",
+    text: input.bodyText.trim(),
+    ...(bodyExamples.length > 0 ? { example: { body_text: [bodyExamples] } } : {}),
+  });
+
+  if (input.footerText?.trim()) {
+    components.push({ type: "FOOTER", text: input.footerText.trim() });
+  }
+
+  if (input.buttons && input.buttons.length > 0) {
+    components.push({
+      type: "BUTTONS",
+      buttons: input.buttons.map((b) =>
+        b.type === "URL"
+          ? { type: "URL", text: b.text, url: b.url || "https://example.com" }
+          : b.type === "PHONE_NUMBER"
+            ? { type: "PHONE_NUMBER", text: b.text, phone_number: b.phoneNumber || "+919820000000" }
+            : { type: "QUICK_REPLY", text: b.text }
+      ),
+    });
+  }
+
+  return components;
+}
+
 export interface WhatsAppTemplateButton {
   type: "QUICK_REPLY" | "URL" | "PHONE_NUMBER";
   text: string;
@@ -329,7 +394,7 @@ export const createWhatsAppTemplate = defineAction({
       defaultSamples[slot] = input.sampleValues?.[slot] || preset?.sample || `Example ${slot}`;
     });
 
-    let approvalStatus = "APPROVED";
+    let approvalStatus = "DRAFT";
     let metaTemplateId: string | null = null;
     const now = Date.now();
 
@@ -349,43 +414,16 @@ export const createWhatsAppTemplate = defineAction({
       const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(token);
 
       if (!isSandbox && token) {
-        let wabaGraphId = wabaConn.externalAccountId;
-        try {
-          const parsedMeta = JSON.parse(wabaConn.metadataJson || "{}") as { wabaId?: string };
-          if (parsedMeta.wabaId) wabaGraphId = parsedMeta.wabaId;
-        } catch {
-          // Use externalAccountId
-        }
-
-        const components: Array<Record<string, unknown>> = [];
-        if (input.headerType === "TEXT" && input.headerText?.trim()) {
-          components.push({ type: "HEADER", format: "TEXT", text: input.headerText.trim() });
-        } else if (input.headerType === "DOCUMENT") {
-          components.push({ type: "HEADER", format: "DOCUMENT" });
-        } else if (input.headerType === "IMAGE") {
-          components.push({ type: "HEADER", format: "IMAGE" });
-        }
-        const bodyExamples = vars.map((v) => defaultSamples[v.replace(/[{}]/g, "")] || "Sample");
-        components.push({
-          type: "BODY",
-          text: input.bodyText.trim(),
-          ...(bodyExamples.length > 0 ? { example: { body_text: [bodyExamples] } } : {}),
+        const wabaGraphId = resolveWabaGraphId(wabaConn);
+        const components = buildMetaTemplateSubmissionComponents({
+          headerType: input.headerType,
+          headerText: input.headerText,
+          bodyText: input.bodyText,
+          footerText: input.footerText,
+          buttons: input.buttons,
+          vars,
+          sampleValues: defaultSamples,
         });
-        if (input.footerText?.trim()) {
-          components.push({ type: "FOOTER", text: input.footerText.trim() });
-        }
-        if (input.buttons && input.buttons.length > 0) {
-          components.push({
-            type: "BUTTONS",
-            buttons: input.buttons.map((b) =>
-              b.type === "URL"
-                ? { type: "URL", text: b.text, url: b.url || "https://example.com" }
-                : b.type === "PHONE_NUMBER"
-                  ? { type: "PHONE_NUMBER", text: b.text, phone_number: b.phoneNumber || "+919820000000" }
-                  : { type: "QUICK_REPLY", text: b.text }
-            ),
-          });
-        }
 
         let resp: Response;
         try {
@@ -426,14 +464,12 @@ export const createWhatsAppTemplate = defineAction({
           );
         }
 
-        metaTemplateId = metaOut.id ?? null;
+        metaTemplateId = metaOut.id || `meta_tmpl_live_${now}`;
         approvalStatus = (metaOut.status || "PENDING").toUpperCase();
       } else if (isSandbox) {
         metaTemplateId = `meta_tmpl_sb_${now}`;
         approvalStatus = "APPROVED";
       }
-    } else if (!input.submitToMeta) {
-      approvalStatus = "DRAFT";
     }
 
     const id = newEntityId("tmpl", ctx.workspaceId, now);
@@ -541,16 +577,162 @@ export const deleteWhatsAppTemplate = defineAction({
   },
 });
 
+export const submitWhatsAppTemplateToMeta = defineAction({
+  key: "whatsapp.template.created",
+  permission: "whatsapp:template.manage",
+  input: z.object({
+    templateId: z.string().min(6),
+  }),
+  summarize: () => "Submitted WhatsApp message template to Meta for approval",
+  handler: async (ctx, input) => {
+    const db = tenantDataDb(ctx);
+    const existing = db
+      .select()
+      .from(tenantDataSchema.whatsappTemplates)
+      .where(eq(tenantDataSchema.whatsappTemplates.id, input.templateId))
+      .get();
+
+    if (!existing) {
+      throw new RslError("RSL-VAL-1001", "Template not found.");
+    }
+
+    const wabaConn = controlDb()
+      .select()
+      .from(controlSchema.connections)
+      .where(
+        and(
+          eq(controlSchema.connections.workspaceId, ctx.workspaceId),
+          eq(controlSchema.connections.provider, "whatsapp")
+        )
+      )
+      .get();
+
+    if (!wabaConn || wabaConn.status !== "healthy") {
+      throw new RslError(
+        "RSL-VAL-1001",
+        "Connect your WhatsApp Business Account under Connected Channels before submitting templates to Meta."
+      );
+    }
+
+    const token = extractConnectionAccessToken(wabaConn.encryptedTokens);
+    if (!token) {
+      throw new RslError("RSL-VAL-1001", "WhatsApp Business Account token is missing. Reconnect WhatsApp first.");
+    }
+
+    const now = Date.now();
+    const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(token);
+    let metaTemplateId = existing.metaTemplateId;
+    let approvalStatus = "PENDING";
+
+    if (isSandbox) {
+      metaTemplateId = `meta_tmpl_sb_${now}`;
+      approvalStatus = "APPROVED";
+    } else {
+      const parsed = parseTemplateRow(existing);
+      const wabaGraphId = resolveWabaGraphId(wabaConn);
+      const components = buildMetaTemplateSubmissionComponents({
+        headerType: parsed.headerType,
+        headerText: parsed.headerText,
+        bodyText: parsed.bodyText,
+        footerText: parsed.footerText,
+        buttons: parsed.buttons,
+        vars: parsed.variables,
+        sampleValues: parsed.sampleValues,
+      });
+
+      let resp: Response;
+      try {
+        resp = await fetch(
+          `https://graph.facebook.com/v21.0/${encodeURIComponent(wabaGraphId)}/message_templates`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              name: parsed.name,
+              language: parsed.language,
+              category: parsed.category.toUpperCase(),
+              components,
+            }),
+            signal: AbortSignal.timeout(12_000),
+          }
+        );
+      } catch (err) {
+        throw new RslError(
+          "RSL-VAL-1001",
+          `Could not submit template to Meta WhatsApp Cloud API: ${err instanceof Error ? err.message : "network timeout"}`
+        );
+      }
+
+      const metaOut = (await resp.json().catch(() => ({}))) as {
+        id?: string;
+        status?: string;
+        error?: { message?: string; error_user_msg?: string };
+      };
+
+      if (!resp.ok) {
+        throw new RslError(
+          "RSL-VAL-1001",
+          `Meta WhatsApp API rejected template '${parsed.name}' (HTTP ${resp.status}): ${metaOut.error?.error_user_msg || metaOut.error?.message || "Verify WABA ID and whatsapp_business_management scope."}`
+        );
+      }
+
+      metaTemplateId = metaOut.id || `meta_tmpl_live_${now}`;
+      approvalStatus = (metaOut.status || "PENDING").toUpperCase();
+    }
+
+    db.update(tenantDataSchema.whatsappTemplates)
+      .set({
+        approvalStatus,
+        metaTemplateId,
+        rejectionReason: null,
+        lastSyncedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(tenantDataSchema.whatsappTemplates.id, existing.id))
+      .run();
+
+    return { templateId: existing.id, approvalStatus, metaTemplateId };
+  },
+});
+
 export const installStarterTallyTemplates = defineAction({
   key: "whatsapp.template.created",
   permission: "whatsapp:template.manage",
   input: z.object({}),
   summarize: () => "Added ready-to-use Tally bill, receipt, and reminder WhatsApp templates",
-  handler: (ctx) => {
+  handler: async (ctx) => {
     const db = tenantDataDb(ctx);
     const now = Date.now();
 
-    const presets = [
+    const wabaConn = controlDb()
+      .select()
+      .from(controlSchema.connections)
+      .where(
+        and(
+          eq(controlSchema.connections.workspaceId, ctx.workspaceId),
+          eq(controlSchema.connections.provider, "whatsapp")
+        )
+      )
+      .get();
+
+    const wabaHealthy = Boolean(wabaConn && wabaConn.status === "healthy");
+    const token = wabaHealthy && wabaConn ? extractConnectionAccessToken(wabaConn.encryptedTokens) : "";
+    const isSandbox = Boolean(token) && /^(rsl_sandbox_|sandbox_|test_)/i.test(token);
+    const wabaGraphId = wabaHealthy && wabaConn ? resolveWabaGraphId(wabaConn) : "";
+
+    const presets: Array<{
+      name: string;
+      category: "utility";
+      headerType: "DOCUMENT" | "TEXT";
+      headerText: string | null;
+      bodyText: string;
+      footerText: string;
+      mappings: Record<string, string>;
+      buttons: WhatsAppTemplateButton[];
+    }> = [
       {
         name: "tally_tax_invoice_pdf",
         category: "utility",
@@ -565,7 +747,7 @@ export const installStarterTallyTemplates = defineAction({
           "3": "amountFormatted",
           "4": "dueDateFormatted",
         },
-        buttons: [{ type: "QUICK_REPLY" as const, text: "Confirm Receipt" }],
+        buttons: [{ type: "QUICK_REPLY", text: "Confirm Receipt" }],
       },
       {
         name: "tally_sales_bill_created",
@@ -581,7 +763,7 @@ export const installStarterTallyTemplates = defineAction({
           "3": "amountFormatted",
           "4": "dueDateFormatted",
         },
-        buttons: [{ type: "QUICK_REPLY" as const, text: "Confirm Receipt" }],
+        buttons: [{ type: "QUICK_REPLY", text: "Confirm Receipt" }],
       },
       {
         name: "tally_payment_receipt_ack",
@@ -613,11 +795,22 @@ export const installStarterTallyTemplates = defineAction({
           "3": "balanceFormatted",
           "4": "dueDateFormatted",
         },
-        buttons: [{ type: "QUICK_REPLY" as const, text: "Already Paid" }],
+        buttons: [{ type: "QUICK_REPLY", text: "Already Paid" }],
       },
     ];
 
+    const sampleValues: Record<string, string> = {
+      "1": "Shree Ganesh Traders",
+      "2": "GST/26-27/0108",
+      "3": "₹18,450",
+      "4": "15 Nov 2026",
+    };
+
     let installed = 0;
+    let approvedCount = 0;
+    let pendingCount = 0;
+    let draftCount = 0;
+
     for (const p of presets) {
       const exists = db
         .select()
@@ -627,6 +820,66 @@ export const installStarterTallyTemplates = defineAction({
       if (exists) continue;
 
       const vars = extractTemplateVariables([p.headerText, p.bodyText]);
+      let approvalStatus = "DRAFT";
+      let metaTemplateId: string | null = null;
+      let rejectionReason: string | null = null;
+
+      if (wabaHealthy && isSandbox) {
+        approvalStatus = "APPROVED";
+        metaTemplateId = `meta_tmpl_sb_${now + installed}`;
+        approvedCount++;
+      } else if (wabaHealthy && token && wabaGraphId) {
+        try {
+          const components = buildMetaTemplateSubmissionComponents({
+            headerType: p.headerType,
+            headerText: p.headerText,
+            bodyText: p.bodyText,
+            footerText: p.footerText,
+            buttons: p.buttons,
+            vars,
+            sampleValues,
+          });
+          const resp = await fetch(
+            `https://graph.facebook.com/v21.0/${encodeURIComponent(wabaGraphId)}/message_templates`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                name: p.name,
+                language: "en_IN",
+                category: p.category.toUpperCase(),
+                components,
+              }),
+              signal: AbortSignal.timeout(12_000),
+            }
+          );
+          const metaOut = (await resp.json().catch(() => ({}))) as {
+            id?: string;
+            status?: string;
+            error?: { message?: string; error_user_msg?: string };
+          };
+          if (resp.ok) {
+            metaTemplateId = metaOut.id || `meta_tmpl_live_${now + installed}`;
+            approvalStatus = (metaOut.status || "PENDING").toUpperCase();
+            if (approvalStatus === "APPROVED") approvedCount++;
+            else pendingCount++;
+          } else {
+            approvalStatus = "DRAFT";
+            rejectionReason = metaOut.error?.error_user_msg || metaOut.error?.message || null;
+            draftCount++;
+          }
+        } catch {
+          approvalStatus = "DRAFT";
+          draftCount++;
+        }
+      } else {
+        approvalStatus = "DRAFT";
+        draftCount++;
+      }
+
       db.insert(tenantDataSchema.whatsappTemplates)
         .values({
           id: newEntityId("tmpl", ctx.workspaceId, now + installed),
@@ -640,14 +893,12 @@ export const installStarterTallyTemplates = defineAction({
           buttonsJson: JSON.stringify(p.buttons),
           variablesJson: JSON.stringify(vars),
           variableMappingsJson: JSON.stringify(p.mappings),
-          sampleValuesJson: JSON.stringify({
-            "1": "Shree Ganesh Traders",
-            "2": "GST/26-27/0108",
-            "3": "₹18,450",
-            "4": "15 Nov 2026",
-          }),
-          approvalStatus: "APPROVED",
+          sampleValuesJson: JSON.stringify(sampleValues),
+          approvalStatus,
+          metaTemplateId,
+          rejectionReason,
           qualityScore: "GREEN",
+          lastSyncedAt: metaTemplateId ? now + installed : null,
           createdAt: now + installed,
           updatedAt: now + installed,
         })
@@ -655,7 +906,7 @@ export const installStarterTallyTemplates = defineAction({
       installed++;
     }
 
-    return { installed };
+    return { installed, approvedCount, pendingCount, draftCount };
   },
 });
 
@@ -685,8 +936,12 @@ export const syncWhatsAppTemplatesWithMeta = defineAction({
     }
 
     const token = extractConnectionAccessToken(conn.encryptedTokens);
+    if (/^(rsl_sandbox_|sandbox_|test_)/i.test(token)) {
+      return { syncedCount: 0 };
+    }
+    const wabaGraphId = resolveWabaGraphId(conn);
     const resp = await fetch(
-      `https://graph.facebook.com/v21.0/${encodeURIComponent(conn.externalAccountId)}/message_templates?limit=100`,
+      `https://graph.facebook.com/v21.0/${encodeURIComponent(wabaGraphId)}/message_templates?limit=100`,
       {
         headers: { Authorization: `Bearer ${token}` },
       }
@@ -837,7 +1092,62 @@ export async function executeWhatsAppTemplateSend(params: {
   }
 
   if (!rawTemplate || rawTemplate.approvalStatus !== "APPROVED") {
-    return { sent: false, skippedReason: "Template is missing or not approved yet" };
+    return {
+      sent: false,
+      skippedReason: rawTemplate
+        ? `Template '${rawTemplate.name}' is currently ${rawTemplate.approvalStatus} (must be Meta-approved 'APPROVED' before sending — ₹0.00 deducted)`
+        : "Template is missing or not approved yet (₹0.00 deducted)",
+    };
+  }
+
+  // 2b. Verify WhatsApp Business Cloud API connection & live Meta template approval BEFORE reserving SendGuard or charging wallet
+  const wabaAsset = ctrl
+    .select()
+    .from(controlSchema.assets)
+    .where(
+      and(
+        eq(controlSchema.assets.workspaceId, params.workspaceId),
+        eq(controlSchema.assets.assetType, "waba_phone"),
+        eq(controlSchema.assets.active, true)
+      )
+    )
+    .get();
+
+  const wabaConn = ctrl
+    .select()
+    .from(controlSchema.connections)
+    .where(
+      and(
+        eq(controlSchema.connections.workspaceId, params.workspaceId),
+        eq(controlSchema.connections.provider, "whatsapp")
+      )
+    )
+    .get();
+
+  if (!wabaConn || wabaConn.status !== "healthy") {
+    return {
+      sent: false,
+      mode: "disconnected",
+      skippedReason: "WhatsApp Business Account is not connected under Connected Channels — ₹0.00 deducted",
+    };
+  }
+
+  const accessToken = extractConnectionAccessToken(wabaConn.encryptedTokens);
+  if (!accessToken) {
+    return {
+      sent: false,
+      mode: "disconnected",
+      skippedReason: "WhatsApp Business Account access token is missing — ₹0.00 deducted",
+    };
+  }
+
+  const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken);
+  if (!isSandbox && !rawTemplate.metaTemplateId) {
+    return {
+      sent: false,
+      mode: "live",
+      skippedReason: `Template '${rawTemplate.name}' has not been verified on Meta WhatsApp Manager yet — sync or submit it first (₹0.00 deducted)`,
+    };
   }
 
   const parsedTemplate = parseTemplateRow(rawTemplate);
@@ -875,134 +1185,157 @@ export async function executeWhatsAppTemplateSend(params: {
     return { sent: false, deduplicated: true, renderedPreview: rendered.fullPreviewText };
   }
 
-  // 5. Dispatch to Meta WhatsApp Business Cloud API BEFORE billing/confirming SendGuard (P0-03)
-  let externalMessageId = `wamid.${newId("msg", params.workspaceId)}`;
-  let deliveryStatus: "sent" | "queued" | "failed" = "sent";
-  let sendMode: "live" | "sandbox" | "disconnected" = "disconnected";
+  // 5. Dispatch to Meta WhatsApp Business Cloud API STRICTLY BEFORE billing or confirming SendGuard
+  let externalMessageId = `wamid.sb_${newId("msg", params.workspaceId)}`;
+  const deliveryStatus: "sent" | "queued" | "failed" = "sent";
+  const sendMode: "live" | "sandbox" = isSandbox ? "sandbox" : "live";
 
-  const wabaAsset = ctrl
-    .select()
-    .from(controlSchema.assets)
-    .where(
-      and(
-        eq(controlSchema.assets.workspaceId, params.workspaceId),
-        eq(controlSchema.assets.assetType, "waba_phone"),
-        eq(controlSchema.assets.active, true)
-      )
-    )
-    .get();
-
-  const wabaConn = ctrl
-    .select()
-    .from(controlSchema.connections)
-    .where(
-      and(
-        eq(controlSchema.connections.workspaceId, params.workspaceId),
-        eq(controlSchema.connections.provider, "whatsapp")
-      )
-    )
-    .get();
-
-  if (wabaConn && wabaConn.status === "healthy") {
+  if (!isSandbox) {
     const phoneNumberId = wabaAsset?.externalId || wabaConn.externalAccountId;
+    if (!phoneNumberId) {
+      markSendGuardOutcome({
+        workspaceId: params.workspaceId,
+        idempotencyKey: params.idempotencyKey,
+        state: "failed",
+      });
+      return {
+        sent: false,
+        mode: "live",
+        skippedReason: "WhatsApp Phone Number ID is missing on Connected Channels — ₹0.00 deducted",
+      };
+    }
+
     const started = Date.now();
+    const apiBody = {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: phoneE164.replace(/^\+/, ""),
+      type: "template",
+      template: {
+        name: parsedTemplate.name,
+        language: { code: parsedTemplate.language },
+        ...(rendered.metaComponents.length > 0 ? { components: rendered.metaComponents } : {}),
+      },
+    };
+
+    let resp: Response;
     try {
-      const accessToken = extractConnectionAccessToken(wabaConn.encryptedTokens);
-      const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken);
-      if (isSandbox) {
-        sendMode = "sandbox";
-      } else if (accessToken) {
-        sendMode = "live";
-        const apiBody = {
-          messaging_product: "whatsapp",
-          recipient_type: "individual",
-          to: phoneE164.replace(/^\+/, ""),
-          type: "template",
-          template: {
-            name: parsedTemplate.name,
-            language: { code: parsedTemplate.language },
-            ...(rendered.metaComponents.length > 0 ? { components: rendered.metaComponents } : {}),
+      resp = await fetch(
+        `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
           },
-        };
+          body: JSON.stringify(apiBody),
+          signal: AbortSignal.timeout(15_000),
+        }
+      );
+    } catch (err) {
+      logsDb
+        .insert(tenantLogsSchema.providerCalls)
+        .values({
+          id: newEntityId("req", params.workspaceId),
+          ts: Date.now(),
+          provider: "whatsapp",
+          operation: "messages.send_template",
+          method: "POST",
+          status: 0,
+          latencyMs: Date.now() - started,
+          correlationId: params.correlationId || newEntityId("req", params.workspaceId),
+        })
+        .run();
 
-        const resp = await fetch(
-          `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              "Content-Type": "application/json",
+      markSendGuardOutcome({
+        workspaceId: params.workspaceId,
+        idempotencyKey: params.idempotencyKey,
+        state: "failed",
+      });
+      return {
+        sent: false,
+        mode: "live",
+        skippedReason: `Network error reaching Meta WhatsApp Cloud API (${err instanceof Error ? err.message : "timeout"}) — ₹0.00 deducted`,
+      };
+    }
+
+    const latencyMs = Date.now() - started;
+    logsDb
+      .insert(tenantLogsSchema.providerCalls)
+      .values({
+        id: newEntityId("req", params.workspaceId),
+        ts: Date.now(),
+        provider: "whatsapp",
+        operation: "messages.send_template",
+        method: "POST",
+        status: resp.status,
+        latencyMs,
+        correlationId: params.correlationId || newEntityId("req", params.workspaceId),
+      })
+      .run();
+
+    const resJson = (await resp.json().catch(() => ({}))) as {
+      messages?: Array<{ id?: string }>;
+      error?: { message?: string; error_user_msg?: string };
+    };
+
+    if (!resp.ok) {
+      markSendGuardOutcome({
+        workspaceId: params.workspaceId,
+        idempotencyKey: params.idempotencyKey,
+        state: "failed",
+      });
+      return {
+        sent: false,
+        mode: "live",
+        skippedReason: `WhatsApp Cloud API rejected message (HTTP ${resp.status}: ${resJson.error?.error_user_msg || resJson.error?.message || "delivery rejected"}) — ₹0.00 deducted`,
+      };
+    }
+
+    const returnedMsgId = resJson.messages?.[0]?.id?.trim();
+    if (!returnedMsgId) {
+      markSendGuardOutcome({
+        workspaceId: params.workspaceId,
+        idempotencyKey: params.idempotencyKey,
+        state: "failed",
+      });
+      return {
+        sent: false,
+        mode: "live",
+        skippedReason: "WhatsApp Cloud API did not return a confirmed message ID (wamid) — ₹0.00 deducted",
+      };
+    }
+    externalMessageId = returnedMsgId;
+
+    // If a Tally-format PDF document is requested and the chosen template header is not already DOCUMENT,
+    // automatically send the formatted Tally PDF document right alongside the WhatsApp notification!
+    if (params.pdfDocument?.url && parsedTemplate.headerType !== "DOCUMENT") {
+      await fetch(
+        `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: phoneE164.replace(/^\+/, ""),
+            type: "document",
+            document: {
+              link: params.pdfDocument.url,
+              filename: params.pdfDocument.filename || "Tax-Invoice.pdf",
+              ...(params.pdfDocument.caption ? { caption: params.pdfDocument.caption } : {}),
             },
-            body: JSON.stringify(apiBody),
-          }
-        );
-
-        const latencyMs = Date.now() - started;
-        logsDb
-          .insert(tenantLogsSchema.providerCalls)
-          .values({
-            id: newEntityId("req", params.workspaceId),
-            ts: Date.now(),
-            provider: "whatsapp",
-            operation: "messages.send_template",
-            method: "POST",
-            status: resp.status,
-            latencyMs,
-            correlationId: params.correlationId || newEntityId("req", params.workspaceId),
-          })
-          .run();
-
-        if (!resp.ok) {
-          markSendGuardOutcome({
-            workspaceId: params.workspaceId,
-            idempotencyKey: params.idempotencyKey,
-            state: "failed",
-          });
-          return {
-            sent: false,
-            skippedReason: `WhatsApp Cloud API returned HTTP ${resp.status}`,
-          };
+          }),
+          signal: AbortSignal.timeout(12_000),
         }
-
-        const resJson = (await resp.json().catch(() => ({}))) as {
-          messages?: Array<{ id: string }>;
-        };
-        if (resJson.messages?.[0]?.id) {
-          externalMessageId = resJson.messages[0].id;
-        }
-
-        // If a Tally-format PDF document is requested and the chosen template header is not already DOCUMENT,
-        // automatically send the formatted Tally PDF document right alongside the WhatsApp notification!
-        if (params.pdfDocument?.url && parsedTemplate.headerType !== "DOCUMENT") {
-          await fetch(
-            `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`,
-            {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                messaging_product: "whatsapp",
-                recipient_type: "individual",
-                to: phoneE164.replace(/^\+/, ""),
-                type: "document",
-                document: {
-                  link: params.pdfDocument.url,
-                  filename: params.pdfDocument.filename || "Tax-Invoice.pdf",
-                  ...(params.pdfDocument.caption ? { caption: params.pdfDocument.caption } : {}),
-                },
-              }),
-            }
-          ).catch(() => null);
-        }
-      }
-    } catch {
-      // Keep local thread updated when running in offline/local sandbox environment
+      ).catch(() => null);
     }
   }
 
-  // 6. Meter per-message usage ONLY after provider send succeeded (supports overdraft down to -₹200.00)
+  // 6. Meter per-message usage STRICTLY AFTER Meta accepted the message and returned a valid wamid (₹0 on error)
   consumeUsage({
     workspaceId: params.workspaceId,
     serviceKey: params.serviceKey ?? "whatsapp.messaging",
@@ -1183,46 +1516,58 @@ export async function sendWhatsAppDirectTextJob(params: {
     )
     .get();
 
+  if (!wabaConn || wabaConn.status !== "healthy") {
+    markSendGuardOutcome({
+      workspaceId: params.workspaceId,
+      idempotencyKey: params.idempotencyKey,
+      state: "failed",
+    });
+    return { sent: false };
+  }
+
   let extId = `wamid.job_${newId("msg", params.workspaceId)}`;
+  const token = extractConnectionAccessToken(wabaConn.encryptedTokens);
+  const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(token);
+  const phoneNumberId = wabaAsset?.externalId || wabaConn.externalAccountId;
 
-  if (wabaConn && wabaConn.status === "healthy") {
-    const token = extractConnectionAccessToken(wabaConn.encryptedTokens);
-    const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(token);
-    const phoneNumberId = wabaAsset?.externalId || wabaConn.externalAccountId;
+  if (!token) {
+    markSendGuardOutcome({
+      workspaceId: params.workspaceId,
+      idempotencyKey: params.idempotencyKey,
+      state: "failed",
+    });
+    return { sent: false };
+  }
 
-    if (!isSandbox && token && phoneNumberId) {
-      try {
-        const resp = await fetch(
-          `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              messaging_product: "whatsapp",
-              recipient_type: "individual",
-              to: toDigits,
-              type: "text",
-              text: { body: params.body.trim() },
-            }),
-            signal: AbortSignal.timeout(10_000),
-          }
-        );
-        if (!resp.ok) {
-          markSendGuardOutcome({
-            workspaceId: params.workspaceId,
-            idempotencyKey: params.idempotencyKey,
-            state: "failed",
-          });
-          return { sent: false };
+  if (!isSandbox) {
+    if (!phoneNumberId) {
+      markSendGuardOutcome({
+        workspaceId: params.workspaceId,
+        idempotencyKey: params.idempotencyKey,
+        state: "failed",
+      });
+      return { sent: false };
+    }
+    try {
+      const resp = await fetch(
+        `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: toDigits,
+            type: "text",
+            text: { body: params.body.trim() },
+          }),
+          signal: AbortSignal.timeout(10_000),
         }
-        const out = (await resp.json().catch(() => ({}))) as {
-          messages?: Array<{ id?: string }>;
-        };
-        if (out.messages?.[0]?.id) extId = out.messages[0].id;
-      } catch {
+      );
+      if (!resp.ok) {
         markSendGuardOutcome({
           workspaceId: params.workspaceId,
           idempotencyKey: params.idempotencyKey,
@@ -1230,6 +1575,25 @@ export async function sendWhatsAppDirectTextJob(params: {
         });
         return { sent: false };
       }
+      const out = (await resp.json().catch(() => ({}))) as {
+        messages?: Array<{ id?: string }>;
+      };
+      if (!out.messages?.[0]?.id) {
+        markSendGuardOutcome({
+          workspaceId: params.workspaceId,
+          idempotencyKey: params.idempotencyKey,
+          state: "failed",
+        });
+        return { sent: false };
+      }
+      extId = out.messages[0].id;
+    } catch {
+      markSendGuardOutcome({
+        workspaceId: params.workspaceId,
+        idempotencyKey: params.idempotencyKey,
+        state: "failed",
+      });
+      return { sent: false };
     }
   }
 
@@ -1415,6 +1779,24 @@ export const launchWhatsAppBroadcast = defineAction({
     const dataDb = tenantDataDb(ctx);
     const logsDb = tenantLogsDb(ctx);
 
+    const wabaConn = controlDb()
+      .select()
+      .from(controlSchema.connections)
+      .where(
+        and(
+          eq(controlSchema.connections.workspaceId, ctx.workspaceId),
+          eq(controlSchema.connections.provider, "whatsapp")
+        )
+      )
+      .get();
+
+    if (!wabaConn || wabaConn.status !== "healthy") {
+      throw new RslError(
+        "RSL-VAL-1001",
+        "Connect your WhatsApp Business Account under Connected Channels before launching a broadcast."
+      );
+    }
+
     const template = dataDb
       .select()
       .from(tenantDataSchema.whatsappTemplates)
@@ -1422,7 +1804,19 @@ export const launchWhatsAppBroadcast = defineAction({
       .get();
 
     if (!template || template.approvalStatus !== "APPROVED") {
-      throw new RslError("RSL-VAL-1001", "Select an approved WhatsApp template.");
+      throw new RslError(
+        "RSL-VAL-1001",
+        "Select a Meta-approved WhatsApp template ('APPROVED') before launching a broadcast."
+      );
+    }
+
+    const accessToken = extractConnectionAccessToken(wabaConn.encryptedTokens);
+    const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken);
+    if (!isSandbox && !template.metaTemplateId) {
+      throw new RslError(
+        "RSL-VAL-1001",
+        `Template '${template.name}' has not been verified on Meta WhatsApp Manager yet. Submit or sync it first.`
+      );
     }
 
     const optIns = dataDb.select().from(tenantDataSchema.optIns).all();

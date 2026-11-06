@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { dispatchWorkspaceWebhookEvent } from "@rsl/api-keys";
+import { creditWallet } from "@rsl/billing";
 import { isValidMetaWebhookVerifyToken } from "@rsl/connections";
 import { newEntityId, newId, verifyHmac } from "@rsl/core";
 import { controlSchema, ingressSchema, tenantDataSchema, tenantLogsSchema } from "@rsl/database";
@@ -154,6 +155,10 @@ export async function POST(req: NextRequest) {
             contacts?: Array<{ wa_id?: string; profile?: { name?: string } }>;
             messages?: RawWhatsAppInboundMessage[];
             statuses?: RawWhatsAppStatusEvent[];
+            event?: string;
+            message_template_id?: string | number;
+            message_template_name?: string;
+            reason?: string;
           };
         }>;
       }>;
@@ -209,6 +214,28 @@ export async function POST(req: NextRequest) {
         targetWorkspaceId = routed?.tenantId ?? null;
       }
 
+      if (!targetWorkspaceId && wabaId) {
+        const waConns = ctrl
+          .select({
+            workspaceId: controlSchema.connections.workspaceId,
+            metadataJson: controlSchema.connections.metadataJson,
+          })
+          .from(controlSchema.connections)
+          .where(eq(controlSchema.connections.provider, "whatsapp"))
+          .all();
+        for (const wc of waConns) {
+          try {
+            const meta = JSON.parse(wc.metadataJson || "{}") as { wabaId?: string };
+            if (meta.wabaId === wabaId) {
+              targetWorkspaceId = wc.workspaceId;
+              break;
+            }
+          } catch {
+            // Ignore malformed metadata
+          }
+        }
+      }
+
       if (!targetWorkspaceId) continue;
 
       const dataDb = tenantDataDb({ workspaceId: targetWorkspaceId });
@@ -216,6 +243,55 @@ export async function POST(req: NextRequest) {
       const now = Date.now();
 
       for (const ch of entry.changes ?? []) {
+        // 0. Real-time Meta WhatsApp Template Approval / Rejection Status Sync
+        if (
+          ch.field === "message_template_status_update" &&
+          ch.value?.event &&
+          (ch.value.message_template_id || ch.value.message_template_name)
+        ) {
+          const nextStatus = ch.value.event.trim().toUpperCase();
+          const metaTmplId = ch.value.message_template_id
+            ? String(ch.value.message_template_id).trim()
+            : null;
+          const metaTmplName = ch.value.message_template_name
+            ? ch.value.message_template_name.trim().toLowerCase()
+            : null;
+          const rejReason =
+            nextStatus === "REJECTED" && ch.value.reason && ch.value.reason !== "NONE"
+              ? ch.value.reason
+              : null;
+
+          const matchedTmpl =
+            (metaTmplId
+              ? dataDb
+                  .select()
+                  .from(tenantDataSchema.whatsappTemplates)
+                  .where(eq(tenantDataSchema.whatsappTemplates.metaTemplateId, metaTmplId))
+                  .get()
+              : undefined) ??
+            (metaTmplName
+              ? dataDb
+                  .select()
+                  .from(tenantDataSchema.whatsappTemplates)
+                  .where(eq(tenantDataSchema.whatsappTemplates.name, metaTmplName))
+                  .get()
+              : undefined);
+
+          if (matchedTmpl) {
+            dataDb
+              .update(tenantDataSchema.whatsappTemplates)
+              .set({
+                approvalStatus: nextStatus,
+                metaTemplateId: metaTmplId ?? matchedTmpl.metaTemplateId,
+                rejectionReason: rejReason,
+                lastSyncedAt: now,
+                updatedAt: now,
+              })
+              .where(eq(tenantDataSchema.whatsappTemplates.id, matchedTmpl.id))
+              .run();
+          }
+        }
+
         const profileNameByWaId = new Map<string, string>();
         for (const c of ch.value?.contacts ?? []) {
           if (c.wa_id && c.profile?.name?.trim()) {
@@ -223,7 +299,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // 1. Process outbound delivery & read receipts (statuses[])
+        // 1. Process outbound delivery & read receipts (statuses[]) — including automatic ₹0-error wallet refund on failed deliveries!
         for (const st of ch.value?.statuses ?? []) {
           const extMsgId = st.id?.trim();
           const incomingStatus = (st.status || "").trim().toLowerCase();
@@ -256,11 +332,29 @@ export async function POST(req: NextRequest) {
 
           if (!shouldAdvanceStatus) continue;
 
+          const refundAmountPaise =
+            incomingStatus === "failed" && prevStatus !== "failed" && existingMsg.costPaise > 0
+              ? existingMsg.costPaise
+              : 0;
+
+          if (refundAmountPaise > 0) {
+            creditWallet({
+              workspaceId: targetWorkspaceId,
+              amountPaise: refundAmountPaise,
+              entryType: "refund",
+              idempotencyKey: `wa_fail_refund:${extMsgId}`,
+              description: `Auto-refund: WhatsApp delivery failed (${extMsgId}${errInfo?.code ? ` • code ${errInfo.code}` : ""})`,
+              actorId: "whatsapp_webhook",
+              createInvoice: false,
+            });
+          }
+
           dataDb
             .update(tenantDataSchema.messages)
             .set({
               deliveryStatus: incomingStatus,
               errorDetail: errorDetail ?? null,
+              ...(refundAmountPaise > 0 ? { costPaise: 0 } : {}),
             })
             .where(eq(tenantDataSchema.messages.id, existingMsg.id))
             .run();
@@ -274,13 +368,18 @@ export async function POST(req: NextRequest) {
             const addRead = incomingStatus === "read" && prevStatus !== "read" ? 1 : 0;
             const addFailed = incomingStatus === "failed" && prevStatus !== "failed" ? 1 : 0;
 
-            if (addDelivered > 0 || addRead > 0 || addFailed > 0) {
+            if (addDelivered > 0 || addRead > 0 || addFailed > 0 || refundAmountPaise > 0) {
               dataDb
                 .update(tenantDataSchema.broadcasts)
                 .set({
                   deliveredCount: sql`${tenantDataSchema.broadcasts.deliveredCount} + ${addDelivered}`,
                   readCount: sql`${tenantDataSchema.broadcasts.readCount} + ${addRead}`,
                   failedCount: sql`${tenantDataSchema.broadcasts.failedCount} + ${addFailed}`,
+                  ...(refundAmountPaise > 0
+                    ? {
+                        actualCostPaise: sql`MAX(0, ${tenantDataSchema.broadcasts.actualCostPaise} - ${refundAmountPaise})`,
+                      }
+                    : {}),
                 })
                 .where(eq(tenantDataSchema.broadcasts.id, existingMsg.broadcastId))
                 .run();

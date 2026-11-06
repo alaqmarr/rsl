@@ -151,6 +151,7 @@ import {
   installStarterTallyTemplates,
   launchWhatsAppBroadcast,
   removeWhatsAppUnsubscribedNumber,
+  submitWhatsAppTemplateToMeta,
   syncWhatsAppTemplatesWithMeta,
   updateWhatsAppTemplate,
   type WhatsAppTemplateButton,
@@ -1615,7 +1616,26 @@ export async function createTemplateAction(formData: FormData) {
   if (!res.ok) return goWithError("/whatsapp", res.error.message);
   return goWithNotice(
     "/whatsapp",
-    `Template saved (${res.data.approvalStatus === "APPROVED" ? "Ready to send" : "Submitted for WhatsApp approval"}).`
+    res.data.approvalStatus === "APPROVED"
+      ? "Template approved by Meta and ready for automations."
+      : res.data.approvalStatus === "PENDING"
+        ? "Template submitted to Meta for approval. It will automatically unlock for automations once Meta approves it."
+        : "Template saved as Draft. Connect your WhatsApp Business Account and click 'Submit to Meta' before using it in automations."
+  );
+}
+
+export async function submitTemplateToMetaAction(formData: FormData) {
+  const session = await requireWebSession();
+  await enforceFeaturePaidEntitlement(session.workspace.id, "whatsapp.messaging", "/whatsapp");
+  const res = await submitWhatsAppTemplateToMeta(session.ctx, {
+    templateId: String(formData.get("templateId") || ""),
+  });
+  if (!res.ok) return goWithError("/whatsapp", res.error.message);
+  return goWithNotice(
+    "/whatsapp",
+    res.data.approvalStatus === "APPROVED"
+      ? "Template approved by Meta and ready for automations!"
+      : "Template submitted to Meta for review. Status updates automatically via webhook or 'Sync Templates'."
   );
 }
 
@@ -1651,7 +1671,11 @@ export async function installStarterTemplatesAction() {
   return goWithNotice(
     "/whatsapp",
     res.data.installed > 0
-      ? `Added ${res.data.installed} ready-to-use Tally bill, receipt & reminder templates.`
+      ? res.data.approvedCount > 0
+        ? `Added ${res.data.installed} Tally WhatsApp template(s) (${res.data.approvedCount} approved, ${res.data.pendingCount} pending Meta review).`
+        : res.data.pendingCount > 0
+          ? `Submitted ${res.data.pendingCount} Tally WhatsApp template(s) to Meta for approval.`
+          : `Saved ${res.data.installed} Tally WhatsApp template draft(s). Connect WhatsApp Business Account & click 'Submit to Meta' to activate automations.`
       : "All starter Tally templates are already in your template library."
   );
 }

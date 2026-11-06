@@ -24,6 +24,7 @@ import {
   staffRecordPlanPaymentAndActivate,
   submitWalletRechargeRequest,
 } from "@rsl/billing";
+import { linkExternalConnection } from "@rsl/connections";
 import { generateOpenApiSpec } from "@rsl/docs";
 import {
   assignConversationToMember,
@@ -41,6 +42,7 @@ import {
   runDueTallyReminders,
   saveTallyReminderRule,
 } from "@rsl/tally";
+import { installStarterTallyTemplates } from "@rsl/whatsapp";
 import { GET as getAnalyticsRoute } from "../app/api/v1/analytics/route";
 
 function setupFreshAccount(tag: string) {
@@ -395,6 +397,17 @@ describe("Phase 10 end-to-end features (Invite Acceptance, /api/v1/analytics, Li
       dueDateIso: tenDaysAgoIso,
     });
     expect(billRes.ok).toBe(true);
+
+    await linkExternalConnection(acct.ctx, {
+      provider: "whatsapp",
+      assetType: "waba_phone",
+      displayName: "Sandbox WhatsApp",
+      externalAccountId: "waba_sb_p10",
+      accessToken: "rsl_sandbox_wa_p10_token",
+      scopesGranted: ["whatsapp_business_messaging"],
+      metadata: { channelKind: "whatsapp_cloud", wabaId: "waba_sb_p10", phoneNumberId: "waba_sb_p10" },
+    });
+    await installStarterTallyTemplates(acct.ctx, {});
 
     const ruleRes = await saveTallyReminderRule(acct.ctx, {
       name: "7 Days Overdue Follow-Up",

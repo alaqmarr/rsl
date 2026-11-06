@@ -980,9 +980,9 @@ export default async function TallySyncPage({
                 </p>
               ) : approvedTemplates.length === 0 ? (
                 <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 text-xs text-amber-900">
-                  <div className="font-semibold">Step Required: Add Your WhatsApp Templates First</div>
+                  <div className="font-semibold">Step Required: Meta-Approved WhatsApp Template Needed</div>
                   <p className="mt-1">
-                    Load our ready-made Tally PDF Tax Invoice (<code className="font-mono">tally_tax_invoice_pdf</code>) &amp; Payment Receipt WhatsApp templates in 1 click, or design your own in{" "}
+                    Automations strictly require a valid Meta-approved (<code className="font-mono">APPROVED</code>) WhatsApp template, and wallet charges are deducted only after confirmed Meta delivery (₹0 on any error). Connect WhatsApp and submit or sync your templates in{" "}
                     <ActionLink href="/whatsapp" className="font-semibold underline">
                       WhatsApp &amp; Templates
                     </ActionLink>
@@ -990,7 +990,7 @@ export default async function TallySyncPage({
                   </p>
                   <form action={installStarterTemplatesAction} className="mt-3">
                     <SubmitButton pendingText="Loading Templates..." className="rsl-btn-primary text-xs">
-                      + Load Ready-Made Tally WhatsApp Templates
+                      + Load &amp; Submit Starter Tally Templates
                     </SubmitButton>
                   </form>
                 </div>
@@ -1143,28 +1143,53 @@ export default async function TallySyncPage({
               ) : (
                 <>
                   {canManageTally ? (
-                    <form
-                      action={saveReminderRuleAction}
-                      className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3"
-                    >
-                      <input
-                        name="name"
-                        required
-                        placeholder="e.g. 7 Days Overdue Follow-Up"
-                        className="rsl-input"
-                      />
-                      <input
-                        name="triggerDaysOffset"
-                        type="number"
-                        defaultValue={7}
-                        required
-                        title="Negative = days before due date; Positive = days after due date"
-                        className="rsl-input tabular-nums"
-                      />
-                      <SubmitButton pendingText="Saving..." className="rsl-btn-primary">
-                        Add Schedule
-                      </SubmitButton>
-                    </form>
+                    approvedTemplates.length === 0 ? (
+                      <p className="rounded-xl border border-amber-200 bg-amber-50/80 p-3.5 text-xs text-amber-900">
+                        Approve at least one WhatsApp template on{" "}
+                        <ActionLink href="/whatsapp" className="font-semibold underline">
+                          WhatsApp &amp; Templates
+                        </ActionLink>{" "}
+                        before adding overdue payment reminder schedules. Wallet charges (₹0.85/message) are deducted strictly after confirmed Meta delivery (₹0 on error).
+                      </p>
+                    ) : (
+                      <form
+                        action={saveReminderRuleAction}
+                        className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4"
+                      >
+                        <input
+                          name="name"
+                          required
+                          placeholder="e.g. 7 Days Overdue Follow-Up"
+                          className="rsl-input"
+                        />
+                        <select
+                          name="templateName"
+                          required
+                          defaultValue={
+                            approvedTemplates.find((t) => t.name === "tally_overdue_bill_reminder")
+                              ?.name ?? approvedTemplates[0]?.name
+                          }
+                          className="rsl-input"
+                        >
+                          {approvedTemplates.map((t) => (
+                            <option key={t.id} value={t.name}>
+                              {t.name} (Meta Approved)
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          name="triggerDaysOffset"
+                          type="number"
+                          defaultValue={7}
+                          required
+                          title="Negative = days before due date; Positive = days after due date"
+                          className="rsl-input tabular-nums"
+                        />
+                        <SubmitButton pendingText="Saving..." className="rsl-btn-primary">
+                          Add Schedule
+                        </SubmitButton>
+                      </form>
+                    )
                   ) : (
                     <p className="rounded-xl border border-zinc-200 bg-zinc-50/70 p-3.5 text-xs text-zinc-600">
                       Read-only view — Owner, Admin, or Manager permission is required to modify

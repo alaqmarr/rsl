@@ -384,6 +384,15 @@ describe("Phase 19 — Sprint 1 & 2: Tally Prime Integrity, Double-Entry XML, Mu
       staffId: "stf_p19",
     });
 
+    await linkExternalConnection(acct.ctx, {
+      provider: "whatsapp",
+      assetType: "waba_phone",
+      displayName: "Sandbox WhatsApp P19",
+      externalAccountId: "waba_sb_p19",
+      accessToken: "rsl_sandbox_wa_p19_token",
+      scopesGranted: ["whatsapp_business_messaging"],
+      metadata: { channelKind: "whatsapp_cloud", wabaId: "waba_sb_p19", phoneNumberId: "waba_sb_p19" },
+    });
     await installStarterTallyTemplates(acct.ctx, {});
     const tenDaysAgoIso = new Date(Date.now() - 10 * 86_400_000).toISOString().slice(0, 10);
     const fiveDaysAgoIso = new Date(Date.now() - 5 * 86_400_000).toISOString().slice(0, 10);

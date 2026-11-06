@@ -213,6 +213,21 @@ function registerStandardJobHandlers() {
           nativePdf ? ` with native Tally PDF (${nativePdf.filename})` : ""
         } for Tally bill to ${payload.recipientName || "customer"}`,
       });
+    } else if (!res.deduplicated) {
+      appendActionLog({
+        workspaceId: envelope.tenantId,
+        actorType: envelope.actor.type,
+        actorId: envelope.actor.id,
+        source: "worker",
+        action: "tally.invoice.sent",
+        outcome: "skipped",
+        requestId: envelope.requestId,
+        correlationId: envelope.correlationId,
+        durationMs: 12,
+        summary: `WhatsApp automation skipped for '${payload.templateName || templateTarget}' (${
+          res.skippedReason || "provider error"
+        }) — ₹0.00 deducted`,
+      });
     }
   });
 
@@ -227,7 +242,7 @@ function registerStandardJobHandlers() {
 
     if (!payload.templateIdOrName || !payload.recipientPhone) return;
 
-    await executeWhatsAppTemplateSend({
+    const res = await executeWhatsAppTemplateSend({
       workspaceId: envelope.tenantId,
       templateIdOrName: payload.templateIdOrName,
       recipientPhone: payload.recipientPhone,
@@ -238,6 +253,23 @@ function registerStandardJobHandlers() {
       serviceKey: "whatsapp.messaging",
       correlationId: envelope.correlationId,
     });
+
+    if (!res.sent && !res.deduplicated) {
+      appendActionLog({
+        workspaceId: envelope.tenantId,
+        actorType: envelope.actor.type,
+        actorId: envelope.actor.id,
+        source: "worker",
+        action: "whatsapp.template.sent",
+        outcome: "skipped",
+        requestId: envelope.requestId,
+        correlationId: envelope.correlationId,
+        durationMs: 10,
+        summary: `WhatsApp API template send skipped for '${payload.templateIdOrName}' (${
+          res.skippedReason || "provider error"
+        }) — ₹0.00 deducted`,
+      });
+    }
   });
 
   // 3. Direct 24h WhatsApp Text Worker Processor (Live Cloud API)

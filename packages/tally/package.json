@@ -18,6 +18,7 @@
     "@rsl/queue": "workspace:*",
     "@rsl/rbac": "workspace:*",
     "@rsl/tenancy": "workspace:*",
+    "@rsl/whatsapp": "workspace:*",
     "drizzle-orm": "0.45.4",
     "zod": "^4.6.7"
   }

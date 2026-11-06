@@ -27,6 +27,7 @@ import {
   installStarterTemplatesAction,
   launchBroadcastAction,
   removeSuppressionAction,
+  submitTemplateToMetaAction,
   syncMetaTemplatesAction,
 } from "@/lib/actions";
 import { requireWebSession } from "@/lib/session";
@@ -282,32 +283,56 @@ export default async function WhatsAppPage({
                       <StatusPill
                         label={
                           t.approvalStatus === "APPROVED"
-                            ? "Ready to Use"
+                            ? "Meta Approved"
                             : t.approvalStatus === "PENDING"
-                              ? "Pending Review"
-                              : t.approvalStatus
+                              ? "Pending Meta Review"
+                              : t.approvalStatus === "DRAFT"
+                                ? "Draft — Submit to Meta"
+                                : t.approvalStatus
                         }
                         tone={
                           t.approvalStatus === "APPROVED"
                             ? "emerald"
                             : t.approvalStatus === "PENDING"
                               ? "amber"
-                              : "ruby"
+                              : t.approvalStatus === "DRAFT"
+                                ? "stone"
+                                : "ruby"
                         }
                       />
+                      {t.rejectionReason && (
+                        <div className="mt-1 max-w-[220px] text-[11px] leading-snug text-rose-700">
+                          {t.rejectionReason}
+                        </div>
+                      )}
                     </td>
                     {canManageTemplates && (
                       <td className="px-5 py-4 text-right align-top sm:px-6">
-                        <form action={deleteTemplateAction} className="inline">
-                          <input type="hidden" name="templateId" value={t.id} />
-                          <SubmitButton
-                            spinnerSize="xs"
-                            pendingText="Deleting..."
-                            className="rsl-btn-danger-soft"
-                          >
-                            Delete
-                          </SubmitButton>
-                        </form>
+                        <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                          {wa.wabaConnected &&
+                            (t.approvalStatus === "DRAFT" || t.approvalStatus === "REJECTED") && (
+                              <form action={submitTemplateToMetaAction} className="inline">
+                                <input type="hidden" name="templateId" value={t.id} />
+                                <SubmitButton
+                                  spinnerSize="xs"
+                                  pendingText="Submitting..."
+                                  className="rsl-btn-secondary py-1 text-xs"
+                                >
+                                  Submit to Meta
+                                </SubmitButton>
+                              </form>
+                            )}
+                          <form action={deleteTemplateAction} className="inline">
+                            <input type="hidden" name="templateId" value={t.id} />
+                            <SubmitButton
+                              spinnerSize="xs"
+                              pendingText="Deleting..."
+                              className="rsl-btn-danger-soft"
+                            >
+                              Delete
+                            </SubmitButton>
+                          </form>
+                        </div>
                       </td>
                     )}
                   </tr>

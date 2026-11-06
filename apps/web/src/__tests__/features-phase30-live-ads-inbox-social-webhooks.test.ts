@@ -672,6 +672,13 @@ describe("Phase 30 — Live Meta & Google Ads Studio, 0-Overdraft Ad Spend Vault
         );
       }
 
+      if (url.includes("/message_templates")) {
+        return new Response(
+          JSON.stringify({ id: `meta_tmpl_live_${Date.now()}`, status: "APPROVED" }),
+          { status: 200 }
+        );
+      }
+
       if (url.includes("/lead_id_990011")) {
         return new Response(
           JSON.stringify({

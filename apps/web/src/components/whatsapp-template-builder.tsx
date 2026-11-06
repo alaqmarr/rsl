@@ -326,8 +326,8 @@ export function WhatsAppTemplateBuilder({
         <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
           <span className="text-[12.5px] text-zinc-500">
             {wabaConnected
-              ? "Your WhatsApp Business Account is connected — saving will also submit this template for review."
-              : "Saved directly to your template library so you can attach it to Tally bill rules right away."}
+              ? "Connected to WhatsApp Cloud API — saving submits directly to Meta for approval. Wallet is charged strictly after confirmed message delivery (₹0 on error)."
+              : "Saved as a Draft until your WhatsApp Business Account is connected and Meta approves the template."}
           </span>
           <SubmitButton pendingText="Saving Template..." className="rsl-btn-primary">
             Save WhatsApp Template
