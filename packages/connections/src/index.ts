@@ -3401,7 +3401,12 @@ export function buildMetaOAuthAuthorizeUrl(params: {
   url.searchParams.set("redirect_uri", params.redirectUri);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("state", params.state);
-  url.searchParams.set("scope", Array.from(scopeSet).join(","));
+  if (cfg.configId && cfg.configId.trim().length > 0) {
+    url.searchParams.set("config_id", cfg.configId.trim());
+    url.searchParams.set("override_default_response_type", "true");
+  } else {
+    url.searchParams.set("scope", Array.from(scopeSet).join(","));
+  }
   return url.toString();
 }
 

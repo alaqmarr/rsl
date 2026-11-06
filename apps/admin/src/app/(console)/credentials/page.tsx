@@ -68,6 +68,13 @@ export default async function AdminPlatformCredentialsPage({
   const googleScopesText =
     "openid, email, profile, https://www.googleapis.com/auth/drive.file, https://www.googleapis.com/auth/business.manage, https://www.googleapis.com/auth/adwords";
 
+  const metaRedirectUri = `${googleOrigin}/api/oauth/meta/callback`;
+  const metaWebhookUri = `${googleOrigin}/api/webhooks/meta`;
+  const whatsappWebhookUri = `${googleOrigin}/api/webhooks/whatsapp`;
+  const metaLegalUrlsText = `Privacy: ${googleOrigin}/privacy | Terms: ${googleOrigin}/terms | Data Deletion: ${googleOrigin}/data-deletion`;
+  const metaScopesText =
+    "public_profile, business_management, ads_management, ads_read, pages_show_list, pages_read_engagement, pages_manage_posts, pages_manage_ads, pages_messaging, leads_retrieval, instagram_basic, instagram_content_publish, instagram_manage_messages, whatsapp_business_management, whatsapp_business_messaging";
+
   const dbActiveCount = [
     snap.google.source,
     snap.googleAds.source,
@@ -286,6 +293,142 @@ export default async function AdminPlatformCredentialsPage({
                 <strong>Application type: Web application</strong> (NEVER Service Account!). Paste the{" "}
                 <strong>Authorized JavaScript Origin</strong> and <strong>Authorized Redirect URI</strong> above, click{" "}
                 <strong>Create</strong>, and paste the Client ID &amp; Secret (or <code className="font-mono">client_secret_*.json</code>) below!
+              </p>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      {/* Complete Step-by-Step Admin Guide for Meta / Facebook Login for Business & Webhooks */}
+      <details
+        open={!snap.meta.isReady}
+        className="group rounded-2xl border border-zinc-200/90 bg-white shadow-2xs"
+      >
+        <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 px-6 py-4 select-none">
+          <div>
+            <div className="text-sm font-bold text-slate-900">
+              Complete Admin Setup Guide — Meta / Facebook Login for Business, Ads &amp; WhatsApp OAuth Screen
+            </div>
+            <div className="text-xs text-zinc-500">
+              {snap.meta.isReady
+                ? "Meta App credentials are saved — click to copy Valid OAuth Redirect URIs, Webhook URLs, Legal URLs, or Login for Business Scopes"
+                : "Do this ONCE in developers.facebook.com so clients can connect Facebook Pages, Instagram, Meta Ads, Pixels & WhatsApp in 1 click"}
+            </div>
+          </div>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-bold text-sky-800">
+            <ShieldCheck className="h-3.5 w-3.5 text-sky-600" />
+            <span>Business App + Login Configuration Ready</span>
+          </span>
+        </summary>
+        <div className="space-y-5 border-t border-zinc-100 p-6 text-xs">
+          <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
+            <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-3.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-bold text-slate-900">
+                  1. Valid OAuth Redirect URI (Facebook Login → Settings)
+                </span>
+                <AdminCopyButton text={metaRedirectUri} label="Copy OAuth URI" />
+              </div>
+              <div className="mt-1.5 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-[11px] font-semibold text-emerald-800">
+                {metaRedirectUri}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-3.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-bold text-slate-900">
+                  2. Meta Pages / Instagram / Lead Ads Webhook URL
+                </span>
+                <AdminCopyButton text={metaWebhookUri} label="Copy Meta Webhook" />
+              </div>
+              <div className="mt-1.5 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-[11px] font-semibold text-emerald-800">
+                {metaWebhookUri}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-3.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-bold text-slate-900">
+                  3. WhatsApp Cloud API Webhook Callback URL
+                </span>
+                <AdminCopyButton text={whatsappWebhookUri} label="Copy WA Webhook" />
+              </div>
+              <div className="mt-1.5 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-[11px] font-semibold text-emerald-800">
+                {whatsappWebhookUri}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-3.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-bold text-slate-900">
+                  4. Required Permissions (Login for Business Configuration)
+                </span>
+                <AdminCopyButton text={metaScopesText} label="Copy Scopes" />
+              </div>
+              <div className="mt-1.5 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-[11px] text-slate-800">
+                {metaScopesText}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-3.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-bold text-slate-900">
+                App Basic Settings — Required Legal URLs (Already Live on Your App!)
+              </span>
+              <AdminCopyButton text={metaLegalUrlsText} label="Copy All 3 URLs" />
+            </div>
+            <div className="mt-1.5 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-[11px] text-slate-800">
+              {metaLegalUrlsText}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <div className="rounded-xl border border-zinc-200/90 bg-white p-3.5">
+              <div className="font-bold text-slate-900">Step 1 • Create &ldquo;Business&rdquo; Meta App</div>
+              <p className="mt-1 leading-relaxed text-zinc-600">
+                Open <code className="font-mono">developers.facebook.com/apps</code> → <strong>Create App</strong> → Choose{" "}
+                <strong>Other → Business</strong> → App Name: <strong>RapidShift Labs</strong> → attach your Meta Business Portfolio.
+              </p>
+            </div>
+            <div className="rounded-xl border border-zinc-200/90 bg-white p-3.5">
+              <div className="font-bold text-slate-900">Step 2 • App Settings → Basic</div>
+              <p className="mt-1 leading-relaxed text-zinc-600">
+                Add App Domain <code className="font-mono">app.{endpoints.primaryDomain}</code>, upload your square app icon, and paste the{" "}
+                <strong>Privacy Policy</strong>, <strong>Terms of Service</strong>, and <strong>User Data Deletion</strong> URLs above. Copy{" "}
+                <strong>App ID</strong> &amp; <strong>App Secret</strong> into Section 4 below.
+              </p>
+            </div>
+            <div className="rounded-xl border border-zinc-200/90 bg-white p-3.5">
+              <div className="font-bold text-slate-900">Step 3 • Facebook Login for Business</div>
+              <p className="mt-1 leading-relaxed text-zinc-600">
+                Add product <strong>Facebook Login for Business</strong>. Under <strong>Settings</strong>, enable{" "}
+                <em>Client OAuth Login</em> + <em>Web OAuth Login</em> and paste <code className="font-mono">{metaRedirectUri}</code> into{" "}
+                <strong>Valid OAuth Redirect URIs</strong>.
+              </p>
+            </div>
+            <div className="rounded-xl border border-zinc-200/90 bg-white p-3.5">
+              <div className="font-bold text-slate-900">Step 4 • Create Login Configuration ID</div>
+              <p className="mt-1 leading-relaxed text-zinc-600">
+                Open <strong>Facebook Login for Business → Configurations → + Create Configuration</strong> → Token type:{" "}
+                <strong>System user access token</strong> (or User access token) → select Assets &amp; Permissions above → paste the resulting{" "}
+                <strong>Configuration ID</strong> into <em>Embedded Config ID</em> in Section 4 below.
+              </p>
+            </div>
+            <div className="rounded-xl border border-zinc-200/90 bg-white p-3.5">
+              <div className="font-bold text-slate-900">Step 5 • Add Webhooks (Pages, IG, WhatsApp)</div>
+              <p className="mt-1 leading-relaxed text-zinc-600">
+                Add products <strong>Webhooks</strong>, <strong>Marketing API</strong>, <strong>Instagram</strong>, and <strong>WhatsApp</strong>. Point Page/Instagram webhooks (<code className="font-mono">messages, feed, leadgen</code>) to{" "}
+                <code className="font-mono">/api/webhooks/meta</code> and WhatsApp (<code className="font-mono">messages</code>) to{" "}
+                <code className="font-mono">/api/webhooks/whatsapp</code> using your <strong>Global Verify Token</strong>.
+              </p>
+            </div>
+            <div className="rounded-xl border border-zinc-200/90 bg-white p-3.5">
+              <div className="font-bold text-slate-900">Step 6 • Business Verification &amp; Live Mode</div>
+              <p className="mt-1 leading-relaxed text-zinc-600">
+                While in <strong>Development Mode</strong>, your own admin/tester accounts work immediately. To let external clients sign in, complete{" "}
+                <strong>Business Verification</strong> (GST/MSME certificate) + request <strong>Advanced Access</strong> in{" "}
+                <em>App Review → Permissions and Features</em>, then toggle top bar to <strong>Live</strong>.
               </p>
             </div>
           </div>
