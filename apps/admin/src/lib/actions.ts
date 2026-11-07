@@ -54,13 +54,18 @@ import {
 } from "@rsl/billing";
 import { formatInr, getEnv, newEntityId, rupeesToPaise } from "@rsl/core";
 import { controlSchema, platformLogsSchema, tenantDataSchema } from "@rsl/database";
-import { sendBillingNotification, sendPlatformSmtpTestEmail } from "@rsl/notifications";
+import {
+  sendBillingNotification,
+  sendPlatformSmtpTestEmail,
+  verifyPlatformSmtpTransport,
+} from "@rsl/notifications";
 import {
   enqueueWorkspaceSslProvisioning,
   rehydrateFromSqlite,
   replayDeadLetterJob,
 } from "@rsl/queue";
 import {
+  ALL_PLATFORM_CREDENTIAL_PROVIDERS,
   clearPlatformCredentialOverride,
   controlDb,
   platformLogsDb,
@@ -78,7 +83,12 @@ import {
   savePlatformVapidConfig,
   seedPlatformCredentialsBundle,
   tenantDataDb,
+  verifyAllPlatformCredentials,
+  verifyAllStaffClientConnectionsLive,
   verifyCloudflareTurnstileToken,
+  verifyPlatformCredentialProvider,
+  verifyStaffClientConnectionLive,
+  verifyStaffClientStorageVaultLive,
   type PlatformCredentialProviderKey,
   type PlatformCredentialsSeedInput,
 } from "@rsl/tenancy";
@@ -2732,4 +2742,177 @@ export async function staffClearPlatformCredentialAction(formData: FormData) {
     "notice",
     `Removed database override for '${providerKey}'. Platform now falls back to server .env if present.`
   );
+}
+
+export async function staffTestPlatformCredentialAction(formData: FormData) {
+  const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  const providerKey = String(formData.get("providerKey") || "").trim() as PlatformCredentialProviderKey;
+  const returnTo = safeReturnTo(formData.get("returnTo"), "/credentials");
+  const validKeys = ALL_PLATFORM_CREDENTIAL_PROVIDERS.map((p) => p.key);
+
+  if (!validKeys.includes(providerKey)) {
+    return flashAdminRedirect(returnTo, "error", "Unknown credential provider key.");
+  }
+
+  const diag = await verifyPlatformCredentialProvider(providerKey, {
+    appOrigin: getEnv().APP_URL,
+    smtpVerifyFn: verifyPlatformSmtpTransport,
+  });
+
+  logStaffCredentialAction(
+    staff.id,
+    `platform.credentials.${providerKey}.tested`,
+    `Tested '${diag.label}' (${diag.status.toUpperCase()} in ${diag.latencyMs}ms): ${diag.message}`
+  );
+
+  return flashAdminRedirect(
+    returnTo,
+    diag.status === "error" ? "error" : "notice",
+    `[${diag.label}] ${diag.message}`
+  );
+}
+
+export async function staffTestAllPlatformCredentialsAction(formData: FormData) {
+  const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  const returnTo = safeReturnTo(formData.get("returnTo"), "/credentials?probeSystem=1");
+
+  const report = await verifyAllPlatformCredentials({
+    appOrigin: getEnv().APP_URL,
+    smtpVerifyFn: verifyPlatformSmtpTransport,
+  });
+
+  const failedLabels = report.results
+    .filter((r) => r.status === "error")
+    .map((r) => r.label);
+
+  logStaffCredentialAction(
+    staff.id,
+    "platform.credentials.all.tested",
+    `Tested all 11 platform credential providers: ${report.counts.healthy} healthy, ${report.counts.warning} warning, ${report.counts.error} error, ${report.counts.unconfigured} unconfigured`
+  );
+
+  if (report.counts.error > 0) {
+    return flashAdminRedirect(
+      returnTo,
+      "error",
+      `Tested all 11 providers: ${report.counts.healthy} healthy, ${report.counts.warning} warning, ${report.counts.unconfigured} unconfigured, ${report.counts.error} failed (${failedLabels.join(", ")}). Check the status matrix below.`
+    );
+  }
+
+  return flashAdminRedirect(
+    returnTo,
+    "notice",
+    `All 11 credential checks completed: ${report.counts.healthy} verified healthy, ${report.counts.warning} warning, ${report.counts.unconfigured} optional/unconfigured.`
+  );
+}
+
+export async function staffTestClientConnectionAction(formData: FormData) {
+  const { staff } = await requireStaffSession();
+  if (
+    !canStaffPerform(staff.staffRole, "staff:clients.manage") &&
+    !canStaffPerform(staff.staffRole, "staff:ops.manage")
+  ) {
+    return flashAdminRedirect("/clients", "error", "Insufficient staff permission to test client connections.");
+  }
+
+  const workspaceId = String(formData.get("workspaceId") || "").trim();
+  const connectionId = String(formData.get("connectionId") || "").trim();
+  const returnTo = safeReturnTo(
+    formData.get("returnTo"),
+    workspaceId ? `/clients/${workspaceId}?tab=connections` : "/clients"
+  );
+
+  try {
+    const res = await verifyStaffClientConnectionLive({ workspaceId, connectionId });
+    logStaffCredentialAction(
+      staff.id,
+      "client.connection.tested",
+      `Tested client connection '${res.displayName}' (${res.status}): ${res.message}`
+    );
+    return flashAdminRedirect(
+      returnTo,
+      res.status === "needs_reauth" ? "error" : "notice",
+      `[${res.displayName}] ${res.message}`
+    );
+  } catch (err) {
+    return flashAdminRedirect(
+      returnTo,
+      "error",
+      err instanceof Error ? err.message : "Failed to test client connection."
+    );
+  }
+}
+
+export async function staffTestAllClientConnectionsAction(formData: FormData) {
+  const { staff } = await requireStaffSession();
+  if (
+    !canStaffPerform(staff.staffRole, "staff:clients.manage") &&
+    !canStaffPerform(staff.staffRole, "staff:ops.manage")
+  ) {
+    return flashAdminRedirect("/clients", "error", "Insufficient staff permission to test client connections.");
+  }
+
+  const workspaceId = String(formData.get("workspaceId") || "").trim();
+  const returnTo = safeReturnTo(
+    formData.get("returnTo"),
+    workspaceId ? `/clients/${workspaceId}?tab=connections` : "/clients"
+  );
+
+  try {
+    const [connReport, storageRes] = await Promise.all([
+      verifyAllStaffClientConnectionsLive(workspaceId),
+      verifyStaffClientStorageVaultLive(workspaceId),
+    ]);
+
+    logStaffCredentialAction(
+      staff.id,
+      "client.connections.all_tested",
+      `Tested ${connReport.total} client channel(s) (${connReport.healthy} healthy, ${connReport.needsAttention} needs attention) + storage (${storageRes.mode}: ${storageRes.ok ? "OK" : "FAIL"})`
+    );
+
+    const hasError = connReport.needsAttention > 0 || !storageRes.ok;
+    return flashAdminRedirect(
+      returnTo,
+      hasError ? "error" : "notice",
+      `Client status check complete: ${connReport.healthy}/${connReport.total} channel(s) healthy • Storage (${storageRes.mode}): ${storageRes.message}`
+    );
+  } catch (err) {
+    return flashAdminRedirect(
+      returnTo,
+      "error",
+      err instanceof Error ? err.message : "Failed to run client status checks."
+    );
+  }
+}
+
+export async function staffTestClientStorageVaultAction(formData: FormData) {
+  const { staff } = await requireStaffSession();
+  if (
+    !canStaffPerform(staff.staffRole, "staff:clients.manage") &&
+    !canStaffPerform(staff.staffRole, "staff:ops.manage")
+  ) {
+    return flashAdminRedirect("/clients", "error", "Insufficient staff permission to test client storage.");
+  }
+
+  const workspaceId = String(formData.get("workspaceId") || "").trim();
+  const returnTo = safeReturnTo(
+    formData.get("returnTo"),
+    workspaceId ? `/clients/${workspaceId}?tab=connections` : "/clients"
+  );
+
+  try {
+    const res = await verifyStaffClientStorageVaultLive(workspaceId);
+    logStaffCredentialAction(
+      staff.id,
+      "client.storage.tested",
+      `Tested client storage vault (${res.mode}): ${res.message}`
+    );
+    return flashAdminRedirect(returnTo, res.ok ? "notice" : "error", res.message);
+  } catch (err) {
+    return flashAdminRedirect(
+      returnTo,
+      "error",
+      err instanceof Error ? err.message : "Failed to test client storage vault."
+    );
+  }
 }

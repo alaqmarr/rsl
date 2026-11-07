@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { asc } from "drizzle-orm";
-import { Activity, BookOpen, Cpu, Server } from "lucide-react";
+import { Activity, BookOpen, Cpu, KeyRound, Play, Server } from "lucide-react";
 import { getPlatformAdminAnalytics } from "@rsl/analytics";
 import { canStaffPerform } from "@rsl/auth";
 import { getEnv } from "@rsl/core";
 import { controlSchema } from "@rsl/database";
-import { controlDb } from "@rsl/tenancy";
+import { controlDb, probePlatformSystemStatuses } from "@rsl/tenancy";
 import {
   FlashBanner,
   FormattedGuideBody,
@@ -63,6 +63,10 @@ export default async function StaffRunbooksPage({
   const env = getEnv();
   const runbooks = loadStaffRunbooks();
   const adminAnalytics = getPlatformAdminAnalytics();
+  const includeExternalProbe = sp.probe === "1";
+  const systemHealth = await probePlatformSystemStatuses({
+    includeOpenExternalApis: includeExternalProbe,
+  });
   const rolloutToggles = controlDb()
     .select()
     .from(controlSchema.featureFlags)
@@ -74,8 +78,28 @@ export default async function StaffRunbooksPage({
       <PageHeader
         eyebrow="Operations Reference"
         title="Server Health & Guides"
-        subtitle={`Signed in as ${staff.name}. Step-by-step instructions for safe server restarts, port numbers, platform rollout toggles, and backup restores.`}
-        badge={<StatusPill label="Staff Reference" tone="emerald" />}
+        subtitle={`Signed in as ${staff.name}. Live diagnostics for server ports, SQLite WAL databases, KMS encryption, rollout toggles, and staff SOP runbooks.`}
+        badge={
+          <StatusPill
+            label={`${systemHealth.summary.healthy}/${systemHealth.items.length} Services Healthy`}
+            tone={systemHealth.summary.error > 0 ? "ruby" : "emerald"}
+          />
+        }
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <ActionLink
+              href="/runbooks?probe=1#live-server-health"
+              className="adm-btn-secondary text-xs"
+            >
+              <Play className="h-3.5 w-3.5 text-indigo-600" />
+              <span>Test All Ports, DBs &amp; Public APIs</span>
+            </ActionLink>
+            <ActionLink href="/credentials" className="adm-btn-primary text-xs">
+              <KeyRound className="h-3.5 w-3.5" />
+              <span>Test 11 OAuth &amp; API Credentials</span>
+            </ActionLink>
+          </div>
+        }
       />
 
       <FlashBanner notice={sp.notice} error={sp.error} />
@@ -108,6 +132,74 @@ export default async function StaffRunbooksPage({
           sublabel="Step-by-step staff instructions"
           icon={<BookOpen className="h-4 w-4" />}
         />
+      </div>
+
+      {/* Live Server Ports, SQLite Databases, KMS & Public API Status */}
+      <div id="live-server-health" className="scroll-mt-24">
+        <SectionCard
+          title={`Live Server Ports, SQLite Databases & KMS Health (${systemHealth.summary.healthy} Healthy • ${systemHealth.summary.warning} Warning • ${systemHealth.summary.error} Error)`}
+          subtitle={
+            includeExternalProbe
+              ? `Full runtime + external India SMB API probe executed at ${new Date(systemHealth.checkedAt).toLocaleTimeString("en-IN")}`
+              : `Local ports, SQLite WAL engines & KMS cipher probed at ${new Date(systemHealth.checkedAt).toLocaleTimeString("en-IN")}. Click "Test All Ports, DBs & Public APIs" to include external IFSC, Pincode & Forex APIs.`
+          }
+          action={
+            <ActionLink
+              href="/runbooks?probe=1#live-server-health"
+              className="adm-btn-secondary py-1 text-xs"
+            >
+              <Play className="h-3 w-3 text-indigo-600" />
+              <span>Re-Run Full Probe</span>
+            </ActionLink>
+          }
+          noPadding
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="border-b border-zinc-200 bg-zinc-50/90 text-[11px] font-bold tracking-wide text-zinc-500 uppercase">
+                <tr>
+                  <th className="px-4 py-2.5">Subsystem</th>
+                  <th className="px-4 py-2.5">Target / Endpoint</th>
+                  <th className="px-4 py-2.5">Live Status</th>
+                  <th className="px-4 py-2.5">Latency</th>
+                  <th className="px-4 py-2.5">Diagnostic Detail</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100 bg-white">
+                {systemHealth.items.map((item) => (
+                  <tr key={item.key} className="hover:bg-zinc-50/60">
+                    <td className="px-4 py-2.5 font-semibold text-slate-900">{item.label}</td>
+                    <td className="px-4 py-2.5 font-mono text-[11px] text-zinc-600">
+                      {item.target}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <StatusPill
+                        label={
+                          item.status === "healthy"
+                            ? "Healthy"
+                            : item.status === "warning"
+                              ? "Optional / Warn"
+                              : "Unreachable"
+                        }
+                        tone={
+                          item.status === "healthy"
+                            ? "emerald"
+                            : item.status === "warning"
+                              ? "amber"
+                              : "ruby"
+                        }
+                      />
+                    </td>
+                    <td className="px-4 py-2.5 font-mono text-[11px] text-zinc-500 tabular-nums">
+                      {item.latencyMs}ms
+                    </td>
+                    <td className="px-4 py-2.5 text-zinc-700">{item.detail}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </SectionCard>
       </div>
 
       {/* Platform Rollout Toggles */}

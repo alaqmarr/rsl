@@ -592,4 +592,5 @@ export function getTenancyHandleMetrics() {
 
 export * from "./ssl";
 export * from "./platform-credentials";
+export * from "./credential-diagnostics";
 export * from "./free-ai-services";

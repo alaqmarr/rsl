@@ -36,6 +36,17 @@ function readRow(providerKey: PlatformCredentialProviderKey) {
     .get();
 }
 
+type PlatformCredentialRow = typeof controlSchema.platformCredentials.$inferSelect;
+
+function hasStoredCredentialsRow(
+  row: PlatformCredentialRow | undefined
+): row is PlatformCredentialRow & { readonly __hasStoredCreds: true } {
+  if (!row) return false;
+  const pub = (row.publicConfigJson || "").trim();
+  const sec = (row.encryptedSecrets || "").trim();
+  return Boolean((pub && pub !== "{}") || sec);
+}
+
 function parseJsonObject<T extends Record<string, unknown>>(raw: string | null | undefined): Partial<T> {
   if (!raw) return {};
   try {
@@ -145,7 +156,7 @@ export function getPlatformGoogleOAuthConfig(): PlatformGoogleOAuthConfig {
   const env = getEnv();
   const row = readRow("google_oauth");
 
-  if (row) {
+  if (hasStoredCredentialsRow(row)) {
     const pub = parseJsonObject<{
       clientId: string;
       projectId: string;
@@ -211,9 +222,9 @@ export function getPlatformGoogleOAuthConfig(): PlatformGoogleOAuthConfig {
     isReady: hasEnv,
     maskedClientSecret: maskCredentialSecret(envClientSecret),
     updatedAt: null,
-    lastVerifiedAt: null,
-    lastVerifyStatus: null,
-    lastVerifyMessage: null,
+    lastVerifiedAt: row?.lastVerifiedAt ?? null,
+    lastVerifyStatus: row?.lastVerifyStatus ?? null,
+    lastVerifyMessage: row?.lastVerifyMessage ?? null,
   };
 }
 
@@ -357,7 +368,7 @@ export function getPlatformSmtpConfig(): PlatformSmtpConfig {
   const env = getEnv();
   const row = readRow("smtp_email");
 
-  if (row) {
+  if (hasStoredCredentialsRow(row)) {
     const pub = parseJsonObject<{
       host: string;
       port: number;
@@ -404,9 +415,9 @@ export function getPlatformSmtpConfig(): PlatformSmtpConfig {
     isReady: hasEnv,
     maskedPassword: maskCredentialSecret(env.GMAIL_SMTP_APP_PASSWORD),
     updatedAt: null,
-    lastVerifiedAt: null,
-    lastVerifyStatus: null,
-    lastVerifyMessage: null,
+    lastVerifiedAt: row?.lastVerifiedAt ?? null,
+    lastVerifyStatus: row?.lastVerifyStatus ?? null,
+    lastVerifyMessage: row?.lastVerifyMessage ?? null,
   };
 }
 
@@ -490,13 +501,16 @@ export interface PlatformManagedR2Config {
   isReady: boolean;
   maskedSecretAccessKey: string;
   updatedAt: number | null;
+  lastVerifiedAt: number | null;
+  lastVerifyStatus: string | null;
+  lastVerifyMessage: string | null;
 }
 
 export function getPlatformManagedR2Config(): PlatformManagedR2Config {
   const env = getEnv();
   const row = readRow("cloudflare_r2");
 
-  if (row) {
+  if (hasStoredCredentialsRow(row)) {
     const pub = parseJsonObject<{
       accountId: string;
       endpointUrl: string;
@@ -527,6 +541,9 @@ export function getPlatformManagedR2Config(): PlatformManagedR2Config {
       isReady: row.enabled && Boolean(endpointUrl && accessKeyId && secretAccessKey && bucketPrivate),
       maskedSecretAccessKey: maskCredentialSecret(secretAccessKey),
       updatedAt: row.updatedAt,
+      lastVerifiedAt: row.lastVerifiedAt,
+      lastVerifyStatus: row.lastVerifyStatus,
+      lastVerifyMessage: row.lastVerifyMessage,
     };
   }
 
@@ -550,6 +567,9 @@ export function getPlatformManagedR2Config(): PlatformManagedR2Config {
     isReady: hasEnv,
     maskedSecretAccessKey: maskCredentialSecret(env.R2_SECRET_ACCESS_KEY),
     updatedAt: null,
+    lastVerifiedAt: row?.lastVerifiedAt ?? null,
+    lastVerifyStatus: row?.lastVerifyStatus ?? null,
+    lastVerifyMessage: row?.lastVerifyMessage ?? null,
   };
 }
 
@@ -645,6 +665,9 @@ export interface PlatformMetaAppConfig {
   maskedVerifyToken: string;
   maskedManagedSystemToken: string;
   updatedAt: number | null;
+  lastVerifiedAt: number | null;
+  lastVerifyStatus: string | null;
+  lastVerifyMessage: string | null;
 }
 
 export interface PublicMetaOAuthStatus {
@@ -658,7 +681,7 @@ export function getPlatformMetaAppConfig(): PlatformMetaAppConfig {
   const env = getEnv();
   const row = readRow("meta_app");
 
-  if (row) {
+  if (hasStoredCredentialsRow(row)) {
     const pub = parseJsonObject<{
       appId: string;
       configId: string;
@@ -697,6 +720,9 @@ export function getPlatformMetaAppConfig(): PlatformMetaAppConfig {
       maskedVerifyToken: maskCredentialSecret(webhookVerifyToken),
       maskedManagedSystemToken: maskCredentialSecret(managedSystemToken),
       updatedAt: row.updatedAt,
+      lastVerifiedAt: row.lastVerifiedAt,
+      lastVerifyStatus: row.lastVerifyStatus,
+      lastVerifyMessage: row.lastVerifyMessage,
     };
   }
 
@@ -722,6 +748,9 @@ export function getPlatformMetaAppConfig(): PlatformMetaAppConfig {
     maskedVerifyToken: maskCredentialSecret(env.META_WEBHOOK_VERIFY_TOKEN),
     maskedManagedSystemToken: maskCredentialSecret(managedSystemToken),
     updatedAt: null,
+    lastVerifiedAt: row?.lastVerifiedAt ?? null,
+    lastVerifyStatus: row?.lastVerifyStatus ?? null,
+    lastVerifyMessage: row?.lastVerifyMessage ?? null,
   };
 }
 
@@ -838,6 +867,9 @@ export interface PlatformGoogleAdsConfig {
   maskedDeveloperToken: string;
   maskedManagedRefreshToken: string;
   updatedAt: number | null;
+  lastVerifiedAt: number | null;
+  lastVerifyStatus: string | null;
+  lastVerifyMessage: string | null;
 }
 
 export interface PublicGoogleAdsStatus {
@@ -856,7 +888,7 @@ export function getPlatformGoogleAdsConfig(): PlatformGoogleAdsConfig {
   const oauth = getPlatformGoogleOAuthConfig();
   const row = readRow("google_ads");
 
-  if (row) {
+  if (hasStoredCredentialsRow(row)) {
     const pub = parseJsonObject<{
       loginCustomerId: string;
       managedCustomerId: string;
@@ -894,6 +926,9 @@ export function getPlatformGoogleAdsConfig(): PlatformGoogleAdsConfig {
       maskedDeveloperToken: maskCredentialSecret(developerToken),
       maskedManagedRefreshToken: maskCredentialSecret(managedRefreshToken),
       updatedAt: row.updatedAt,
+      lastVerifiedAt: row.lastVerifiedAt,
+      lastVerifyStatus: row.lastVerifyStatus,
+      lastVerifyMessage: row.lastVerifyMessage,
     };
   }
 
@@ -918,6 +953,9 @@ export function getPlatformGoogleAdsConfig(): PlatformGoogleAdsConfig {
     maskedDeveloperToken: maskCredentialSecret(developerToken),
     maskedManagedRefreshToken: maskCredentialSecret(managedRefreshToken),
     updatedAt: null,
+    lastVerifiedAt: row?.lastVerifiedAt ?? null,
+    lastVerifyStatus: row?.lastVerifyStatus ?? null,
+    lastVerifyMessage: row?.lastVerifyMessage ?? null,
   };
 }
 
@@ -1011,13 +1049,16 @@ export interface PlatformRazorpayConfig {
   maskedKeySecret: string;
   maskedWebhookSecret: string;
   updatedAt: number | null;
+  lastVerifiedAt: number | null;
+  lastVerifyStatus: string | null;
+  lastVerifyMessage: string | null;
 }
 
 export function getPlatformRazorpayConfig(): PlatformRazorpayConfig {
   const env = getEnv();
   const row = readRow("razorpay");
 
-  if (row) {
+  if (hasStoredCredentialsRow(row)) {
     const pub = parseJsonObject<{ keyId: string }>(row.publicConfigJson);
     const sec = decryptSecretObject<{ keySecret: string; webhookSecret: string }>(
       row.encryptedSecrets
@@ -1036,6 +1077,9 @@ export function getPlatformRazorpayConfig(): PlatformRazorpayConfig {
       maskedKeySecret: maskCredentialSecret(keySecret),
       maskedWebhookSecret: maskCredentialSecret(webhookSecret),
       updatedAt: row.updatedAt,
+      lastVerifiedAt: row.lastVerifiedAt,
+      lastVerifyStatus: row.lastVerifyStatus,
+      lastVerifyMessage: row.lastVerifyMessage,
     };
   }
 
@@ -1050,6 +1094,9 @@ export function getPlatformRazorpayConfig(): PlatformRazorpayConfig {
     maskedKeySecret: maskCredentialSecret(env.RAZORPAY_KEY_SECRET),
     maskedWebhookSecret: maskCredentialSecret(env.RAZORPAY_WEBHOOK_SECRET),
     updatedAt: null,
+    lastVerifiedAt: row?.lastVerifiedAt ?? null,
+    lastVerifyStatus: row?.lastVerifyStatus ?? null,
+    lastVerifyMessage: row?.lastVerifyMessage ?? null,
   };
 }
 
@@ -1126,6 +1173,9 @@ export interface PlatformTurnstileConfig {
   isReady: boolean;
   maskedSecretKey: string;
   updatedAt: number | null;
+  lastVerifiedAt: number | null;
+  lastVerifyStatus: string | null;
+  lastVerifyMessage: string | null;
 }
 
 export interface PublicTurnstileConfig {
@@ -1140,7 +1190,7 @@ export function getPlatformTurnstileConfig(): PlatformTurnstileConfig {
   const env = getEnv();
   const row = readRow("cloudflare_turnstile");
 
-  if (row) {
+  if (hasStoredCredentialsRow(row)) {
     const pub = parseJsonObject<{
       siteKey: string;
       enforceOnLogin: boolean;
@@ -1163,6 +1213,9 @@ export function getPlatformTurnstileConfig(): PlatformTurnstileConfig {
       isReady,
       maskedSecretKey: maskCredentialSecret(secretKey),
       updatedAt: row.updatedAt,
+      lastVerifiedAt: row.lastVerifiedAt,
+      lastVerifyStatus: row.lastVerifyStatus,
+      lastVerifyMessage: row.lastVerifyMessage,
     };
   }
 
@@ -1178,6 +1231,9 @@ export function getPlatformTurnstileConfig(): PlatformTurnstileConfig {
     isReady: hasEnv,
     maskedSecretKey: maskCredentialSecret(env.CF_TURNSTILE_SECRET_KEY),
     updatedAt: null,
+    lastVerifiedAt: row?.lastVerifiedAt ?? null,
+    lastVerifyStatus: row?.lastVerifyStatus ?? null,
+    lastVerifyMessage: row?.lastVerifyMessage ?? null,
   };
 }
 
@@ -1270,6 +1326,9 @@ export interface PlatformCloudflareAiConfig {
   isReady: boolean;
   maskedApiToken: string;
   updatedAt: number | null;
+  lastVerifiedAt: number | null;
+  lastVerifyStatus: string | null;
+  lastVerifyMessage: string | null;
 }
 
 export function getPlatformCloudflareAiConfig(): PlatformCloudflareAiConfig {
@@ -1277,7 +1336,7 @@ export function getPlatformCloudflareAiConfig(): PlatformCloudflareAiConfig {
   const r2FallbackAccountId = getPlatformManagedR2Config().accountId;
   const row = readRow("cloudflare_ai");
 
-  if (row) {
+  if (hasStoredCredentialsRow(row)) {
     const pub = parseJsonObject<{
       accountId: string;
       textModel: string;
@@ -1298,6 +1357,9 @@ export function getPlatformCloudflareAiConfig(): PlatformCloudflareAiConfig {
       isReady,
       maskedApiToken: maskCredentialSecret(apiToken),
       updatedAt: row.updatedAt,
+      lastVerifiedAt: row.lastVerifiedAt,
+      lastVerifyStatus: row.lastVerifyStatus,
+      lastVerifyMessage: row.lastVerifyMessage,
     };
   }
 
@@ -1315,6 +1377,9 @@ export function getPlatformCloudflareAiConfig(): PlatformCloudflareAiConfig {
     isReady: hasEnv,
     maskedApiToken: maskCredentialSecret(envToken),
     updatedAt: null,
+    lastVerifiedAt: row?.lastVerifiedAt ?? null,
+    lastVerifyStatus: row?.lastVerifyStatus ?? null,
+    lastVerifyMessage: row?.lastVerifyMessage ?? null,
   };
 }
 
@@ -1390,13 +1455,16 @@ export interface PlatformCloudflareEmailConfig {
   isReady: boolean;
   maskedWebhookSecret: string;
   updatedAt: number | null;
+  lastVerifiedAt: number | null;
+  lastVerifyStatus: string | null;
+  lastVerifyMessage: string | null;
 }
 
 export function getPlatformCloudflareEmailConfig(): PlatformCloudflareEmailConfig {
   const env = getEnv();
   const row = readRow("cloudflare_email_routing");
 
-  if (row) {
+  if (hasStoredCredentialsRow(row)) {
     const pub = parseJsonObject<{ inboundDomain: string }>(row.publicConfigJson);
     const sec = decryptSecretObject<{ webhookSecret: string }>(row.encryptedSecrets);
     const inboundDomain = (pub.inboundDomain || env.PRIMARY_DOMAIN || "rapidshiftlabs.in").trim();
@@ -1410,6 +1478,9 @@ export function getPlatformCloudflareEmailConfig(): PlatformCloudflareEmailConfi
       isReady: row.enabled && Boolean(inboundDomain && webhookSecret),
       maskedWebhookSecret: maskCredentialSecret(webhookSecret),
       updatedAt: row.updatedAt,
+      lastVerifiedAt: row.lastVerifiedAt,
+      lastVerifyStatus: row.lastVerifyStatus,
+      lastVerifyMessage: row.lastVerifyMessage,
     };
   }
 
@@ -1422,6 +1493,9 @@ export function getPlatformCloudflareEmailConfig(): PlatformCloudflareEmailConfi
     isReady: hasEnv,
     maskedWebhookSecret: maskCredentialSecret(env.CF_EMAIL_WEBHOOK_SECRET),
     updatedAt: null,
+    lastVerifiedAt: row?.lastVerifiedAt ?? null,
+    lastVerifyStatus: row?.lastVerifyStatus ?? null,
+    lastVerifyMessage: row?.lastVerifyMessage ?? null,
   };
 }
 
@@ -1525,6 +1599,9 @@ export interface PlatformVapidConfig {
   isReady: boolean;
   maskedPrivateKey: string;
   updatedAt: number | null;
+  lastVerifiedAt: number | null;
+  lastVerifyStatus: string | null;
+  lastVerifyMessage: string | null;
 }
 
 export function generateFreshVapidKeyPair(): {
@@ -1558,7 +1635,7 @@ export function getPlatformVapidConfig(): PlatformVapidConfig {
   const row = readRow("web_push_vapid");
   const defaultSubject = `mailto:app@${env.PRIMARY_DOMAIN || "rapidshiftlabs.in"}`;
 
-  if (row) {
+  if (hasStoredCredentialsRow(row)) {
     const pub = parseJsonObject<{ subject: string; publicKey: string }>(row.publicConfigJson);
     const sec = decryptSecretObject<{ privateKeyD: string; privateKeyJwkJson: string }>(
       row.encryptedSecrets
@@ -1578,6 +1655,9 @@ export function getPlatformVapidConfig(): PlatformVapidConfig {
       isReady,
       maskedPrivateKey: maskCredentialSecret(privateKeyD),
       updatedAt: row.updatedAt,
+      lastVerifiedAt: row.lastVerifiedAt,
+      lastVerifyStatus: row.lastVerifyStatus,
+      lastVerifyMessage: row.lastVerifyMessage,
     };
   }
 
@@ -1610,6 +1690,9 @@ export function getPlatformVapidConfig(): PlatformVapidConfig {
     isReady: hasEnv && Boolean(reconstructedJwk),
     maskedPrivateKey: maskCredentialSecret(env.VAPID_PRIVATE_KEY),
     updatedAt: null,
+    lastVerifiedAt: row?.lastVerifiedAt ?? null,
+    lastVerifyStatus: row?.lastVerifyStatus ?? null,
+    lastVerifyMessage: row?.lastVerifyMessage ?? null,
   };
 }
 
@@ -1711,13 +1794,16 @@ export interface PlatformBhashiniConfig {
   maskedUlcaApiKey: string;
   maskedInferenceApiKey: string;
   updatedAt: number | null;
+  lastVerifiedAt: number | null;
+  lastVerifyStatus: string | null;
+  lastVerifyMessage: string | null;
 }
 
 export function getPlatformBhashiniConfig(): PlatformBhashiniConfig {
   const env = getEnv();
   const row = readRow("bhashini");
 
-  if (row) {
+  if (hasStoredCredentialsRow(row)) {
     const pub = parseJsonObject<{ userId: string }>(row.publicConfigJson);
     const sec = decryptSecretObject<{ ulcaApiKey: string; inferenceApiKey: string }>(
       row.encryptedSecrets
@@ -1736,6 +1822,9 @@ export function getPlatformBhashiniConfig(): PlatformBhashiniConfig {
       maskedUlcaApiKey: maskCredentialSecret(ulcaApiKey),
       maskedInferenceApiKey: maskCredentialSecret(inferenceApiKey),
       updatedAt: row.updatedAt,
+      lastVerifiedAt: row.lastVerifiedAt,
+      lastVerifyStatus: row.lastVerifyStatus,
+      lastVerifyMessage: row.lastVerifyMessage,
     };
   }
 
@@ -1752,6 +1841,9 @@ export function getPlatformBhashiniConfig(): PlatformBhashiniConfig {
     maskedUlcaApiKey: maskCredentialSecret(env.BHASHINI_ULCA_API_KEY),
     maskedInferenceApiKey: maskCredentialSecret(env.BHASHINI_INFERENCE_API_KEY),
     updatedAt: null,
+    lastVerifiedAt: row?.lastVerifiedAt ?? null,
+    lastVerifyStatus: row?.lastVerifyStatus ?? null,
+    lastVerifyMessage: row?.lastVerifyMessage ?? null,
   };
 }
 
@@ -2231,19 +2323,49 @@ export function clearPlatformCredentialOverride(providerKey: PlatformCredentialP
     .run();
 }
 
+export type CredentialVerifyStatus = "healthy" | "warning" | "error" | "unconfigured";
+
 export function recordPlatformCredentialVerification(params: {
   providerKey: PlatformCredentialProviderKey;
-  status: "healthy" | "error";
+  status: CredentialVerifyStatus;
   message: string;
 }): void {
+  const now = Date.now();
+  const existing = readRow(params.providerKey);
+  if (existing) {
+    controlDb()
+      .update(controlSchema.platformCredentials)
+      .set({
+        lastVerifiedAt: now,
+        lastVerifyStatus: params.status,
+        lastVerifyMessage: params.message,
+      })
+      .where(eq(controlSchema.platformCredentials.providerKey, params.providerKey))
+      .run();
+    return;
+  }
+
   controlDb()
-    .update(controlSchema.platformCredentials)
-    .set({
-      lastVerifiedAt: Date.now(),
+    .insert(controlSchema.platformCredentials)
+    .values({
+      providerKey: params.providerKey,
+      enabled: true,
+      publicConfigJson: "{}",
+      encryptedSecrets: "",
+      maskedHintsJson: "{}",
+      lastVerifiedAt: now,
       lastVerifyStatus: params.status,
       lastVerifyMessage: params.message,
+      updatedAt: now,
     })
-    .where(eq(controlSchema.platformCredentials.providerKey, params.providerKey))
+    .onConflictDoUpdate({
+      target: controlSchema.platformCredentials.providerKey,
+      set: {
+        lastVerifiedAt: now,
+        lastVerifyStatus: params.status,
+        lastVerifyMessage: params.message,
+      },
+    })
     .run();
 }
 
@@ -2293,6 +2415,9 @@ export function getSafePlatformCredentialsAdminSnapshot() {
       maskedDeveloperToken: googleAds.maskedDeveloperToken,
       maskedManagedRefreshToken: googleAds.maskedManagedRefreshToken,
       updatedAt: googleAds.updatedAt,
+      lastVerifiedAt: googleAds.lastVerifiedAt,
+      lastVerifyStatus: googleAds.lastVerifyStatus,
+      lastVerifyMessage: googleAds.lastVerifyMessage,
     },
     smtp: {
       enabled: smtp.enabled,
@@ -2321,6 +2446,9 @@ export function getSafePlatformCredentialsAdminSnapshot() {
       isReady: r2.isReady,
       maskedSecretAccessKey: r2.maskedSecretAccessKey,
       updatedAt: r2.updatedAt,
+      lastVerifiedAt: r2.lastVerifiedAt,
+      lastVerifyStatus: r2.lastVerifyStatus,
+      lastVerifyMessage: r2.lastVerifyMessage,
     },
     meta: {
       enabled: meta.enabled,
@@ -2337,6 +2465,9 @@ export function getSafePlatformCredentialsAdminSnapshot() {
       maskedVerifyToken: meta.maskedVerifyToken,
       maskedManagedSystemToken: meta.maskedManagedSystemToken,
       updatedAt: meta.updatedAt,
+      lastVerifiedAt: meta.lastVerifiedAt,
+      lastVerifyStatus: meta.lastVerifyStatus,
+      lastVerifyMessage: meta.lastVerifyMessage,
     },
     razorpay: {
       enabled: razorpay.enabled,
@@ -2346,6 +2477,9 @@ export function getSafePlatformCredentialsAdminSnapshot() {
       maskedKeySecret: razorpay.maskedKeySecret,
       maskedWebhookSecret: razorpay.maskedWebhookSecret,
       updatedAt: razorpay.updatedAt,
+      lastVerifiedAt: razorpay.lastVerifiedAt,
+      lastVerifyStatus: razorpay.lastVerifyStatus,
+      lastVerifyMessage: razorpay.lastVerifyMessage,
     },
     turnstile: {
       enabled: turnstile.enabled,
@@ -2357,6 +2491,9 @@ export function getSafePlatformCredentialsAdminSnapshot() {
       isReady: turnstile.isReady,
       maskedSecretKey: turnstile.maskedSecretKey,
       updatedAt: turnstile.updatedAt,
+      lastVerifiedAt: turnstile.lastVerifiedAt,
+      lastVerifyStatus: turnstile.lastVerifyStatus,
+      lastVerifyMessage: turnstile.lastVerifyMessage,
     },
     cloudflareAi: {
       enabled: cloudflareAi.enabled,
@@ -2367,6 +2504,9 @@ export function getSafePlatformCredentialsAdminSnapshot() {
       isReady: cloudflareAi.isReady,
       maskedApiToken: cloudflareAi.maskedApiToken,
       updatedAt: cloudflareAi.updatedAt,
+      lastVerifiedAt: cloudflareAi.lastVerifiedAt,
+      lastVerifyStatus: cloudflareAi.lastVerifyStatus,
+      lastVerifyMessage: cloudflareAi.lastVerifyMessage,
     },
     cloudflareEmail: {
       enabled: cloudflareEmail.enabled,
@@ -2375,6 +2515,9 @@ export function getSafePlatformCredentialsAdminSnapshot() {
       isReady: cloudflareEmail.isReady,
       maskedWebhookSecret: cloudflareEmail.maskedWebhookSecret,
       updatedAt: cloudflareEmail.updatedAt,
+      lastVerifiedAt: cloudflareEmail.lastVerifiedAt,
+      lastVerifyStatus: cloudflareEmail.lastVerifyStatus,
+      lastVerifyMessage: cloudflareEmail.lastVerifyMessage,
     },
     vapid: {
       enabled: vapid.enabled,
@@ -2384,6 +2527,9 @@ export function getSafePlatformCredentialsAdminSnapshot() {
       isReady: vapid.isReady,
       maskedPrivateKey: vapid.maskedPrivateKey,
       updatedAt: vapid.updatedAt,
+      lastVerifiedAt: vapid.lastVerifiedAt,
+      lastVerifyStatus: vapid.lastVerifyStatus,
+      lastVerifyMessage: vapid.lastVerifyMessage,
     },
     bhashini: {
       enabled: bhashini.enabled,
@@ -2393,6 +2539,9 @@ export function getSafePlatformCredentialsAdminSnapshot() {
       maskedUlcaApiKey: bhashini.maskedUlcaApiKey,
       maskedInferenceApiKey: bhashini.maskedInferenceApiKey,
       updatedAt: bhashini.updatedAt,
+      lastVerifiedAt: bhashini.lastVerifiedAt,
+      lastVerifyStatus: bhashini.lastVerifyStatus,
+      lastVerifyMessage: bhashini.lastVerifyMessage,
     },
   };
 }

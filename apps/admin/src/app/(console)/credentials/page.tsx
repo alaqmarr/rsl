@@ -1,13 +1,27 @@
 import { headers } from "next/headers";
-import { AlertTriangle, CheckCircle2, Database, KeyRound, MailCheck, ShieldCheck } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  CheckCircle2,
+  Database,
+  KeyRound,
+  MailCheck,
+  Play,
+  RefreshCw,
+  Server,
+  ShieldCheck,
+} from "lucide-react";
 import { canStaffAccessAdminRoute, formatStaffRoleLabel } from "@rsl/auth";
 import { getEnv, isLoopbackUrlOrHost, resolveEndpointsFromHeaders } from "@rsl/core";
 import {
+  ALL_PLATFORM_CREDENTIAL_PROVIDERS,
   buildCloudflareEmailWorkerSnippet,
   buildPlatformCredentialsSeedTemplate,
   getPlatformCloudflareEmailConfig,
   getSafePlatformCredentialsAdminSnapshot,
+  probePlatformSystemStatuses,
   type CredentialSource,
+  type PlatformCredentialProviderKey,
 } from "@rsl/tenancy";
 import {
   AccessRestrictedState,
@@ -17,7 +31,7 @@ import {
   SectionCard,
   StatusPill,
 } from "@rsl/ui";
-import { AdminCopyButton, SubmitButton } from "@/components/ios-feedback";
+import { ActionLink, AdminCopyButton, SubmitButton } from "@/components/ios-feedback";
 import {
   staffBulkSeedPlatformCredentialsJsonAction,
   staffClearPlatformCredentialAction,
@@ -33,6 +47,8 @@ import {
   staffSaveSmtpCredentialsAction,
   staffSaveWebPushVapidAction,
   staffSendTestSmtpEmailAction,
+  staffTestAllPlatformCredentialsAction,
+  staffTestPlatformCredentialAction,
 } from "@/lib/actions";
 import { requireStaffSession } from "@/lib/session";
 
@@ -47,6 +63,101 @@ function sourcePill(source: CredentialSource, isReady: boolean) {
     return <StatusPill label="Server .env Fallback" tone="sky" />;
   }
   return <StatusPill label="Not Configured Yet" tone="stone" />;
+}
+
+function verifyStatusPill(status: string | null | undefined, isReady: boolean) {
+  if (status === "healthy") {
+    return <StatusPill label="Verified Healthy" tone="emerald" />;
+  }
+  if (status === "warning") {
+    return <StatusPill label="Warning" tone="amber" />;
+  }
+  if (status === "error") {
+    return <StatusPill label="Test Failed" tone="ruby" />;
+  }
+  if (status === "unconfigured") {
+    return <StatusPill label="Unconfigured" tone="stone" />;
+  }
+  if (isReady) {
+    return <StatusPill label="Configured (Untested)" tone="sky" />;
+  }
+  return <StatusPill label="Not Configured" tone="stone" />;
+}
+
+function ProviderLiveTestFooter({
+  providerKey,
+  label,
+  source,
+  isReady,
+  lastVerifiedAt,
+  lastVerifyStatus,
+  lastVerifyMessage,
+}: {
+  providerKey: PlatformCredentialProviderKey;
+  label: string;
+  source: CredentialSource;
+  isReady: boolean;
+  lastVerifiedAt: number | null | undefined;
+  lastVerifyStatus: string | null | undefined;
+  lastVerifyMessage: string | null | undefined;
+}) {
+  const toneClasses =
+    lastVerifyStatus === "healthy"
+      ? "border-emerald-200/90 bg-emerald-50/55 text-emerald-950"
+      : lastVerifyStatus === "error"
+        ? "border-rose-200 bg-rose-50/70 text-rose-950"
+        : lastVerifyStatus === "warning"
+          ? "border-amber-200 bg-amber-50/70 text-amber-950"
+          : "border-zinc-200/90 bg-zinc-50/75 text-slate-800";
+
+  return (
+    <div className={`mt-4 rounded-xl border p-3.5 text-xs ${toneClasses}`}>
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            {verifyStatusPill(lastVerifyStatus, isReady)}
+            <span className="text-[11px] font-medium text-zinc-500">
+              {lastVerifiedAt
+                ? `Last tested ${new Date(lastVerifiedAt).toLocaleString("en-IN")}`
+                : "No live test recorded yet"}
+            </span>
+          </div>
+          <p className="text-[11.5px] leading-relaxed font-medium">
+            {lastVerifyMessage ||
+              `Click "Test ${label}" to run a live authentication & endpoint health check.`}
+          </p>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <form action={staffTestPlatformCredentialAction}>
+            <input type="hidden" name="providerKey" value={providerKey} />
+            <input type="hidden" name="returnTo" value={`/credentials#cred-${providerKey}`} />
+            <SubmitButton
+              className="adm-btn-secondary bg-white py-1.5 text-xs"
+              spinnerSize="xs"
+              pendingText={`Testing ${label}...`}
+            >
+              <Play className="h-3 w-3 text-indigo-600" />
+              <span>Test {label}</span>
+            </SubmitButton>
+          </form>
+
+          {source === "database" && (
+            <form action={staffClearPlatformCredentialAction}>
+              <input type="hidden" name="providerKey" value={providerKey} />
+              <SubmitButton
+                className="adm-btn-secondary bg-white py-1.5 text-[11px]"
+                spinnerSize="xs"
+                pendingText="Clearing..."
+              >
+                Remove DB Override
+              </SubmitButton>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default async function AdminPlatformCredentialsPage({
@@ -71,6 +182,8 @@ export default async function AdminPlatformCredentialsPage({
   const env = getEnv();
   const endpoints = resolveEndpointsFromHeaders(hdrs);
   const snap = getSafePlatformCredentialsAdminSnapshot();
+  const systemReport =
+    sp.probeSystem === "1" ? await probePlatformSystemStatuses() : null;
 
   const googleOrigin =
     env.APP_URL && !isLoopbackUrlOrHost(env.APP_URL)
@@ -91,32 +204,196 @@ export default async function AdminPlatformCredentialsPage({
   const cfEmailWorkerCode = buildCloudflareEmailWorkerSnippet(googleOrigin);
   const seedTemplateJson = JSON.stringify(buildPlatformCredentialsSeedTemplate(), null, 2);
 
-  const dbActiveCount = [
-    snap.google.source,
-    snap.googleAds.source,
-    snap.smtp.source,
-    snap.r2.source,
-    snap.meta.source,
-    snap.razorpay.source,
-    snap.turnstile.source,
-    snap.cloudflareAi.source,
-    snap.cloudflareEmail.source,
-    snap.vapid.source,
-    snap.bhashini.source,
-  ].filter((s) => s === "database").length;
+  const matrixRows: Array<{
+    key: PlatformCredentialProviderKey;
+    badge: string;
+    label: string;
+    category: string;
+    source: CredentialSource;
+    isReady: boolean;
+    lastVerifiedAt: number | null;
+    lastVerifyStatus: string | null;
+    lastVerifyMessage: string | null;
+  }> = [
+    {
+      key: "google_oauth",
+      badge: "1",
+      label: "Google Cloud OAuth 2.0",
+      category: "1-Click Drive, GBP & Ads Sign-In",
+      source: snap.google.source,
+      isReady: snap.google.isReady,
+      lastVerifiedAt: snap.google.lastVerifiedAt,
+      lastVerifyStatus: snap.google.lastVerifyStatus,
+      lastVerifyMessage: snap.google.lastVerifyMessage,
+    },
+    {
+      key: "smtp_email",
+      badge: "2",
+      label: "Outbound SMTP Email",
+      category: `${snap.smtp.host || "smtp.gmail.com"}:${snap.smtp.port || 465}`,
+      source: snap.smtp.source,
+      isReady: snap.smtp.isReady,
+      lastVerifiedAt: snap.smtp.lastVerifiedAt,
+      lastVerifyStatus: snap.smtp.lastVerifyStatus,
+      lastVerifyMessage: snap.smtp.lastVerifyMessage,
+    },
+    {
+      key: "cloudflare_r2",
+      badge: "3",
+      label: "Cloudflare R2 Vault",
+      category: snap.r2.bucketPrivate ? `Bucket: ${snap.r2.bucketPrivate}` : "Encrypted S3/R2 Vault",
+      source: snap.r2.source,
+      isReady: snap.r2.isReady,
+      lastVerifiedAt: snap.r2.lastVerifiedAt,
+      lastVerifyStatus: snap.r2.lastVerifyStatus,
+      lastVerifyMessage: snap.r2.lastVerifyMessage,
+    },
+    {
+      key: "meta_app",
+      badge: "4",
+      label: "Meta & WhatsApp App",
+      category: `Graph ${snap.meta.graphVersion || "v21.0"} • OAuth & Webhooks`,
+      source: snap.meta.source,
+      isReady: snap.meta.isReady,
+      lastVerifiedAt: snap.meta.lastVerifiedAt,
+      lastVerifyStatus: snap.meta.lastVerifyStatus,
+      lastVerifyMessage: snap.meta.lastVerifyMessage,
+    },
+    {
+      key: "google_ads",
+      badge: "5",
+      label: "Google Ads & Managed MCC",
+      category: `API ${snap.googleAds.apiVersion || "v18"} • Cloud Console Mode`,
+      source: snap.googleAds.source,
+      isReady: snap.googleAds.isReady,
+      lastVerifiedAt: snap.googleAds.lastVerifiedAt,
+      lastVerifyStatus: snap.googleAds.lastVerifyStatus,
+      lastVerifyMessage: snap.googleAds.lastVerifyMessage,
+    },
+    {
+      key: "razorpay",
+      badge: "6",
+      label: "Razorpay Checkout Gateway",
+      category: snap.razorpay.keyId || "Optional Instant UPI/Card Gateway",
+      source: snap.razorpay.source,
+      isReady: snap.razorpay.isReady,
+      lastVerifiedAt: snap.razorpay.lastVerifiedAt,
+      lastVerifyStatus: snap.razorpay.lastVerifyStatus,
+      lastVerifyMessage: snap.razorpay.lastVerifyMessage,
+    },
+    {
+      key: "cloudflare_turnstile",
+      badge: "7",
+      label: "Cloudflare Turnstile",
+      category: "Login, Signup & Public Form Shield",
+      source: snap.turnstile.source,
+      isReady: snap.turnstile.isReady,
+      lastVerifiedAt: snap.turnstile.lastVerifiedAt,
+      lastVerifyStatus: snap.turnstile.lastVerifyStatus,
+      lastVerifyMessage: snap.turnstile.lastVerifyMessage,
+    },
+    {
+      key: "cloudflare_ai",
+      badge: "8",
+      label: "Cloudflare Workers AI",
+      category: snap.cloudflareAi.textModel,
+      source: snap.cloudflareAi.source,
+      isReady: snap.cloudflareAi.isReady,
+      lastVerifiedAt: snap.cloudflareAi.lastVerifiedAt,
+      lastVerifyStatus: snap.cloudflareAi.lastVerifyStatus,
+      lastVerifyMessage: snap.cloudflareAi.lastVerifyMessage,
+    },
+    {
+      key: "cloudflare_email_routing",
+      badge: "9",
+      label: "Cloudflare Email Routing",
+      category: `*@${snap.cloudflareEmail.inboundDomain}`,
+      source: snap.cloudflareEmail.source,
+      isReady: snap.cloudflareEmail.isReady,
+      lastVerifiedAt: snap.cloudflareEmail.lastVerifiedAt,
+      lastVerifyStatus: snap.cloudflareEmail.lastVerifyStatus,
+      lastVerifyMessage: snap.cloudflareEmail.lastVerifyMessage,
+    },
+    {
+      key: "web_push_vapid",
+      badge: "10",
+      label: "W3C Web Push (VAPID)",
+      category: snap.vapid.subject,
+      source: snap.vapid.source,
+      isReady: snap.vapid.isReady,
+      lastVerifiedAt: snap.vapid.lastVerifiedAt,
+      lastVerifyStatus: snap.vapid.lastVerifyStatus,
+      lastVerifyMessage: snap.vapid.lastVerifyMessage,
+    },
+    {
+      key: "bhashini",
+      badge: "11",
+      label: "MeitY Digital India BHASHINI",
+      category: "22 Indian Languages NMT",
+      source: snap.bhashini.source,
+      isReady: snap.bhashini.isReady,
+      lastVerifiedAt: snap.bhashini.lastVerifiedAt,
+      lastVerifyStatus: snap.bhashini.lastVerifyStatus,
+      lastVerifyMessage: snap.bhashini.lastVerifyMessage,
+    },
+  ];
+
+  const dbActiveCount = matrixRows.filter((r) => r.source === "database").length;
+  const verifiedHealthyCount = matrixRows.filter((r) => r.lastVerifyStatus === "healthy").length;
+  const failedVerifyCount = matrixRows.filter((r) => r.lastVerifyStatus === "error").length;
 
   return (
     <div className="w-full space-y-6">
       <PageHeader
         eyebrow="Database-Controlled Platform Vault (AES-256-GCM)"
         title="OAuth & API Credentials"
-        subtitle="Configure the official RapidShift Labs Google OAuth Consent Screen (for 1-click customer Google Drive & Business Profile connections), SMTP email, Cloudflare R2, Meta App, and Razorpay — stored encrypted in control.db with zero SSH or .env restarts needed."
+        subtitle="Configure, encrypt, and live-test all 11 platform credential providers plus runtime ports, SQLite databases, KMS ciphers, and open SMB APIs directly from the staff console."
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <ActionLink
+              href={
+                sp.probeSystem === "1"
+                  ? "/credentials"
+                  : "/credentials?probeSystem=1#system-status-probe"
+              }
+              className="adm-btn-secondary text-xs"
+            >
+              <Server className="h-3.5 w-3.5 text-indigo-600" />
+              <span>
+                {sp.probeSystem === "1"
+                  ? "Hide Runtime Port & DB Probe"
+                  : "Test Server Ports, DBs & APIs"}
+              </span>
+            </ActionLink>
+            <form action={staffTestAllPlatformCredentialsAction}>
+              <input type="hidden" name="returnTo" value="/credentials?probeSystem=1" />
+              <SubmitButton
+                className="adm-btn-primary text-xs"
+                spinnerSize="xs"
+                pendingText="Testing All 11 Providers..."
+              >
+                <Activity className="h-3.5 w-3.5" />
+                <span>Test All 11 Credentials &amp; Statuses</span>
+              </SubmitButton>
+            </form>
+          </div>
+        }
       />
 
       <FlashBanner notice={sp.notice} error={sp.error} />
 
       {/* Top Readiness Strip */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          label="Verified Healthy"
+          value={`${verifiedHealthyCount} / ${ALL_PLATFORM_CREDENTIAL_PROVIDERS.length}`}
+          sublabel={
+            failedVerifyCount > 0
+              ? `${failedVerifyCount} provider(s) reported errors on last test`
+              : "Click 'Test All 11 Credentials' anytime"
+          }
+          accent={failedVerifyCount > 0 ? "ruby" : verifiedHealthyCount > 0 ? "emerald" : "sky"}
+        />
         <MetricCard
           label="Google OAuth Consent Screen"
           value={snap.google.isReady ? "1-Click Ready" : "Setup Needed"}
@@ -138,22 +415,166 @@ export default async function AdminPlatformCredentialsPage({
           accent={snap.smtp.isReady ? "emerald" : "amber"}
         />
         <MetricCard
-          label="Managed Cloudflare R2"
-          value={snap.r2.isReady ? "R2 Active" : "Local Disk"}
-          sublabel={
-            snap.r2.isReady
-              ? `Bucket: ${snap.r2.bucketPrivate}`
-              : "Optional S3/R2 cloud object tier"
-          }
-          accent={snap.r2.isReady ? "emerald" : "default"}
-        />
-        <MetricCard
           label="DB-Controlled Providers"
           value={`${dbActiveCount} / 11`}
           sublabel="Encrypted with KMS envelope keys in control.db"
           accent="emerald"
         />
       </div>
+
+      {/* Live Server Ports, SQLite, KMS & Open API Status Probe */}
+      {systemReport && (
+        <div id="system-status-probe" className="scroll-mt-24">
+          <SectionCard
+            title={`Live Platform Runtime, Ports, Databases & Open API Status (${systemReport.summary.healthy}/${systemReport.items.length} Healthy)`}
+            subtitle={`Probed live at ${new Date(systemReport.checkedAt).toLocaleTimeString("en-IN")} across ports 4500-4520, SQLite WAL files, KMS AES-256-GCM cipher, and public Indian SMB directories`}
+            action={
+              <ActionLink
+                href={`/credentials?probeSystem=1&ts=${Date.now()}#system-status-probe`}
+                className="adm-btn-secondary py-1.5 text-xs"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                <span>Re-Run Runtime Probe</span>
+              </ActionLink>
+            }
+            noPadding
+          >
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-zinc-200/80 bg-zinc-50/80 text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
+                  <tr>
+                    <th className="px-5 py-2.5">Component / Endpoint</th>
+                    <th className="px-4 py-2.5">Target</th>
+                    <th className="px-4 py-2.5">Live Status</th>
+                    <th className="px-4 py-2.5">Latency</th>
+                    <th className="px-5 py-2.5">Diagnostic Detail</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-100 bg-white">
+                  {systemReport.items.map((item) => (
+                    <tr key={item.key} className="hover:bg-zinc-50/60">
+                      <td className="px-5 py-2.5 font-semibold text-slate-900 whitespace-nowrap">
+                        {item.label}
+                      </td>
+                      <td className="px-4 py-2.5 font-mono text-[11px] text-zinc-500 whitespace-nowrap">
+                        {item.target}
+                      </td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        <StatusPill
+                          label={
+                            item.status === "healthy"
+                              ? "Healthy"
+                              : item.status === "warning"
+                                ? "Standby / Warning"
+                                : "Unreachable"
+                          }
+                          tone={
+                            item.status === "healthy"
+                              ? "emerald"
+                              : item.status === "warning"
+                                ? "amber"
+                                : "ruby"
+                          }
+                        />
+                      </td>
+                      <td className="px-4 py-2.5 font-mono text-[11px] text-zinc-600 tabular-nums whitespace-nowrap">
+                        {item.latencyMs} ms
+                      </td>
+                      <td className="px-5 py-2.5 text-zinc-700">{item.detail}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </SectionCard>
+        </div>
+      )}
+
+      {/* Unified 11-Provider Credential & Live Verification Matrix */}
+      <SectionCard
+        title="11-Provider Credential & Live Status Matrix"
+        subtitle="Test any single credential provider in one click or run all 11 checks in parallel. Click any provider name to jump directly to its configuration form."
+        action={
+          <form action={staffTestAllPlatformCredentialsAction}>
+            <input type="hidden" name="returnTo" value="/credentials" />
+            <SubmitButton
+              className="adm-btn-secondary py-1.5 text-xs"
+              spinnerSize="xs"
+              pendingText="Running 11 Live Checks..."
+            >
+              <RefreshCw className="h-3.5 w-3.5 text-emerald-600" />
+              <span>Test All 11 Providers</span>
+            </SubmitButton>
+          </form>
+        }
+        noPadding
+      >
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="border-b border-zinc-200/80 bg-zinc-50/80 text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
+              <tr>
+                <th className="px-5 py-2.5">Provider</th>
+                <th className="px-4 py-2.5">Source</th>
+                <th className="px-4 py-2.5">Verification Status</th>
+                <th className="px-4 py-2.5">Last Diagnostic Message</th>
+                <th className="px-5 py-2.5 text-right">Live Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100 bg-white">
+              {matrixRows.map((row) => (
+                <tr key={row.key} className="hover:bg-zinc-50/60">
+                  <td className="px-5 py-3 whitespace-nowrap">
+                    <a
+                      href={`#cred-${row.key}`}
+                      className="group inline-flex items-center gap-2 font-bold text-slate-900 hover:text-indigo-700"
+                    >
+                      <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-slate-100 px-1.5 font-mono text-[10px] font-bold text-slate-700 group-hover:bg-indigo-100 group-hover:text-indigo-800">
+                        {row.badge}
+                      </span>
+                      <span>{row.label}</span>
+                    </a>
+                    <div className="mt-0.5 pl-7 text-[11px] text-zinc-500">{row.category}</div>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    {sourcePill(row.source, row.isReady)}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <div className="flex flex-col items-start gap-1">
+                      {verifyStatusPill(row.lastVerifyStatus, row.isReady)}
+                      {row.lastVerifiedAt && (
+                        <span className="text-[10.5px] text-zinc-400 tabular-nums">
+                          {new Date(row.lastVerifiedAt).toLocaleString("en-IN")}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="max-w-md px-4 py-3 text-[11.5px] leading-relaxed text-zinc-700">
+                    {row.lastVerifyMessage || (
+                      <span className="text-zinc-400">
+                        Not tested yet. Click Test to verify live credentials.
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-5 py-3 text-right whitespace-nowrap">
+                    <form action={staffTestPlatformCredentialAction} className="inline-block">
+                      <input type="hidden" name="providerKey" value={row.key} />
+                      <input type="hidden" name="returnTo" value="/credentials" />
+                      <SubmitButton
+                        className="adm-btn-secondary py-1.5 text-xs"
+                        spinnerSize="xs"
+                        pendingText="Testing..."
+                      >
+                        <Play className="h-3 w-3 text-emerald-600" />
+                        <span>Test</span>
+                      </SubmitButton>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
 
       {/* Bulk Database Credential Seeder (1-Click JSON Seed or CLI Command) */}
       <details className="group rounded-2xl border border-emerald-200/90 bg-emerald-50/35 shadow-2xs">
@@ -504,6 +925,7 @@ export default async function AdminPlatformCredentialsPage({
       </details>
 
       {/* 1. Google OAuth 2.0 Web Client Vault */}
+      <div id="cred-google_oauth" className="scroll-mt-24">
       <SectionCard
         title="1. Google OAuth 2.0 Web Application Credentials (RapidShift Labs Consent Screen)"
         subtitle="Powers 1-click 'Connect Google Drive with Google' on /backups & /connections, plus 1-click Google Business Profile sign-in"
@@ -686,17 +1108,20 @@ export default async function AdminPlatformCredentialsPage({
           </div>
         </form>
 
-        {snap.google.source === "database" && (
-          <form action={staffClearPlatformCredentialAction} className="mt-3 border-t border-zinc-100 pt-3">
-            <input type="hidden" name="providerKey" value="google_oauth" />
-            <SubmitButton className="adm-btn-secondary py-1 text-[11px]" pendingText="Clearing...">
-              Remove Database Override (Revert to Server .env)
-            </SubmitButton>
-          </form>
-        )}
+        <ProviderLiveTestFooter
+          providerKey="google_oauth"
+          label="Google OAuth"
+          source={snap.google.source}
+          isReady={snap.google.isReady}
+          lastVerifiedAt={snap.google.lastVerifiedAt}
+          lastVerifyStatus={snap.google.lastVerifyStatus}
+          lastVerifyMessage={snap.google.lastVerifyMessage}
+        />
       </SectionCard>
+      </div>
 
       {/* 2. Outbound SMTP / Transactional Email Credentials */}
+      <div id="cred-smtp_email" className="scroll-mt-24">
       <SectionCard
         title="2. Outbound SMTP / Transactional Email (OTP, Password Resets, Team Invites & GST Notices)"
         subtitle="Use Gmail / Google Workspace (smtp.gmail.com:465 with a 16-character Google App Password) or any transactional SMTP relay (AWS SES, Brevo, Resend, Zoho)"
@@ -813,7 +1238,7 @@ export default async function AdminPlatformCredentialsPage({
             >
               <div className="min-w-[240px] flex-1">
                 <label className="mb-1 block font-semibold text-slate-900">
-                  Send Live Verification Email
+                  Send Live Verification Email (Full Branded HTML + Inline Logos)
                 </label>
                 <input
                   name="recipientEmail"
@@ -824,37 +1249,30 @@ export default async function AdminPlatformCredentialsPage({
                   className="adm-input bg-white"
                 />
               </div>
-              <SubmitButton className="adm-btn-secondary" pendingText="Sending Live Email...">
+              <SubmitButton className="adm-btn-secondary bg-white" pendingText="Sending Live Email...">
                 <MailCheck className="h-3.5 w-3.5 text-emerald-600" />
                 <span>Send Live Test Email</span>
               </SubmitButton>
             </form>
-            {snap.smtp.lastVerifyMessage && (
-              <p
-                className={`mt-2 text-[11px] font-medium ${
-                  snap.smtp.lastVerifyStatus === "healthy" ? "text-emerald-700" : "text-rose-700"
-                }`}
-              >
-                {snap.smtp.lastVerifyStatus === "healthy" ? "✓ " : "⚠ "}
-                {snap.smtp.lastVerifyMessage}
-              </p>
-            )}
           </div>
 
-          {snap.smtp.source === "database" && (
-            <form action={staffClearPlatformCredentialAction}>
-              <input type="hidden" name="providerKey" value="smtp_email" />
-              <SubmitButton className="adm-btn-secondary py-1 text-[11px]" pendingText="Clearing...">
-                Remove Database Override (Revert to Server .env)
-              </SubmitButton>
-            </form>
-          )}
+          <ProviderLiveTestFooter
+            providerKey="smtp_email"
+            label="SMTP Handshake"
+            source={snap.smtp.source}
+            isReady={snap.smtp.isReady}
+            lastVerifiedAt={snap.smtp.lastVerifiedAt}
+            lastVerifyStatus={snap.smtp.lastVerifyStatus}
+            lastVerifyMessage={snap.smtp.lastVerifyMessage}
+          />
         </div>
       </SectionCard>
+      </div>
 
       {/* 3. Managed Cloud Storage — Cloudflare R2 & 4. Meta / Razorpay Grid */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         {/* 3. Managed Cloudflare R2 */}
+        <div id="cred-cloudflare_r2" className="scroll-mt-24">
         <SectionCard
           title="3. Managed Cloud Storage — Cloudflare R2 / S3"
           subtitle="Powers the 'RSL Managed Cloud Storage' plan for customer invoice PDFs, media, and workspace archives"
@@ -970,17 +1388,20 @@ export default async function AdminPlatformCredentialsPage({
             </div>
           </form>
 
-          {snap.r2.source === "database" && (
-            <form action={staffClearPlatformCredentialAction} className="mt-3 border-t border-zinc-100 pt-3">
-              <input type="hidden" name="providerKey" value="cloudflare_r2" />
-              <SubmitButton className="adm-btn-secondary py-1 text-[11px]" pendingText="Clearing...">
-                Remove Database Override
-              </SubmitButton>
-            </form>
-          )}
+          <ProviderLiveTestFooter
+            providerKey="cloudflare_r2"
+            label="R2 Bucket"
+            source={snap.r2.source}
+            isReady={snap.r2.isReady}
+            lastVerifiedAt={snap.r2.lastVerifiedAt}
+            lastVerifyStatus={snap.r2.lastVerifyStatus}
+            lastVerifyMessage={snap.r2.lastVerifyMessage}
+          />
         </SectionCard>
+        </div>
 
         {/* 4. Meta / WhatsApp Platform App & Managed BM */}
+        <div id="cred-meta_app" className="scroll-mt-24">
         <SectionCard
           title="4. Meta / WhatsApp Platform App & Managed BM"
           subtitle="Powers 1-Click Facebook/Meta OAuth, X-Hub-Signature-256 webhooks, and optional RSL Managed Ad Spend Vault"
@@ -1126,18 +1547,21 @@ export default async function AdminPlatformCredentialsPage({
             </div>
           </form>
 
-          {snap.meta.source === "database" && (
-            <form action={staffClearPlatformCredentialAction} className="mt-3 border-t border-zinc-100 pt-3">
-              <input type="hidden" name="providerKey" value="meta_app" />
-              <SubmitButton className="adm-btn-secondary py-1 text-[11px]" pendingText="Clearing...">
-                Remove Database Override
-              </SubmitButton>
-            </form>
-          )}
+          <ProviderLiveTestFooter
+            providerKey="meta_app"
+            label="Meta Graph"
+            source={snap.meta.source}
+            isReady={snap.meta.isReady}
+            lastVerifiedAt={snap.meta.lastVerifiedAt}
+            lastVerifyStatus={snap.meta.lastVerifyStatus}
+            lastVerifyMessage={snap.meta.lastVerifyMessage}
+          />
         </SectionCard>
+        </div>
       </div>
 
       {/* 4B. Google Ads Cloud Project Access & Optional Managed MCC */}
+      <div id="cred-google_ads" className="scroll-mt-24">
       <SectionCard
         title="5. Google Ads API & Managed Ad Vault (Cloud Project Access — No Developer Token Required)"
         subtitle="Google sunset Developer Tokens — Direct Client 1-Click Google Ads works automatically via your Google Cloud OAuth Client ID above once Google Ads API is enabled & upgraded to Explorer/Basic Access in Google Cloud Console. Fill the optional Managed MCC fields below only if running RSL-funded Managed Vault campaigns."
@@ -1221,17 +1645,20 @@ export default async function AdminPlatformCredentialsPage({
           </div>
         </form>
 
-        {snap.googleAds.source === "database" && (
-          <form action={staffClearPlatformCredentialAction} className="mt-3 border-t border-zinc-100 pt-3">
-            <input type="hidden" name="providerKey" value="google_ads" />
-            <SubmitButton className="adm-btn-secondary py-1 text-[11px]" pendingText="Clearing...">
-              Remove Database Override
-            </SubmitButton>
-          </form>
-        )}
+        <ProviderLiveTestFooter
+          providerKey="google_ads"
+          label="Google Ads"
+          source={snap.googleAds.source}
+          isReady={snap.googleAds.isReady}
+          lastVerifiedAt={snap.googleAds.lastVerifiedAt}
+          lastVerifyStatus={snap.googleAds.lastVerifyStatus}
+          lastVerifyMessage={snap.googleAds.lastVerifyMessage}
+        />
       </SectionCard>
+      </div>
 
       {/* 6. Razorpay Automated Gateway */}
+      <div id="cred-razorpay" className="scroll-mt-24">
       <SectionCard
         title="6. Razorpay Automated Checkout Gateway (Optional — Alongside Manual UPI QR / UTR)"
         subtitle="Leave unconfigured if collecting zero-fee UPI QR & NEFT UTR transfers; add Razorpay keys anytime to unlock instant automated wallet top-up checkout"
@@ -1302,17 +1729,20 @@ export default async function AdminPlatformCredentialsPage({
           </div>
         </form>
 
-        {snap.razorpay.source === "database" && (
-          <form action={staffClearPlatformCredentialAction} className="mt-3 border-t border-zinc-100 pt-3">
-            <input type="hidden" name="providerKey" value="razorpay" />
-            <SubmitButton className="adm-btn-secondary py-1 text-[11px]" pendingText="Clearing...">
-              Remove Database Override
-            </SubmitButton>
-          </form>
-        )}
+        <ProviderLiveTestFooter
+          providerKey="razorpay"
+          label="Razorpay API"
+          source={snap.razorpay.source}
+          isReady={snap.razorpay.isReady}
+          lastVerifiedAt={snap.razorpay.lastVerifiedAt}
+          lastVerifyStatus={snap.razorpay.lastVerifyStatus}
+          lastVerifyMessage={snap.razorpay.lastVerifyMessage}
+        />
       </SectionCard>
+      </div>
 
       {/* 7. Cloudflare Turnstile Bot Protection ($0 Free Unlimited) */}
+      <div id="cred-cloudflare_turnstile" className="scroll-mt-24">
       <SectionCard
         title="7. Cloudflare Turnstile Bot Protection ($0 Unlimited Free — Login, Signup & Password Reset)"
         subtitle="Invisible privacy-preserving CAPTCHA replacement from dash.cloudflare.com -> Turnstile -> Add Widget"
@@ -1363,17 +1793,20 @@ export default async function AdminPlatformCredentialsPage({
             </SubmitButton>
           </div>
         </form>
-        {snap.turnstile.source === "database" && (
-          <form action={staffClearPlatformCredentialAction} className="mt-3 border-t border-zinc-100 pt-3">
-            <input type="hidden" name="providerKey" value="cloudflare_turnstile" />
-            <SubmitButton className="adm-btn-secondary py-1 text-[11px]" pendingText="Clearing...">
-              Remove Database Override
-            </SubmitButton>
-          </form>
-        )}
+        <ProviderLiveTestFooter
+          providerKey="cloudflare_turnstile"
+          label="Turnstile Secret"
+          source={snap.turnstile.source}
+          isReady={snap.turnstile.isReady}
+          lastVerifiedAt={snap.turnstile.lastVerifiedAt}
+          lastVerifyStatus={snap.turnstile.lastVerifyStatus}
+          lastVerifyMessage={snap.turnstile.lastVerifyMessage}
+        />
       </SectionCard>
+      </div>
 
       {/* 8. Cloudflare Workers AI (10,000 Free Neurons / Day) */}
+      <div id="cred-cloudflare_ai" className="scroll-mt-24">
       <SectionCard
         title="8. Cloudflare Workers AI (10,000 Free Neurons/Day — Smart Reviews, Ad Copy, Meta Risk Linter & Whisper)"
         subtitle="Create an API Token at dash.cloudflare.com -> My Profile -> API Tokens with 'Workers AI: Read' permission"
@@ -1442,17 +1875,20 @@ export default async function AdminPlatformCredentialsPage({
             </SubmitButton>
           </div>
         </form>
-        {snap.cloudflareAi.source === "database" && (
-          <form action={staffClearPlatformCredentialAction} className="mt-3 border-t border-zinc-100 pt-3">
-            <input type="hidden" name="providerKey" value="cloudflare_ai" />
-            <SubmitButton className="adm-btn-secondary py-1 text-[11px]" pendingText="Clearing...">
-              Remove Database Override
-            </SubmitButton>
-          </form>
-        )}
+        <ProviderLiveTestFooter
+          providerKey="cloudflare_ai"
+          label="Workers AI"
+          source={snap.cloudflareAi.source}
+          isReady={snap.cloudflareAi.isReady}
+          lastVerifiedAt={snap.cloudflareAi.lastVerifiedAt}
+          lastVerifyStatus={snap.cloudflareAi.lastVerifyStatus}
+          lastVerifyMessage={snap.cloudflareAi.lastVerifyMessage}
+        />
       </SectionCard>
+      </div>
 
       {/* 9. Cloudflare Email Routing + Workers (Supplier Bill-to-Tally Inbox) */}
+      <div id="cred-cloudflare_email_routing" className="scroll-mt-24">
       <SectionCard
         title="9. Cloudflare Email Routing + Workers ($0 Inbound Vendor Bill-to-Tally Inbox)"
         subtitle="Routes bills+<workspace-slug>@<domain> straight into each client's Tally Purchase Draft Inbox"
@@ -1516,17 +1952,20 @@ export default async function AdminPlatformCredentialsPage({
           </pre>
         </div>
 
-        {snap.cloudflareEmail.source === "database" && (
-          <form action={staffClearPlatformCredentialAction} className="mt-3 border-t border-zinc-100 pt-3">
-            <input type="hidden" name="providerKey" value="cloudflare_email_routing" />
-            <SubmitButton className="adm-btn-secondary py-1 text-[11px]" pendingText="Clearing...">
-              Remove Database Override
-            </SubmitButton>
-          </form>
-        )}
+        <ProviderLiveTestFooter
+          providerKey="cloudflare_email_routing"
+          label="Email Routing & MX"
+          source={snap.cloudflareEmail.source}
+          isReady={snap.cloudflareEmail.isReady}
+          lastVerifiedAt={snap.cloudflareEmail.lastVerifiedAt}
+          lastVerifyStatus={snap.cloudflareEmail.lastVerifyStatus}
+          lastVerifyMessage={snap.cloudflareEmail.lastVerifyMessage}
+        />
       </SectionCard>
+      </div>
 
       {/* 10. W3C Web Push VAPID Keys ($0 Zero External Account Needed) */}
+      <div id="cred-web_push_vapid" className="scroll-mt-24">
       <SectionCard
         title="10. W3C Web Push Notifications — VAPID Keys ($0 Forever • Zero Third-Party Account Required)"
         subtitle="RFC 8292 P-256 ECDSA keys for instant desktop & Android Chrome alerts on WhatsApp chats, Tally payments & Google reviews"
@@ -1596,9 +2035,20 @@ export default async function AdminPlatformCredentialsPage({
             <span>1-Click Auto-Generate Fresh VAPID Keypair in Database</span>
           </SubmitButton>
         </form>
+        <ProviderLiveTestFooter
+          providerKey="web_push_vapid"
+          label="VAPID ECDSA Keys"
+          source={snap.vapid.source}
+          isReady={snap.vapid.isReady}
+          lastVerifiedAt={snap.vapid.lastVerifiedAt}
+          lastVerifyStatus={snap.vapid.lastVerifyStatus}
+          lastVerifyMessage={snap.vapid.lastVerifyMessage}
+        />
       </SectionCard>
+      </div>
 
       {/* 11. MeitY Digital India BHASHINI ($0 Regional Indian Language Translation) */}
+      <div id="cred-bhashini" className="scroll-mt-24">
       <SectionCard
         title="11. MeitY Digital India BHASHINI ($0 Government AI — 22 Indian Languages)"
         subtitle="Optional: Register free at bhashini.gov.in/ulca for official NMT translation (Hindi, Gujarati, Marathi, Tamil, Telugu, Kannada, Bengali...). Falls back automatically to Cloudflare Workers AI when unconfigured."
@@ -1667,15 +2117,17 @@ export default async function AdminPlatformCredentialsPage({
             </SubmitButton>
           </div>
         </form>
-        {snap.bhashini.source === "database" && (
-          <form action={staffClearPlatformCredentialAction} className="mt-3 border-t border-zinc-100 pt-3">
-            <input type="hidden" name="providerKey" value="bhashini" />
-            <SubmitButton className="adm-btn-secondary py-1 text-[11px]" pendingText="Clearing...">
-              Remove Database Override
-            </SubmitButton>
-          </form>
-        )}
+        <ProviderLiveTestFooter
+          providerKey="bhashini"
+          label="Bhashini NMT"
+          source={snap.bhashini.source}
+          isReady={snap.bhashini.isReady}
+          lastVerifiedAt={snap.bhashini.lastVerifiedAt}
+          lastVerifyStatus={snap.bhashini.lastVerifyStatus}
+          lastVerifyMessage={snap.bhashini.lastVerifyMessage}
+        />
       </SectionCard>
+      </div>
     </div>
   );
 }

@@ -544,3 +544,56 @@ export async function sendPlatformSmtpTestEmail(recipientEmail: string): Promise
     }),
   });
 }
+
+export async function verifyPlatformSmtpTransport(): Promise<{
+  ok: boolean;
+  latencyMs: number;
+  message: string;
+}> {
+  const started = Date.now();
+  const smtp = getPlatformSmtpConfig();
+  if (!smtp.isReady) {
+    return {
+      ok: false,
+      latencyMs: 1,
+      message: "SMTP credentials are not configured or disabled.",
+    };
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: smtp.host,
+    port: smtp.port,
+    secure: smtp.secure,
+    auth: {
+      user: smtp.user,
+      pass: smtp.password,
+    },
+    connectionTimeout: 7500,
+    greetingTimeout: 7500,
+    socketTimeout: 8000,
+  });
+
+  try {
+    await transporter.verify();
+    const latencyMs = Math.max(1, Date.now() - started);
+    return {
+      ok: true,
+      latencyMs,
+      message: `Verified live SMTP handshake & login (${smtp.user} via ${smtp.host}:${smtp.port}, ${smtp.secure ? "SSL/TLS" : "STARTTLS"}, ${latencyMs}ms).`,
+    };
+  } catch (err) {
+    const latencyMs = Math.max(1, Date.now() - started);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      latencyMs,
+      message: `SMTP handshake failed (${smtp.host}:${smtp.port}): ${errMsg.slice(0, 180)}`,
+    };
+  } finally {
+    try {
+      transporter.close();
+    } catch {
+      // ignore close errors
+    }
+  }
+}

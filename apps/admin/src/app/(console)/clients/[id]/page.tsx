@@ -19,13 +19,14 @@ import {
 import { formatInr, resolvePublicEndpoints } from "@rsl/core";
 import { controlSchema } from "@rsl/database";
 import { ensureWorkspaceSslProvisioned } from "@rsl/queue";
-import { controlDb } from "@rsl/tenancy";
+import { controlDb, getStaffClientIntegrationSnapshot } from "@rsl/tenancy";
 import {
   FlashBanner,
   MetricCard,
   PageHeader,
   StatusPill,
 } from "@rsl/ui";
+import { ClientConnectionsStatusTab } from "@/components/client-detail/connections-status-tab";
 import { ClientFinanceInvoicesTab } from "@/components/client-detail/finance-invoices-tab";
 import { ClientPlansEntitlementsTab } from "@/components/client-detail/plans-entitlements-tab";
 import { ClientProfileSslTeamTab } from "@/components/client-detail/profile-ssl-team-tab";
@@ -83,6 +84,8 @@ export default async function AdminClientDetailPage({
   const reminders = listWorkspaceBillingReminders(workspace.id, 6);
   const ledger = listLedgerEntries(workspace.id, 30);
   const team = listWorkspaceTeam(workspace.id);
+  const integrationSnapshot = getStaffClientIntegrationSnapshot(workspace.id);
+  const canTestIntegrations = canManageClients || canManageOps;
   const invoices = db
     .select()
     .from(controlSchema.invoices)
@@ -250,6 +253,10 @@ export default async function AdminClientDetailPage({
           ...(canViewBilling
             ? [{ key: "finance", label: `Wallet, PDFs & GST Invoices (${invoices.length})` }]
             : []),
+          {
+            key: "connections",
+            label: `Connected Channels & Live Status (${integrationSnapshot.connections.length})`,
+          },
           { key: "profile", label: `Business Profile, SSL & Team (${team.members.length})` },
           { key: "support", label: "Templates & Email Tools" },
         ].map((tab) => {
@@ -293,6 +300,15 @@ export default async function AdminClientDetailPage({
           staffRoleLabel={staffRoleLabel}
           ledger={ledger}
           invoices={invoices}
+        />
+      )}
+
+      {activeTab === "connections" && (
+        <ClientConnectionsStatusTab
+          workspaceId={workspace.id}
+          workspaceName={workspace.name}
+          canTestIntegrations={canTestIntegrations}
+          snapshot={integrationSnapshot}
         />
       )}
 
