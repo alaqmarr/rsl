@@ -156,6 +156,21 @@ export async function GET(req: NextRequest) {
       codeVerifier,
     });
 
+    if (parsedState.purpose === "google_all") {
+      if (result.locationId) {
+        await syncGoogleBusinessReviewsForWorkspace({
+          workspaceId: session.workspace.id,
+          forceDiscovery: false,
+        }).catch(() => null);
+      }
+      return buildAppRedirect(
+        appBaseUrl,
+        returnTo,
+        "notice",
+        result.summaryMessage || `Connected all Google accounts (${result.email}) via 1-Click Google Sign-In!`
+      );
+    }
+
     if (parsedState.purpose === "google_drive") {
       const successMsg = `Google Drive (${result.email}) connected! Folder '${result.folderName || "RapidShift Labs Backups"}' was created automatically in your Google Drive.`;
       return buildAppRedirect(appBaseUrl, returnTo, "notice", successMsg);

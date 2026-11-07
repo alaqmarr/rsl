@@ -3,16 +3,19 @@
 import React, { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { EmptyWorkspaceState, IosSpinner, SectionCard, sileo, StatusPill } from "@rsl/ui";
+import { IosSpinner, SectionCard, sileo, StatusPill } from "@rsl/ui";
 import type { ConnectionChannelKind, ConnectionMetadata } from "@rsl/connections";
 import { CopyTextButton } from "@/components/client-utils";
 import { ConnectToGoogleDriveButton, GoogleGLogo } from "@/components/google-drive-connect-button";
 import {
   connectChannelJsonAction,
   disconnectConnectionJsonAction,
+  refreshMetaChannelAssetsJsonAction,
   rotateMetaVerifyTokenJsonAction,
   selectGoogleAdsCustomerJsonAction,
   selectGoogleBusinessLocationJsonAction,
+  selectGoogleSearchConsoleSiteJsonAction,
+  selectMetaChannelAssetJsonAction,
   syncGoogleBusinessProfileJsonAction,
   updateConnectionJsonAction,
   verifyConnectionLiveJsonAction,
@@ -65,472 +68,303 @@ export interface WorkspaceBusinessSummary {
   gstin?: string;
 }
 
+export interface TallyDeviceSummary {
+  id: string;
+  deviceName: string;
+  status: string;
+  osVersion?: string | null;
+  agentVersion?: string | null;
+  activeCompanyName?: string | null;
+  lastHeartbeatAt?: number | null;
+}
+
 export interface ConnectionsHubProps {
   initialKind?: ConnectionChannelKind;
   connections: SerializedConnectionItem[];
-  whatsappWebhookUrl: string;
-  metaWebhookUrl: string;
-  webhookVerifyToken: string;
+  allowManualCredentials?: boolean;
+  whatsappWebhookUrl?: string;
+  metaWebhookUrl?: string;
+  webhookVerifyToken?: string;
   canManage: boolean;
+  canAccessTally?: boolean;
+  tallyDevices?: TallyDeviceSummary[];
   googleOAuth?: GoogleOAuthClientStatus;
   metaOAuth?: MetaOAuthClientStatus;
   googleAdsStatus?: GoogleAdsClientStatus;
   workspaceBusiness?: WorkspaceBusinessSummary;
 }
 
-interface WhitelistStep {
-  title: string;
-  detail: string;
-  codeHint?: string;
+function FacebookLogo({ className = "h-4 w-4 shrink-0" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="currentColor">
+      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+    </svg>
+  );
 }
 
-interface ChannelBlueprint {
-  kind: ConnectionChannelKind;
-  shortLabel: string;
-  title: string;
-  badgeText: string;
-  summary: string;
-  webhookMode: "whatsapp" | "meta" | "none";
-  webhookFields: string[];
-  requiredScopes: string[];
-  steps: WhitelistStep[];
+function ConnectWithFacebookButton({
+  purpose,
+  label,
+  configured,
+  variant = "primary",
+  size = "md",
+  returnTo = "/connections",
+}: {
+  purpose:
+    | "meta_all"
+    | "whatsapp_cloud"
+    | "instagram_business"
+    | "facebook_page"
+    | "meta_ads_pixel";
+  label: string;
+  configured: boolean;
+  variant?: "primary" | "outline";
+  size?: "sm" | "md";
+  returnTo?: string;
+}) {
+  const sizeCls = size === "sm" ? "px-3 py-1.5 text-xs" : "px-4 py-2.5 text-[13px]";
+
+  if (!configured) {
+    return (
+      <span
+        role="button"
+        aria-disabled="true"
+        title="1-click Facebook Sign-In is pending platform setup"
+        className={`inline-flex shrink-0 cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-zinc-100/90 font-semibold text-zinc-500 ${sizeCls}`}
+      >
+        <FacebookLogo className="h-4 w-4 text-[#1877F2]/60" />
+        <span>{label}</span>
+        <span className="rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 ring-1 ring-zinc-200">
+          Setup Pending
+        </span>
+      </span>
+    );
+  }
+
+  const href = `/api/oauth/meta/start?purpose=${encodeURIComponent(purpose)}&returnTo=${encodeURIComponent(returnTo)}`;
+
+  if (variant === "outline") {
+    return (
+      <a
+        href={href}
+        className={`inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-zinc-300 bg-white font-semibold text-slate-900 shadow-2xs transition hover:border-[#1877F2]/50 hover:bg-blue-50/40 ${sizeCls}`}
+      >
+        <FacebookLogo className="h-3.5 w-3.5 text-[#1877F2]" />
+        <span>{label}</span>
+      </a>
+    );
+  }
+
+  return (
+    <a
+      href={href}
+      className={`inline-flex shrink-0 items-center justify-center gap-2.5 rounded-xl bg-[#1877F2] font-semibold text-white shadow-xs transition hover:bg-[#166FE5] ${sizeCls}`}
+    >
+      <FacebookLogo className="h-4 w-4 text-white" />
+      <span>{label}</span>
+    </a>
+  );
 }
 
-const CHANNEL_BLUEPRINTS: ChannelBlueprint[] = [
+interface MetaChannelCardSpec {
+  kind: "whatsapp_cloud" | "instagram_business" | "facebook_page" | "meta_ads_pixel";
+  title: string;
+  tagline: string;
+  connectLabel: string;
+  proceedHref: string;
+  proceedLabel: string;
+  secondaryHref?: string;
+  secondaryLabel?: string;
+}
+
+const META_CHANNELS: MetaChannelCardSpec[] = [
   {
     kind: "whatsapp_cloud",
-    shortLabel: "WhatsApp Cloud API",
-    title: "WhatsApp Business Cloud API",
-    badgeText: "Official Meta WABA",
-    summary:
-      "Connect your official WhatsApp Business Account (WABA) and Phone Number ID for Tally Prime invoice automation, broadcasts, and 2-way shared inbox.",
-    webhookMode: "whatsapp",
-    webhookFields: ["messages", "message_template_status_update"],
-    requiredScopes: [
-      "whatsapp_business_messaging",
-      "whatsapp_business_management",
-      "business_management",
-    ],
-    steps: [
-      {
-        title: "1. Whitelist Platform Domain & Privacy URL in Meta App Dashboard",
-        detail:
-          "Open developers.facebook.com/apps → App Settings → Basic. Add your RSL app domain under App Domains and set a valid HTTPS Privacy Policy URL (mandatory before switching to Live Mode).",
-      },
-      {
-        title: "2. Whitelist Test Recipient Phone Numbers (Development Mode)",
-        detail:
-          "While your Meta App is in Development Mode, go to WhatsApp → API Setup → 'To' field → Manage phone number list and verify up to 5 recipient numbers via OTP. This prevents Meta Error #131030 ('Recipient phone number not in allowed list').",
-      },
-      {
-        title: "3. Create an Admin System User & Assign Your WABA Asset",
-        detail:
-          "Open business.facebook.com/settings → Users → System Users. Create an Admin System User, click Assign Assets → WhatsApp Accounts, select your WABA, and turn ON Full Control (Manage WhatsApp Account).",
-      },
-      {
-        title: "4. Generate a Permanent System User Token (Never Temporary 24h Token)",
-        detail:
-          "Click Generate New Token on the System User, choose your Meta App, set Token Expiration to 'Never', and grant all three required WhatsApp permissions below. Temporary API Setup tokens expire in 24 hours (Error 190).",
-        codeHint: "whatsapp_business_messaging, whatsapp_business_management, business_management",
-      },
-      {
-        title: "5. Verify Webhook Callback URL & Subscribe to Events",
-        detail:
-          "In Meta App Dashboard → WhatsApp → Configuration → Webhook, paste the Callback URL and Verify Token shown on the left, click Verify and save, then click Manage and enable 'messages' and 'message_template_status_update'.",
-      },
-      {
-        title: "6. Attach Payment Method & Switch Meta App to Live Mode",
-        detail:
-          "In Meta Business Settings → Billing & Payments, attach a valid card to your WABA (prevents Error #131042), complete Business Verification for higher messaging tiers, and flip the top Meta App toggle from Development to Live.",
-      },
-    ],
+    title: "WhatsApp Business",
+    tagline:
+      "Send automated Tally Prime GST invoices, broadcast approved templates, and reply to customers in your shared inbox.",
+    connectLabel: "Connect WhatsApp",
+    proceedHref: "/whatsapp",
+    proceedLabel: "Open WhatsApp & Templates →",
+    secondaryHref: "/inbox",
+    secondaryLabel: "Customer Inbox",
   },
   {
     kind: "instagram_business",
-    shortLabel: "Instagram Business",
-    title: "Instagram Business Account (DMs, Comments & Publishing)",
-    badgeText: "Meta Graph IG",
-    summary:
-      "Link your Instagram Professional (Business/Creator) account to receive Instagram DMs and comments in Shared Inbox and publish scheduled posts.",
-    webhookMode: "meta",
-    webhookFields: ["messages", "messaging_postbacks", "comments"],
-    requiredScopes: [
-      "instagram_basic",
-      "instagram_manage_messages",
-      "instagram_manage_comments",
-      "instagram_content_publish",
-      "pages_show_list",
-      "pages_read_engagement",
-      "pages_manage_metadata",
-    ],
-    steps: [
-      {
-        title: "1. Switch Instagram to Business/Creator & Link a Facebook Page",
-        detail:
-          "Instagram Graph API requires a Professional account linked to a Facebook Page inside the same Meta Business Portfolio (Instagram App → Edit Profile → Page, or Facebook Page → Settings → Linked Accounts → Instagram).",
-      },
-      {
-        title: "2. Enable 'Allow Access to Messages' in Instagram Mobile App (Critical)",
-        detail:
-          "Open the Instagram mobile app on your phone → Settings and activity → Messages and story replies → Message controls → Connected tools → Toggle ON 'Allow access to messages'. Without this switch, Meta silently drops all DM webhooks!",
-      },
-      {
-        title: "3. Whitelist Instagram Tester Accounts (Development Mode)",
-        detail:
-          "In Meta App Dashboard → App Roles → Roles → Add People → Instagram Testers, invite your @handle. Then log into instagram.com on desktop → Settings → Website Permissions → Apps and Websites → Tester Invites → Accept.",
-      },
-      {
-        title: "4. Assign Both Facebook Page & Instagram Asset to System User",
-        detail:
-          "In business.facebook.com/settings → System Users → Assign Assets, grant Full Control to BOTH the linked Facebook Page (under Pages) and your Instagram profile (under Instagram Accounts).",
-      },
-      {
-        title: "5. Copy Your 17-Digit Instagram Business User ID (Not @Username)",
-        detail:
-          "Call GET /v21.0/{page-id}?fields=instagram_business_account or inspect Graph API Explorer to obtain your numeric 17-digit IG Business Account ID (e.g. 17841405822304914) and generate a System User token with the scopes below.",
-        codeHint:
-          "instagram_basic, instagram_manage_messages, instagram_manage_comments, instagram_content_publish, pages_show_list",
-      },
-      {
-        title: "6. Verify Instagram Webhook & Subscribe Fields",
-        detail:
-          "In Meta App Dashboard → Webhooks → Select 'Instagram' from the dropdown, paste the Meta Callback URL and Verify Token on the left, and subscribe to 'messages', 'messaging_postbacks', and 'comments'.",
-      },
-    ],
+    title: "Instagram Business",
+    tagline:
+      "Reply to Instagram Direct Messages and story replies from one unified inbox and publish scheduled posts.",
+    connectLabel: "Connect Instagram",
+    proceedHref: "/inbox",
+    proceedLabel: "Open Customer Inbox →",
+    secondaryHref: "/campaigns",
+    secondaryLabel: "Social Posts",
   },
   {
     kind: "facebook_page",
-    shortLabel: "Facebook Page",
-    title: "Facebook Page & Messenger",
-    badgeText: "Page & Messenger",
-    summary:
-      "Connect your Facebook Business Page to reply to Messenger chats, moderate post comments, and publish scheduled page updates.",
-    webhookMode: "meta",
-    webhookFields: ["messages", "messaging_postbacks", "feed"],
-    requiredScopes: [
-      "pages_show_list",
-      "pages_messaging",
-      "pages_manage_posts",
-      "pages_read_engagement",
-      "pages_manage_metadata",
-    ],
-    steps: [
-      {
-        title: "1. Confirm Page Ownership in Meta Business Portfolio",
-        detail:
-          "Verify your Facebook Page is claimed under business.facebook.com/settings/pages. Find your numeric Facebook Page ID under your Page → About → Page Transparency.",
-      },
-      {
-        title: "2. Whitelist System User on the Facebook Page Asset",
-        detail:
-          "Open Meta Business Settings → System Users → Assign Assets → Pages, select your Facebook Page, and enable Full Control (Manage Page, Content, Messages, Community Activity).",
-      },
-      {
-        title: "3. Generate a Non-Expiring Page Access Token",
-        detail:
-          "Generate a System User token with the Page scopes below, then call GET /v21.0/me/accounts to retrieve the Page-specific never-expiring access_token for your Page ID.",
-        codeHint:
-          "pages_show_list, pages_messaging, pages_manage_posts, pages_read_engagement, pages_manage_metadata",
-      },
-      {
-        title: "4. Set App as Primary Receiver in Advanced Messaging",
-        detail:
-          "On your Facebook Page → Settings → New Pages Experience → Advanced Messaging → Handover Protocol, assign your Meta App as Primary Receiver for Messenger conversations.",
-      },
-      {
-        title: "5. Verify Page Webhook & Subscribe Page App",
-        detail:
-          "In Meta App Dashboard → Webhooks → Page, verify the Callback URL and Verify Token shown on the left, subscribe to 'messages', 'messaging_postbacks', and 'feed', and subscribe your Page in Messenger → Settings.",
-      },
-    ],
+    title: "Facebook Page",
+    tagline:
+      "Receive Facebook Lead Ads & Messenger inquiries automatically and publish updates to your business page.",
+    connectLabel: "Connect Facebook Page",
+    proceedHref: "/campaigns",
+    proceedLabel: "Open Campaigns & Posts →",
+    secondaryHref: "/inbox",
+    secondaryLabel: "Messenger Inbox",
   },
   {
     kind: "meta_ads_pixel",
-    shortLabel: "Meta Ads & Pixel",
-    title: "Meta Ad Account & Conversions API Pixel",
-    badgeText: "ROAS & CAPI",
-    summary:
-      "Sync Facebook & Instagram ad spend against Tally revenue and send deduplicated server-side Website Sales Events via Conversions API.",
-    webhookMode: "none",
-    webhookFields: [],
-    requiredScopes: ["ads_read", "ads_management", "business_management"],
-    steps: [
-      {
-        title: "1. Assign Ad Account & Dataset/Pixel to System User",
-        detail:
-          "In Meta Business Settings → System Users → Assign Assets, grant Manage Campaigns on your Ad Account and Manage Events on your Dataset / Pixel.",
-      },
-      {
-        title: "2. Whitelist Website Domains in Events Manager",
-        detail:
-          "Open Events Manager → Data Sources → Settings → Traffic Permissions → Create Allow List, and whitelist your primary website domain so third-party domains cannot pollute conversion metrics.",
-      },
-      {
-        title: "3. Generate Marketing + Conversions API Token",
-        detail:
-          "Generate a permanent System User token with 'ads_read', 'ads_management', and 'business_management' (or click 'Generate access token' inside Events Manager → Settings → Conversions API).",
-        codeHint: "ads_read, ads_management, business_management",
-      },
-      {
-        title: "4. Format Ad Account ID with 'act_' Prefix",
-        detail:
-          "Always include the 'act_' prefix on your Ad Account ID (for example: act_293847561029384) along with your numeric 15-16 digit Pixel / Dataset ID.",
-      },
-    ],
-  },
-  {
-    kind: "google_ads",
-    shortLabel: "Google Ads",
-    title: "Google Ads Account (Search, Performance Max & Local Store Ads)",
-    badgeText: "Search & PMax",
-    summary:
-      "Connect your Google Ads Customer ID (xxx-xxx-xxxx) in 1 click to launch Search, Performance Max, and Call/Lead ads directly from RSL Console — or run ads via RSL Managed Vault.",
-    webhookMode: "none",
-    webhookFields: [],
-    requiredScopes: ["https://www.googleapis.com/auth/adwords"],
-    steps: [
-      {
-        title: "1. Click 'Connect Google Ads' on the Left",
-        detail:
-          "Sign in with the Google account that has Admin or Standard access to your Google Ads account (ads.google.com). RapidShift Labs automatically discovers your 10-digit Customer IDs.",
-      },
-      {
-        title: "2. Direct Billing vs RapidShift Managed Ad Spend Vault",
-        detail:
-          "In Direct Client Mode, Google bills your saved UPI Autopay / card inside ads.google.com while RSL creates & optimizes campaigns. If you don't have a Google Ads account yet, you can also fund the 0-overdraft Managed Ad Spend Vault on Plans & Wallet.",
-      },
-      {
-        title: "3. Multi-Account / MCC Switcher",
-        detail:
-          "If your Google login manages an MCC or multiple client Customer IDs, pick the exact 10-digit Customer ID (e.g. 123-456-7890) from the dropdown right after signing in.",
-        codeHint: "https://www.googleapis.com/auth/adwords",
-      },
-    ],
-  },
-  {
-    kind: "google_business",
-    shortLabel: "Google Business",
-    title: "Google Business Profile (Store Reviews & Replies)",
-    badgeText: "1-Click Google OAuth",
-    summary:
-      "Sign in directly with Google to pull customer star ratings across store locations and publish verified owner replies to Google Maps & Search.",
-    webhookMode: "none",
-    webhookFields: [],
-    requiredScopes: ["https://www.googleapis.com/auth/business.manage"],
-    steps: [
-      {
-        title: "1. Click 'Connect Google Business Profile' on the Left",
-        detail:
-          "You do NOT need Google Cloud Console, Service Account JSON files, or manual tokens. Click the Google Sign-In button and select the Google account that owns or manages your verified Google Business Profile listing.",
-      },
-      {
-        title: "2. Approve 'RapidShift Labs' on Google's Consent Screen",
-        detail:
-          "Review the permission prompt on accounts.google.com and click Continue / Allow. RapidShift Labs receives a secure auto-renewing token encrypted in your workspace vault.",
-        codeHint: "https://www.googleapis.com/auth/business.manage",
-      },
-      {
-        title: "3. Automatic Storefront & Location Discovery",
-        detail:
-          "Immediately after sign-in, RapidShift Labs discovers your verified GBP Account and primary Storefront Location ID automatically so customer reviews sync straight into the Google Reviews tab.",
-      },
-      {
-        title: "4. Multi-Branch Override (Only If You Manage Multiple Locations)",
-        detail:
-          "If your Google account manages multiple branches and you want to target a specific store, click 'Rotate Token / Edit' on the connected card below to enter a specific locations/... ID.",
-      },
-    ],
-  },
-  {
-    kind: "google_drive",
-    shortLabel: "Google Drive",
-    title: "Google Drive Off-Site Backup Vault",
-    badgeText: "1-Click Google OAuth",
-    summary:
-      "Connect your Google Drive in 2 clicks using Google's official Consent Screen — creates a dedicated backup folder automatically and mirrors every encrypted .rslbackup archive.",
-    webhookMode: "none",
-    webhookFields: [],
-    requiredScopes: ["https://www.googleapis.com/auth/drive.file"],
-    steps: [
-      {
-        title: "1. Click 'Connect to Google Drive' (No Service Account JSON Needed!)",
-        detail:
-          "Never create or upload a Google Service Account JSON file. Simply click 'Connect to Google Drive' on the left and pick the Gmail or Google Workspace account where you want off-site backups stored.",
-      },
-      {
-        title: "2. Privacy-First 'drive.file' Permission Scope",
-        detail:
-          "Google's Consent Screen only grants RapidShift Labs access to the specific backup folder & files it creates ('drive.file' scope). RapidShift Labs can NEVER view, list, or modify any other personal or company files in your Google Drive.",
-        codeHint: "https://www.googleapis.com/auth/drive.file",
-      },
-      {
-        title: "3. Automatic Backup Folder Creation",
-        detail:
-          "As soon as you click Allow on Google's screen, RapidShift Labs automatically creates a 'RapidShift Labs Backups' folder in your Google Drive — no manual Folder ID copying required.",
-      },
-      {
-        title: "4. Automatic Off-Site Upload on Every Backup",
-        detail:
-          "Whenever you create an encrypted .rslbackup snapshot in Cloud Storage & Backups, a copy is uploaded automatically to your Google Drive folder with auto-renewing OAuth refresh tokens.",
-      },
-    ],
-  },
-  {
-    kind: "google_sheets",
-    shortLabel: "Google Sheets CA Sync",
-    title: "Google Sheets Live CA Ledger & GST Workbook",
-    badgeText: "Free CA Sync",
-    summary:
-      "Connect Google Sheets in 1 click to auto-create and sync a 4-tab Tally Sales, Overdue Receivables, Stock Inventory, and Ad Spend workbook you can share live with your Chartered Accountant.",
-    webhookMode: "none",
-    webhookFields: [],
-    requiredScopes: [
-      "https://www.googleapis.com/auth/spreadsheets",
-      "https://www.googleapis.com/auth/drive.file",
-    ],
-    steps: [
-      {
-        title: "1. Click 'Connect Google Sheets' on the Left",
-        detail:
-          "Sign in with your Google account. RapidShift Labs uses the privacy-safe drive.file + spreadsheets scopes so it only accesses the CA Workbook it creates for your business.",
-      },
-      {
-        title: "2. Automatic 4-Tab CA Workbook Provisioning",
-        detail:
-          "Immediately after connecting, click 'Sync Live Google Sheet for CA' on Tally Prime & Bills to populate Sales & GST Register, Overdue Receivables, Stock & Inventory, and Ad Spend & ROAS.",
-        codeHint: "https://www.googleapis.com/auth/spreadsheets",
-      },
-      {
-        title: "3. Share Read-Only Link with Your CA / Auditor",
-        detail:
-          "Open the generated Google Sheet link and share Viewer access with your Chartered Accountant — zero manual Excel/CSV email attachments needed.",
-      },
-    ],
-  },
-  {
-    kind: "google_search_console",
-    shortLabel: "Search Console SEO",
-    title: "Google Search Console (Free Organic Keywords & Ad Discovery)",
-    badgeText: "Free SEO & Keywords",
-    summary:
-      "Connect Google Search Console ($0/month) to see the exact Google queries driving clicks & impressions to your website — and turn high-impression queries into Google Search Ads in 1 click.",
-    webhookMode: "none",
-    webhookFields: [],
-    requiredScopes: ["https://www.googleapis.com/auth/webmasters.readonly"],
-    steps: [
-      {
-        title: "1. Click 'Connect Search Console' on the Left",
-        detail:
-          "Sign in with the Google account that has verified ownership of your company website in Google Search Console (search.google.com/search-console).",
-      },
-      {
-        title: "2. Automatic Verified Property Discovery",
-        detail:
-          "RapidShift Labs automatically lists your verified domain/URL-prefix properties using read-only webmasters.readonly access.",
-        codeHint: "https://www.googleapis.com/auth/webmasters.readonly",
-      },
-      {
-        title: "3. Discover Winning Organic Keywords in Ads Studio",
-        detail:
-          "Open Ads & Social Posts to load top organic search queries, CTR, and average Google ranking — ideal for launching high-converting Search Ads.",
-      },
-    ],
+    title: "Meta Ads & Conversions Pixel",
+    tagline:
+      "Launch Facebook & Instagram ad campaigns, track ROAS, and send server-side Conversions API events.",
+    connectLabel: "Connect Meta Ads",
+    proceedHref: "/campaigns",
+    proceedLabel: "Open Ads & Campaigns →",
   },
 ];
 
-const CHANNEL_LABEL_BY_KIND: Record<ConnectionChannelKind, string> = {
-  whatsapp_cloud: "WhatsApp Cloud API",
-  instagram_business: "Instagram Business",
-  facebook_page: "Facebook Page",
-  meta_ads_pixel: "Meta Ads & Pixel",
-  google_ads: "Google Ads Studio",
-  google_business: "Google Business Profile",
-  google_drive: "Google Drive Backup",
-  google_sheets: "Google Sheets CA Sync",
-  google_search_console: "Google Search Console",
-};
+interface GoogleChannelCardSpec {
+  kind:
+    | "google_business"
+    | "google_ads"
+    | "google_drive"
+    | "google_sheets"
+    | "google_search_console";
+  title: string;
+  tagline: string;
+  connectLabel: string;
+  proceedHref: string;
+  proceedLabel: string;
+}
+
+const GOOGLE_CHANNELS: GoogleChannelCardSpec[] = [
+  {
+    kind: "google_business",
+    title: "Google Business Profile",
+    tagline:
+      "Sync Google Maps & Search star ratings across store locations and publish verified owner replies.",
+    connectLabel: "Connect Business Profile",
+    proceedHref: "/reviews",
+    proceedLabel: "Open Google Reviews →",
+  },
+  {
+    kind: "google_ads",
+    title: "Google Ads",
+    tagline:
+      "Create Search & Performance Max campaigns, monitor ad spend, and track conversions from one console.",
+    connectLabel: "Connect Google Ads",
+    proceedHref: "/campaigns",
+    proceedLabel: "Open Google Ads →",
+  },
+  {
+    kind: "google_drive",
+    title: "Google Drive Backups",
+    tagline:
+      "Store automatic encrypted off-site backups in a dedicated folder inside your own Google Drive.",
+    connectLabel: "Connect Google Drive",
+    proceedHref: "/backups",
+    proceedLabel: "Open Backups & Storage →",
+  },
+  {
+    kind: "google_sheets",
+    title: "Google Sheets (CA Live Sync)",
+    tagline:
+      "Push live Tally Sales, Purchase, Receipt, and Party Aging tabs to a shared Google Sheet for your CA.",
+    connectLabel: "Connect Google Sheets",
+    proceedHref: "/tally",
+    proceedLabel: "Open Tally & CA Sheet →",
+  },
+  {
+    kind: "google_search_console",
+    title: "Google Search Console",
+    tagline:
+      "Track organic Google Search clicks, impressions, average position, and top customer search queries.",
+    connectLabel: "Connect Search Console",
+    proceedHref: "/campaigns",
+    proceedLabel: "View Search Analytics →",
+  },
+];
+
+function getStatusPillProps(status: string): {
+  label: string;
+  tone: "emerald" | "amber" | "ruby";
+} {
+  if (status === "healthy") return { label: "Connected", tone: "emerald" };
+  if (status === "expiring") return { label: "Refreshing Soon", tone: "amber" };
+  return { label: "Reconnect Needed", tone: "ruby" };
+}
 
 export function ConnectionsHub({
   initialKind,
   connections,
-  whatsappWebhookUrl,
-  metaWebhookUrl,
-  webhookVerifyToken: initialVerifyToken,
+  allowManualCredentials = false,
+  whatsappWebhookUrl = "",
+  metaWebhookUrl = "",
+  webhookVerifyToken: initialVerifyToken = "",
   canManage,
+  canAccessTally = false,
+  tallyDevices = [],
   googleOAuth,
   metaOAuth,
-  googleAdsStatus,
-  workspaceBusiness,
 }: ConnectionsHubProps) {
   const router = useRouter();
-  const [selectedKind, setSelectedKind] = useState<ConnectionChannelKind>(
-    initialKind ?? "whatsapp_cloud"
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [, startTransition] = useTransition();
+
+  // Support-only manual credential state (active ONLY when allowManualCredentials === true)
+  const [manualKind, setManualKind] = useState<ConnectionChannelKind>(
+    initialKind || "whatsapp_cloud"
   );
+  const [rotatingConnId, setRotatingConnId] = useState<string | null>(null);
   const [verifyToken, setVerifyToken] = useState(initialVerifyToken);
-  const [showAccessToken, setShowAccessToken] = useState(false);
-  const [accessTokenInput, setAccessTokenInput] = useState("");
-  const [testLiveAfterSave, setTestLiveAfterSave] = useState(true);
 
-  const [isConnecting, startConnectTransition] = useTransition();
-  const [isRotatingVerify, startRotateVerifyTransition] = useTransition();
-  const [pendingCardAction, setPendingCardAction] = useState<string | null>(null);
-  const [, startCardTransition] = useTransition();
-  const [editingId, setEditingId] = useState<string | null>(null);
-
-  const activeBlueprint = useMemo(
-    () => CHANNEL_BLUEPRINTS.find((b) => b.kind === selectedKind) ?? CHANNEL_BLUEPRINTS[0]!,
-    [selectedKind]
-  );
-
-  const countByKind = useMemo(() => {
-    const map: Record<string, number> = {};
+  const byKind = useMemo(() => {
+    const map = new Map<ConnectionChannelKind, SerializedConnectionItem>();
     for (const c of connections) {
-      map[c.channelKind] = (map[c.channelKind] ?? 0) + 1;
+      if (!map.has(c.channelKind)) {
+        map.set(c.channelKind, c);
+      }
     }
     return map;
   }, [connections]);
 
-  function handleFillSandboxToken() {
-    const sample = `rsl_sandbox_${selectedKind}_${Math.random().toString(36).slice(2, 10)}`;
-    setAccessTokenInput(sample);
-    setShowAccessToken(true);
-    sileo.success({
-      title: "Filled Sandbox Test Token",
-      description:
-        "Sandbox tokens let you test full connection & webhook routing locally before pasting a live Meta/Google token.",
-      duration: 4200,
-    });
+  const metaConfigured = Boolean(metaOAuth?.isReady && metaOAuth?.enableMetaOAuth);
+  const googleDriveConfigured = Boolean(googleOAuth?.isReady && googleOAuth?.enableDriveOAuth);
+  const googleGbpConfigured = Boolean(googleOAuth?.isReady && googleOAuth?.enableGbpOAuth);
+  const googleAdsConfigured = Boolean(googleOAuth?.isReady && googleOAuth?.enableGoogleAdsOAuth);
+  const googleAllConfigured =
+    googleDriveConfigured || googleGbpConfigured || googleAdsConfigured;
+
+  function isGooglePurposeConfigured(kind: GoogleChannelCardSpec["kind"]): boolean {
+    if (kind === "google_business") return googleGbpConfigured;
+    if (kind === "google_ads") return googleAdsConfigured;
+    return googleDriveConfigured;
   }
 
-  function handleConnectSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const formEl = e.currentTarget;
-    const fd = new FormData(formEl);
-    fd.set("channelKind", selectedKind);
-    fd.set("testLiveAfterSave", testLiveAfterSave ? "1" : "0");
+  const metaConnectedCount = META_CHANNELS.filter((m) => byKind.has(m.kind)).length;
+  const googleConnectedCount = GOOGLE_CHANNELS.filter((g) => byKind.has(g.kind)).length;
+  const totalConnectedCount = metaConnectedCount + googleConnectedCount;
+  const onlineTallyDevices = tallyDevices.filter((d) => d.status === "online");
 
-    startConnectTransition(async () => {
-      const res = await connectChannelJsonAction(fd);
+  function runAction(
+    key: string,
+    fn: () => Promise<{ ok: boolean; message: string }>,
+    successTitle: string,
+    errorTitle: string
+  ) {
+    setPendingKey(key);
+    startTransition(async () => {
+      const res = await fn();
+      setPendingKey(null);
       if (res.ok) {
-        if (res.liveStatus === "needs_reauth") {
-          sileo.error({
-            title: "Saved, but Live API Check Reported an Issue",
-            description: res.liveMessage || res.message,
-            duration: 6500,
-          });
-        } else {
-          sileo.success({
-            title: `${activeBlueprint.shortLabel} Connected`,
-            description: res.message,
-            duration: 5000,
-          });
-        }
-        formEl.reset();
-        setAccessTokenInput("");
+        sileo.success({
+          title: successTitle,
+          description: res.message,
+          duration: 4500,
+        });
         router.refresh();
       } else {
         sileo.error({
-          title: "Could Not Connect Channel",
+          title: errorTitle,
           description: res.message,
           duration: 5500,
         });
@@ -538,1680 +372,1182 @@ export function ConnectionsHub({
     });
   }
 
+  function handleVerify(conn: SerializedConnectionItem) {
+    runAction(
+      `verify:${conn.id}`,
+      async () => {
+        const fd = new FormData();
+        fd.set("connectionId", conn.id);
+        return verifyConnectionLiveJsonAction(fd);
+      },
+      `${conn.displayName} Active`,
+      `${conn.displayName} Check Failed`
+    );
+  }
+
+  function handleDisconnect(conn: SerializedConnectionItem) {
+    runAction(
+      `disc:${conn.id}`,
+      async () => {
+        const fd = new FormData();
+        fd.set("connectionId", conn.id);
+        return disconnectConnectionJsonAction(fd);
+      },
+      "Account Disconnected",
+      "Could Not Disconnect"
+    );
+  }
+
+  function handleSwitchMetaAsset(
+    connId: string,
+    assetId: string,
+    secondaryPixelId?: string
+  ) {
+    if (!assetId) return;
+    runAction(
+      `switch-meta:${connId}`,
+      async () => {
+        const fd = new FormData();
+        fd.set("connectionId", connId);
+        fd.set("assetId", assetId);
+        if (secondaryPixelId !== undefined) {
+          fd.set("secondaryPixelId", secondaryPixelId);
+        }
+        return selectMetaChannelAssetJsonAction(fd);
+      },
+      "Active Account Updated",
+      "Could Not Switch Account"
+    );
+  }
+
+  function handleRefreshMetaAssets(connId: string) {
+    runAction(
+      `refresh-meta:${connId}`,
+      async () => {
+        const fd = new FormData();
+        fd.set("connectionId", connId);
+        return refreshMetaChannelAssetsJsonAction(fd);
+      },
+      "Assets Synced",
+      "Asset Sync Failed"
+    );
+  }
+
+  function handleSwitchGbpLocation(connId: string, locationId: string) {
+    if (!locationId) return;
+    runAction(
+      `switch-gbp:${connId}`,
+      async () => {
+        const fd = new FormData();
+        fd.set("connectionId", connId);
+        fd.set("locationId", locationId);
+        return selectGoogleBusinessLocationJsonAction(fd);
+      },
+      "Store Location Switched",
+      "Could Not Switch Location"
+    );
+  }
+
+  function handleSyncGbpReviews(connId: string) {
+    runAction(
+      `sync-gbp:${connId}`,
+      async () => {
+        const fd = new FormData();
+        fd.set("connectionId", connId);
+        return syncGoogleBusinessProfileJsonAction(fd);
+      },
+      "Google Profile Synced",
+      "Sync Notice"
+    );
+  }
+
+  function handleSwitchGoogleAdsCustomer(connId: string, customerId: string) {
+    if (!customerId) return;
+    runAction(
+      `switch-gads:${connId}`,
+      async () => {
+        const fd = new FormData();
+        fd.set("connectionId", connId);
+        fd.set("customerId", customerId);
+        return selectGoogleAdsCustomerJsonAction(fd);
+      },
+      "Google Ads Account Switched",
+      "Could Not Switch Account"
+    );
+  }
+
+  function handleSwitchGscSite(connId: string, siteUrl: string) {
+    if (!siteUrl) return;
+    runAction(
+      `switch-gsc:${connId}`,
+      async () => {
+        const fd = new FormData();
+        fd.set("connectionId", connId);
+        fd.set("siteUrl", siteUrl);
+        return selectGoogleSearchConsoleSiteJsonAction(fd);
+      },
+      "Website Property Updated",
+      "Could Not Switch Property"
+    );
+  }
+
+  function handleManualConnectSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const formEl = e.currentTarget;
+    const fd = new FormData(formEl);
+    runAction(
+      "manual-connect",
+      async () => {
+        const res = await connectChannelJsonAction(fd);
+        if (res.ok) formEl.reset();
+        return res;
+      },
+      "Manual Credentials Saved",
+      "Could Not Save Credentials"
+    );
+  }
+
+  function handleManualRotateSubmit(connId: string, e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const formEl = e.currentTarget;
+    const fd = new FormData(formEl);
+    fd.set("connectionId", connId);
+    runAction(
+      `manual-rotate:${connId}`,
+      async () => {
+        const res = await updateConnectionJsonAction(fd);
+        if (res.ok) {
+          formEl.reset();
+          setRotatingConnId(null);
+        }
+        return res;
+      },
+      "Token Updated",
+      "Could Not Update Token"
+    );
+  }
+
   function handleRotateVerifyToken() {
-    startRotateVerifyTransition(async () => {
+    setPendingKey("rotate-verify");
+    startTransition(async () => {
       const res = await rotateMetaVerifyTokenJsonAction();
+      setPendingKey(null);
       if (res.ok && res.verifyToken) {
         setVerifyToken(res.verifyToken);
         sileo.success({
           title: "Verify Token Rotated",
           description: res.message,
-          duration: 4800,
-        });
-        router.refresh();
-      } else {
-        sileo.error({
-          title: "Could Not Rotate Verify Token",
-          description: res.message,
-          duration: 4800,
-        });
-      }
-    });
-  }
-
-  function handleVerifyLive(conn: SerializedConnectionItem) {
-    setPendingCardAction(`verify:${conn.id}`);
-    startCardTransition(async () => {
-      const fd = new FormData();
-      fd.set("connectionId", conn.id);
-      const res = await verifyConnectionLiveJsonAction(fd);
-      setPendingCardAction(null);
-      if (res.ok) {
-        sileo.success({
-          title: `${conn.displayName} — Healthy`,
-          description: res.message,
-          duration: 5000,
+          duration: 4500,
         });
       } else {
         sileo.error({
-          title: `${conn.displayName} — Needs Attention`,
-          description: res.message,
-          duration: 6500,
-        });
-      }
-      router.refresh();
-    });
-  }
-
-  function handleDisconnect(conn: SerializedConnectionItem) {
-    setPendingCardAction(`disconnect:${conn.id}`);
-    startCardTransition(async () => {
-      const fd = new FormData();
-      fd.set("connectionId", conn.id);
-      const res = await disconnectConnectionJsonAction(fd);
-      setPendingCardAction(null);
-      if (res.ok) {
-        sileo.success({
-          title: "Channel Disconnected",
-          description: res.message,
-          duration: 4200,
-        });
-        router.refresh();
-      } else {
-        sileo.error({
-          title: "Disconnect Failed",
+          title: "Could Not Rotate Token",
           description: res.message,
           duration: 5000,
         });
       }
     });
   }
-
-  function handleInlineUpdate(connId: string, e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    fd.set("connectionId", connId);
-    fd.set("testLiveAfterSave", "1");
-    setPendingCardAction(`update:${connId}`);
-    startCardTransition(async () => {
-      const res = await updateConnectionJsonAction(fd);
-      setPendingCardAction(null);
-      if (res.ok) {
-        setEditingId(null);
-        if (res.liveStatus === "needs_reauth") {
-          sileo.error({
-            title: "Updated, but Live Token Check Failed",
-            description: res.message,
-            duration: 6200,
-          });
-        } else {
-          sileo.success({
-            title: "Channel Credentials Updated",
-            description: res.message,
-            duration: 4800,
-          });
-        }
-        router.refresh();
-      } else {
-        sileo.error({
-          title: "Update Failed",
-          description: res.message,
-          duration: 5200,
-        });
-      }
-    });
-  }
-
-  function handleSyncGoogleBusiness(connId: string) {
-    setPendingCardAction(`syncgbp:${connId}`);
-    startCardTransition(async () => {
-      const fd = new FormData();
-      fd.set("connectionId", connId);
-      const res = await syncGoogleBusinessProfileJsonAction(fd);
-      setPendingCardAction(null);
-      if (res.ok) {
-        sileo.success({
-          title: res.storeName
-            ? `${res.storeName} — Synced`
-            : "Google Business Profile Synced",
-          description: res.message,
-          duration: 5500,
-        });
-      } else {
-        sileo.error({
-          title: "Google Business Sync Notice",
-          description: res.message,
-          duration: 7000,
-        });
-      }
-      router.refresh();
-    });
-  }
-
-  function handleSelectGbpLocation(connId: string, nextLocId: string) {
-    if (!nextLocId) return;
-    setPendingCardAction(`locgbp:${connId}`);
-    startCardTransition(async () => {
-      const fd = new FormData();
-      fd.set("connectionId", connId);
-      fd.set("locationId", nextLocId);
-      const res = await selectGoogleBusinessLocationJsonAction(fd);
-      setPendingCardAction(null);
-      if (res.ok) {
-        sileo.success({
-          title: "Storefront Location Updated",
-          description: res.message,
-          duration: 5000,
-        });
-      } else {
-        sileo.error({
-          title: "Could Not Switch Location",
-          description: res.message,
-          duration: 5500,
-        });
-      }
-      router.refresh();
-    });
-  }
-
-  function handleSelectGoogleAdsCustomer(connId: string, nextCustomerId: string) {
-    if (!nextCustomerId) return;
-    setPendingCardAction(`custgads:${connId}`);
-    startCardTransition(async () => {
-      const fd = new FormData();
-      fd.set("connectionId", connId);
-      fd.set("customerId", nextCustomerId);
-      const res = await selectGoogleAdsCustomerJsonAction(fd);
-      setPendingCardAction(null);
-      if (res.ok) {
-        sileo.success({
-          title: "Google Ads Account Updated",
-          description: res.message,
-          duration: 5000,
-        });
-      } else {
-        sileo.error({
-          title: "Could Not Switch Google Ads Account",
-          description: res.message,
-          duration: 5500,
-        });
-      }
-      router.refresh();
-    });
-  }
-
-  const activeCallbackUrl =
-    activeBlueprint.webhookMode === "whatsapp" ? whatsappWebhookUrl : metaWebhookUrl;
-  const activeDriveConn = connections.find((c) => c.channelKind === "google_drive");
-  const activeGbpConn = connections.find((c) => c.channelKind === "google_business");
-  const activeGoogleAdsConn = connections.find((c) => c.channelKind === "google_ads");
 
   return (
     <div className="w-full space-y-6">
-      {/* Quick-Connect Google Drive Off-Site Backup Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200/90 bg-emerald-50/70 px-4 py-3 text-[13px]">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white shadow-2xs ring-1 ring-emerald-200">
+      {/* Clean Overview Strip */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="flex items-center justify-between rounded-2xl border border-zinc-200/90 bg-white px-4 py-3.5 shadow-2xs">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+              Active Connections
+            </div>
+            <div className="mt-0.5 text-lg font-bold text-slate-900 tabular-nums">
+              {totalConnectedCount} / 9 Connected
+            </div>
+          </div>
+          <StatusPill
+            label={totalConnectedCount > 0 ? "1-Click Sync Active" : "Ready to Connect"}
+            tone={totalConnectedCount > 0 ? "emerald" : "stone"}
+          />
+        </div>
+
+        <div className="flex items-center justify-between rounded-2xl border border-zinc-200/90 bg-white px-4 py-3.5 shadow-2xs">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+              Meta Business Suite
+            </div>
+            <div className="mt-0.5 text-lg font-bold text-slate-900 tabular-nums">
+              {metaConnectedCount} / 4 Channels
+            </div>
+          </div>
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-[#1877F2]">
+            <FacebookLogo className="h-4 w-4" />
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between rounded-2xl border border-zinc-200/90 bg-white px-4 py-3.5 shadow-2xs">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+              Google Suite
+            </div>
+            <div className="mt-0.5 text-lg font-bold text-slate-900 tabular-nums">
+              {googleConnectedCount} / 5 Channels
+            </div>
+          </div>
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-zinc-200/80 bg-zinc-50">
             <GoogleGLogo className="h-4 w-4" />
           </span>
-          <div className="min-w-0">
-            {activeDriveConn ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-bold text-slate-900">
-                  Google Drive Backups Connected ({activeDriveConn.metadata.driveEmail || activeDriveConn.displayName})
-                </span>
-                <span className="rounded-md border border-emerald-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-emerald-900">
-                  Folder: {activeDriveConn.metadata.folderName || googleOAuth?.defaultDriveFolderName || "RapidShift Labs Backups"}
-                </span>
-              </div>
-            ) : (
-              <div>
-                <span className="font-bold text-slate-900">
-                  Off-Site Encrypted Backups to Your Google Drive
-                </span>{" "}
-                <span className="text-xs text-slate-700">
-                  — Connect your Google Drive in 1 click (auto-creates your backup folder, zero JSON files needed).
-                </span>
-              </div>
-            )}
-          </div>
         </div>
+      </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {activeDriveConn ? (
-            <>
-              {activeDriveConn.metadata.folderWebViewLink && (
-                <a
-                  href={activeDriveConn.metadata.folderWebViewLink}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rsl-btn-secondary py-1.5 text-xs"
-                >
-                  Open Drive Folder ↗
-                </a>
-              )}
-              <Link href="/backups" className="rsl-btn-primary py-1.5 text-xs">
-                Manage Backups →
-              </Link>
-            </>
-          ) : canManage ? (
-            <ConnectToGoogleDriveButton
-              returnTo="/connections?tab=google_drive"
-              label="Connect to Google Drive"
+      {/* SECTION 1: META BUSINESS SUITE */}
+      <SectionCard
+        title="Meta Business Suite"
+        subtitle="Sign in with Facebook once to connect WhatsApp Business, Instagram, your Facebook Page, and Meta Ads automatically — no tokens or IDs required."
+        action={
+          canManage ? (
+            <ConnectWithFacebookButton
+              purpose="meta_all"
+              label={
+                metaConnectedCount === META_CHANNELS.length
+                  ? "Reconnect All with Facebook"
+                  : "Connect All with Facebook"
+              }
+              configured={metaConfigured}
               size="sm"
             />
-          ) : (
-            <Link href="/backups" className="rsl-btn-secondary py-1.5 text-xs">
-              View Backup Status →
-            </Link>
-          )}
-        </div>
-      </div>
+          ) : undefined
+        }
+      >
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {META_CHANNELS.map((spec) => {
+            const conn = byKind.get(spec.kind);
+            const meta = conn?.metadata;
+            const pill = conn ? getStatusPillProps(conn.status) : null;
+            const isVerifying = conn && pendingKey === `verify:${conn.id}`;
+            const isRefreshing = conn && pendingKey === `refresh-meta:${conn.id}`;
+            const isSwitching = conn && pendingKey === `switch-meta:${conn.id}`;
+            const isDisconnecting = conn && pendingKey === `disc:${conn.id}`;
 
-      {/* Channel Selector Tabs */}
-      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
-        {CHANNEL_BLUEPRINTS.map((bp) => {
-          const isSelected = bp.kind === selectedKind;
-          const connectedCount = countByKind[bp.kind] ?? 0;
+            const pages = meta?.availableMetaPages ?? [];
+            const igAccounts = meta?.availableInstagramAccounts ?? [];
+            const adAccounts = meta?.availableMetaAdAccounts ?? [];
+            const wabaPhones = meta?.availableWabaPhones ?? [];
+            const activeAdAccObj = adAccounts.find(
+              (a) => a.adAccountId === (meta?.adAccountId || conn?.externalAccountId)
+            );
+            const availablePixels = activeAdAccObj?.availablePixels ?? [];
 
-          return (
-            <button
-              key={bp.kind}
-              type="button"
-              onClick={() => setSelectedKind(bp.kind)}
-              className={`min-w-0 rounded-2xl border p-3.5 text-left transition-all ${
-                isSelected
-                  ? "border-emerald-500 bg-emerald-50/75 shadow-2xs ring-1 ring-emerald-500/30"
-                  : "border-zinc-200/90 bg-white hover:border-zinc-300 hover:bg-zinc-50/50"
-              }`}
-            >
-              <div className="flex items-center justify-between gap-1.5">
-                <span
-                  className={`truncate text-[10px] font-bold tracking-wider uppercase ${
-                    isSelected ? "text-emerald-800" : "text-zinc-400"
-                  }`}
-                >
-                  {bp.badgeText}
-                </span>
-                {connectedCount > 0 && (
-                  <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 tabular-nums">
-                    {connectedCount} active
-                  </span>
-                )}
-              </div>
-              <div className="mt-1 truncate text-[13px] font-bold text-slate-900">
-                {bp.shortLabel}
-              </div>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Main Two-Column Connection + Whitelisting Studio */}
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
-        {/* Left Column: Tailored Channel Form + Webhook Credentials */}
-        <div className="min-w-0 space-y-6 xl:col-span-6">
-          <SectionCard
-            title={
-              selectedKind === "google_business" && activeGbpConn
-                ? "Connected Google Business Profile"
-                : `Connect ${activeBlueprint.title}`
-            }
-            subtitle={activeBlueprint.summary}
-          >
-            {!canManage ? (
-              <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 text-[13px] text-amber-950">
-                Your current team role has view-only access to Connected Channels. Ask a Business
-                Owner or Admin to link or rotate external provider tokens.
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {selectedKind === "google_business" && activeGbpConn && (() => {
-                  const gbpMeta = activeGbpConn.metadata;
-                  const resolvedBizName =
-                    gbpMeta.storeName ||
-                    workspaceBusiness?.name ||
-                    activeGbpConn.displayName;
-                  const resolvedCategory =
-                    gbpMeta.primaryCategory || workspaceBusiness?.industry || undefined;
-                  const resolvedAddress =
-                    gbpMeta.storeAddress || workspaceBusiness?.address || undefined;
-                  const resolvedPhone =
-                    gbpMeta.storePhone || workspaceBusiness?.phone || undefined;
-                  const resolvedWebsite =
-                    gbpMeta.websiteUri || workspaceBusiness?.website || undefined;
-                  const isSyncingGbp = pendingCardAction === `syncgbp:${activeGbpConn.id}`;
-                  const isSwitchingLoc = pendingCardAction === `locgbp:${activeGbpConn.id}`;
-                  const locations = gbpMeta.availableLocations ?? [];
-                  const discoveryStatus = gbpMeta.gbpDiscoveryStatus;
-                  const isVerifiedListing = discoveryStatus === "verified_locations";
-
-                  return (
-                    <div className="space-y-3.5 rounded-2xl border border-emerald-300/90 bg-gradient-to-br from-emerald-50/90 via-white to-emerald-50/40 p-4 text-[13px] shadow-2xs">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="flex min-w-0 items-start gap-3">
-                          <span className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white shadow-2xs ring-1 ring-emerald-200">
-                            <GoogleGLogo className="h-5 w-5" />
-                          </span>
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <h4 className="text-base font-bold text-slate-900">
-                                {resolvedBizName}
-                              </h4>
-                              <StatusPill
-                                label={
-                                  isVerifiedListing
-                                    ? "GBP Location Active"
-                                    : discoveryStatus === "quota_pending"
-                                      ? "OAuth Active • GBP Quota Pending"
-                                      : discoveryStatus === "api_disabled"
-                                        ? "OAuth Active • Enable GBP API"
-                                        : discoveryStatus === "no_locations_found"
-                                          ? "OAuth Active • 0 Listings Found"
-                                          : "Google Connected"
-                                }
-                                tone={isVerifiedListing ? "emerald" : "amber"}
-                              />
-                            </div>
-                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
-                              {gbpMeta.driveEmail && (
-                                <span>
-                                  Google Account:{" "}
-                                  <strong className="text-slate-900">{gbpMeta.driveEmail}</strong>
-                                  {gbpMeta.googleUserName ? ` (${gbpMeta.googleUserName})` : ""}
-                                </span>
-                              )}
-                              {typeof gbpMeta.averageRating === "number" && (
-                                <span className="font-semibold text-amber-700">
-                                  ★ {gbpMeta.averageRating.toFixed(1)} avg
-                                </span>
-                              )}
-                              {typeof gbpMeta.totalReviewsCount === "number" && (
-                                <span>
-                                  • <strong>{gbpMeta.totalReviewsCount}</strong> Google review
-                                  {gbpMeta.totalReviewsCount === 1 ? "" : "s"}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Rich Business Profile Details Grid */}
-                      <div className="grid grid-cols-1 gap-2.5 rounded-xl border border-zinc-200/80 bg-white/95 p-3.5 text-xs sm:grid-cols-2">
-                        <div>
-                          <div className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
-                            Business Name
-                          </div>
-                          <div className="mt-0.5 font-semibold text-slate-900">
-                            {resolvedBizName}
-                            {!gbpMeta.storeName && workspaceBusiness?.name && (
-                              <span className="ml-1.5 text-[11px] font-normal text-zinc-500">
-                                (Workspace Profile)
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
-                            Category / Industry
-                          </div>
-                          <div className="mt-0.5 font-medium text-slate-800">
-                            {resolvedCategory || "—"}
-                          </div>
-                        </div>
-
-                        <div className="sm:col-span-2">
-                          <div className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
-                            Storefront Address
-                          </div>
-                          <div className="mt-0.5 font-medium text-slate-800">
-                            {resolvedAddress || "Address will populate automatically from your verified Google Business location"}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
-                            Business Phone
-                          </div>
-                          <div className="mt-0.5 font-medium text-slate-800">
-                            {resolvedPhone || "—"}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
-                            Website
-                          </div>
-                          <div className="mt-0.5 truncate font-medium text-slate-800">
-                            {resolvedWebsite ? (
-                              <a
-                                href={
-                                  resolvedWebsite.startsWith("http")
-                                    ? resolvedWebsite
-                                    : `https://${resolvedWebsite}`
-                                }
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-emerald-700 hover:underline"
-                              >
-                                {resolvedWebsite} ↗
-                              </a>
-                            ) : (
-                              "—"
-                            )}
-                          </div>
-                        </div>
-
-                        {gbpMeta.locationId && (
-                          <div>
-                            <div className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
-                              GBP Location ID
-                            </div>
-                            <div className="mt-0.5 font-mono text-[11px] font-semibold text-slate-800">
-                              {gbpMeta.locationId}
-                            </div>
-                          </div>
-                        )}
-
-                        {gbpMeta.accountId && (
-                          <div>
-                            <div className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
-                              GBP Account
-                            </div>
-                            <div className="mt-0.5 font-mono text-[11px] font-semibold text-slate-800">
-                              {gbpMeta.accountName
-                                ? `${gbpMeta.accountName} (${gbpMeta.accountId})`
-                                : gbpMeta.accountId}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Multi-Location Switcher if 2+ store branches exist */}
-                      {locations.length > 1 && (
-                        <div className="rounded-xl border border-emerald-200/80 bg-white p-3">
-                          <label
-                            htmlFor="gbp-location-select"
-                            className="block text-xs font-semibold text-slate-900"
-                          >
-                            Active Storefront Location ({locations.length} branches discovered)
-                          </label>
-                          <div className="mt-1.5 flex items-center gap-2">
-                            <select
-                              id="gbp-location-select"
-                              disabled={isSwitchingLoc}
-                              value={gbpMeta.locationId || locations[0]?.locationId || ""}
-                              onChange={(e) =>
-                                handleSelectGbpLocation(activeGbpConn.id, e.target.value)
-                              }
-                              className="rsl-input bg-white text-xs"
-                            >
-                              {locations.map((loc) => (
-                                <option key={loc.locationId} value={loc.locationId}>
-                                  {loc.title}
-                                  {loc.storeAddress ? ` — ${loc.storeAddress}` : ""} ({loc.locationId})
-                                </option>
-                              ))}
-                            </select>
-                            {isSwitchingLoc && <IosSpinner size="xs" />}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Actionable Diagnostic Banner if Google Cloud GBP API / Quota / Listing needs attention */}
-                      {gbpMeta.gbpDiscoveryDetail && !isVerifiedListing && (
-                        <div className="rounded-xl border border-amber-200 bg-amber-50/90 p-3 text-xs leading-relaxed text-amber-950">
-                          <div className="font-bold text-amber-950">
-                            Google Business Profile Sync Status
-                          </div>
-                          <p className="mt-0.5">{gbpMeta.gbpDiscoveryDetail}</p>
-                        </div>
-                      )}
-
-                      {/* Direct Actions Row */}
-                      <div className="flex flex-wrap items-center gap-2 pt-0.5">
-                        <button
-                          type="button"
-                          disabled={Boolean(pendingCardAction)}
-                          onClick={() => handleSyncGoogleBusiness(activeGbpConn.id)}
-                          className="rsl-btn-primary inline-flex items-center gap-1.5 py-1.5 text-xs"
-                        >
-                          {isSyncingGbp && <IosSpinner size="xs" className="text-white" />}
-                          <span>
-                            {isSyncingGbp
-                              ? "Syncing Profile & Reviews..."
-                              : "Sync Business Profile & Reviews"}
-                          </span>
-                        </button>
-
-                        <Link href="/reviews" className="rsl-btn-secondary py-1.5 text-xs">
-                          Open Google Reviews →
-                        </Link>
-
-                        {gbpMeta.mapsUri && (
-                          <a
-                            href={gbpMeta.mapsUri}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="rsl-btn-secondary py-1.5 text-xs"
-                          >
-                            View on Google Maps ↗
-                          </a>
-                        )}
-
-                        {gbpMeta.newReviewUri && (
-                          <CopyTextButton
-                            text={gbpMeta.newReviewUri}
-                            label="Copy Customer Review Link"
-                            copiedLabel="Copied Review Link"
-                          />
-                        )}
-
-                        <ConnectToGoogleDriveButton
-                          purpose="google_business"
-                          returnTo="/connections?tab=google_business"
-                          label="Switch Google Account"
-                          variant="white"
-                          size="sm"
-                        />
-                      </div>
-
-                      {gbpMeta.lastReviewsSyncedAt && (
+            return (
+              <div
+                key={spec.kind}
+                className={`flex flex-col justify-between rounded-2xl border p-5 transition ${
+                  conn
+                    ? "border-emerald-200/80 bg-emerald-50/20"
+                    : "border-zinc-200/90 bg-white hover:border-zinc-300"
+                }`}
+              >
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-[#1877F2] ring-1 ring-blue-100">
+                        <FacebookLogo className="h-4 w-4" />
+                      </span>
+                      <div>
+                        <h3 className="text-[14px] font-bold text-slate-900">{spec.title}</h3>
                         <div className="text-[11px] text-zinc-500">
-                          Last synced from Google:{" "}
-                          {new Date(gbpMeta.lastReviewsSyncedAt).toLocaleString("en-IN")}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-
-                {selectedKind === "google_ads" && activeGoogleAdsConn && (() => {
-                  const gadsMeta = activeGoogleAdsConn.metadata;
-                  const customers = gadsMeta.availableAdCustomers ?? [];
-                  const isSwitchingCust = pendingCardAction === `custgads:${activeGoogleAdsConn.id}`;
-                  const isVerifiedAds = gadsMeta.adsDiscoveryStatus === "verified_customers";
-
-                  return (
-                    <div className="space-y-3.5 rounded-2xl border border-sky-300/90 bg-gradient-to-br from-sky-50/90 via-white to-sky-50/40 p-4 text-[13px] shadow-2xs">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="flex min-w-0 items-start gap-3">
-                          <span className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white shadow-2xs ring-1 ring-sky-200">
-                            <GoogleGLogo className="h-5 w-5" />
-                          </span>
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <h4 className="text-base font-bold text-slate-900">
-                                {activeGoogleAdsConn.displayName}
-                              </h4>
-                              <StatusPill
-                                label={
-                                  isVerifiedAds
-                                    ? "Google Ads Active"
-                                    : gadsMeta.adsDiscoveryStatus === "dev_token_missing"
-                                      ? "OAuth Active • Dev Token Pending"
-                                      : "Google Ads Connected"
-                                }
-                                tone={isVerifiedAds ? "emerald" : "amber"}
-                              />
-                            </div>
-                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
-                              {gadsMeta.formattedCustomerId && (
-                                <span>
-                                  Customer ID:{" "}
-                                  <strong className="font-mono text-slate-900">
-                                    {gadsMeta.formattedCustomerId}
-                                  </strong>
-                                </span>
-                              )}
-                              {gadsMeta.currencyCode && (
-                                <span>
-                                  • Currency: <strong>{gadsMeta.currencyCode}</strong>
-                                </span>
-                              )}
-                              {gadsMeta.driveEmail && (
-                                <span>
-                                  • Login: <strong>{gadsMeta.driveEmail}</strong>
-                                </span>
-                              )}
-                            </div>
-                          </div>
+                          {conn ? "1-Click Facebook OAuth" : "Not connected yet"}
                         </div>
                       </div>
-
-                      {customers.length > 1 && (
-                        <div className="rounded-xl border border-sky-200/80 bg-white p-3">
-                          <label
-                            htmlFor="gads-customer-select"
-                            className="block text-xs font-semibold text-slate-900"
-                          >
-                            Active Google Ads Customer ID ({customers.length} accounts discovered)
-                          </label>
-                          <div className="mt-1.5 flex items-center gap-2">
-                            <select
-                              id="gads-customer-select"
-                              disabled={isSwitchingCust}
-                              value={gadsMeta.customerId || customers[0]?.customerId || ""}
-                              onChange={(e) =>
-                                handleSelectGoogleAdsCustomer(activeGoogleAdsConn.id, e.target.value)
-                              }
-                              className="rsl-input bg-white text-xs"
-                            >
-                              {customers.map((cust) => (
-                                <option key={cust.customerId} value={cust.customerId}>
-                                  {cust.descriptiveName} ({cust.formattedCustomerId} •{" "}
-                                  {cust.currencyCode || "INR"})
-                                </option>
-                              ))}
-                            </select>
-                            {isSwitchingCust && <IosSpinner size="xs" />}
-                          </div>
-                        </div>
-                      )}
-
-                      {gadsMeta.adsDiscoveryDetail && (
-                        <div className="rounded-xl border border-zinc-200/80 bg-white/95 p-3 text-xs text-slate-700">
-                          {gadsMeta.adsDiscoveryDetail}
-                        </div>
-                      )}
-
-                      <div className="flex flex-wrap items-center gap-2 pt-0.5">
-                        <Link href="/campaigns" className="rsl-btn-primary py-1.5 text-xs">
-                          Open Ads Studio →
-                        </Link>
-                        <ConnectToGoogleDriveButton
-                          purpose="google_ads"
-                          returnTo="/connections?tab=google_ads"
-                          label="Switch Google Ads Login"
-                          variant="white"
-                          size="sm"
-                        />
-                      </div>
                     </div>
-                  );
-                })()}
-
-                {!selectedKind.startsWith("google") && (
-                  <div className="rounded-2xl border border-sky-200 bg-sky-50/75 p-4 text-[13px]">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-0.5 text-[11px] font-bold text-sky-900 ring-1 ring-sky-200">
-                        1-Click Facebook / Meta OAuth
-                      </span>
-                      {selectedKind === "meta_ads_pixel" && metaOAuth?.isManagedAdsReady && (
-                        <span className="text-[11px] font-semibold text-emerald-800">
-                          ✓ RSL Managed Vault Also Ready
-                        </span>
-                      )}
-                    </div>
-                    <h4 className="mt-2 text-sm font-bold text-slate-900">
-                      Connect {activeBlueprint.shortLabel} in 1 Click with Facebook Login
-                    </h4>
-                    <p className="mt-1 text-xs leading-relaxed text-slate-700">
-                      Sign in directly on Facebook to auto-discover your Pages, Instagram Business handle, Meta Ad Accounts (`act_...`), Pixels, and WABAs — or paste a Permanent System User Token below.
-                    </p>
-                    <div className="mt-3 flex flex-wrap items-center gap-3">
-                      {metaOAuth?.enableMetaOAuth ? (
-                        <a
-                          href={`/api/oauth/meta/start?purpose=${encodeURIComponent(selectedKind)}&returnTo=${encodeURIComponent(`/connections?tab=${selectedKind}`)}`}
-                          className="rsl-btn-primary inline-flex items-center gap-2 text-xs font-semibold"
-                        >
-                          <span>Connect with Facebook / Meta →</span>
-                        </a>
-                      ) : (
-                        <span className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white/90 px-3 py-1.5 text-xs font-semibold text-zinc-600">
-                          <span>1-Click Facebook Login pending Meta App ID setup — use System User Token below</span>
-                        </span>
-                      )}
-                      {selectedKind === "meta_ads_pixel" && (
-                        <Link
-                          href="/campaigns"
-                          className="text-xs font-semibold text-sky-800 hover:underline"
-                        >
-                          Or launch ads via RSL Managed Vault →
-                        </Link>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {selectedKind.startsWith("google") &&
-                  !(selectedKind === "google_business" && activeGbpConn) &&
-                  !(selectedKind === "google_ads" && activeGoogleAdsConn) && (
-                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50/75 p-4 text-[13px]">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200">
-                        Recommended • Official Google Consent Screen
-                      </span>
-                      <span className="text-[11px] font-semibold text-emerald-900">
-                        App: {googleOAuth?.consentAppName || "RapidShift Labs"}
-                      </span>
-                    </div>
-                    <h4 className="mt-2.5 text-sm font-bold text-slate-900">
-                      {selectedKind === "google_drive"
-                        ? "Connect Your Google Drive Automatically in 2 Clicks"
-                        : selectedKind === "google_ads"
-                          ? "Connect Your Google Ads Account in 1 Click"
-                          : selectedKind === "google_sheets"
-                            ? "Connect Google Sheets Live CA Workbook in 1 Click"
-                            : selectedKind === "google_search_console"
-                              ? "Connect Google Search Console (Organic SEO Keywords) in 1 Click"
-                              : "Connect Google Business Profile with Google Sign-In"}
-                    </h4>
-                    <p className="mt-1 text-xs leading-relaxed text-slate-700">
-                      {selectedKind === "google_drive"
-                        ? `No Google Cloud Console, no Service Account JSONs, and no manual Folder IDs needed. Sign in on Google's official screen — RapidShift Labs automatically creates '${googleOAuth?.defaultDriveFolderName || "RapidShift Labs Backups"}' in your Drive using the privacy-safe drive.file scope.`
-                        : selectedKind === "google_ads"
-                          ? "Sign in with your Google Ads login to auto-discover your 10-digit Customer ID (xxx-xxx-xxxx) and create Search, Performance Max, and Call/Lead ads directly from RSL Console."
-                          : selectedKind === "google_sheets"
-                            ? "Automatically creates a formatted 4-tab Google Sheet (Sales & GST, Overdue Receivables, Stock Inventory, and Ad Spend) in your Google Drive so your CA always sees live numbers."
-                            : selectedKind === "google_search_console"
-                              ? "Pull your website's real Google Search queries, impressions, clicks, and average position using read-only access ($0/month) to power smarter Search Ads."
-                              : "Sign in with the Google account that manages your verified Google Business Profile listing. Storefront locations, business details, and customer reviews sync automatically."}
-                    </p>
-
-                    <div className="mt-3.5 flex flex-wrap items-center gap-3">
-                      <ConnectToGoogleDriveButton
-                        purpose={
-                          selectedKind === "google_drive"
-                            ? "google_drive"
-                            : selectedKind === "google_ads"
-                              ? "google_ads"
-                              : selectedKind === "google_sheets"
-                                ? "google_sheets"
-                                : selectedKind === "google_search_console"
-                                  ? "google_search_console"
-                                  : "google_business"
-                        }
-                        returnTo={`/connections?tab=${selectedKind}`}
-                        label={
-                          selectedKind === "google_drive"
-                            ? "Connect to Google Drive"
-                            : selectedKind === "google_ads"
-                              ? "Connect Google Ads"
-                              : selectedKind === "google_sheets"
-                                ? "Connect Google Sheets"
-                                : selectedKind === "google_search_console"
-                                  ? "Connect Search Console"
-                                  : "Connect Google Business Profile"
-                        }
-                        configured={
-                          selectedKind === "google_drive"
-                            ? googleOAuth?.enableDriveOAuth ?? true
-                            : selectedKind === "google_ads"
-                              ? googleOAuth?.enableGoogleAdsOAuth ?? googleOAuth?.isReady ?? true
-                              : selectedKind === "google_sheets" ||
-                                  selectedKind === "google_search_console"
-                                ? googleOAuth?.isReady ?? true
-                                : googleOAuth?.enableGbpOAuth ?? true
-                        }
-                      />
-                      <span className="text-[11px] text-emerald-900/80">
-                        Auto-renews tokens • Zero JSON files required
-                      </span>
-                      {selectedKind === "google_ads" && googleAdsStatus?.isManagedAdsReady && (
-                        <Link
-                          href="/campaigns"
-                          className="text-xs font-semibold text-emerald-800 hover:underline"
-                        >
-                          Or run via RSL Managed Vault →
-                        </Link>
-                      )}
-                    </div>
-
-                    {((selectedKind === "google_drive" && !googleOAuth?.enableDriveOAuth) ||
-                      (selectedKind === "google_ads" && !googleOAuth?.enableGoogleAdsOAuth) ||
-                      (selectedKind === "google_business" && !googleOAuth?.enableGbpOAuth)) && (
-                      <p className="mt-2.5 text-[11px] font-medium text-amber-900">
-                        Google 1-click sign-in is being configured on this platform. Please try again shortly or use Manual Token Override below.
-                      </p>
+                    {pill ? (
+                      <StatusPill label={pill.label} tone={pill.tone} />
+                    ) : (
+                      <StatusPill label="Not Connected" tone="stone" />
                     )}
                   </div>
-                )}
 
-                <details
-                  open={!selectedKind.startsWith("google")}
-                  className={
-                    selectedKind.startsWith("google")
-                      ? "group rounded-xl border border-zinc-200/90 bg-zinc-50/50 p-3.5"
-                      : ""
-                  }
-                >
-                  {selectedKind.startsWith("google") && (
-                    <summary className="cursor-pointer list-none text-xs font-semibold text-slate-700 select-none">
-                      <span className="inline-flex items-center gap-1.5">
-                        <span>Advanced / Sandbox Testing Only: Paste Manual OAuth Token Override</span>
-                        <span className="text-[11px] font-normal text-zinc-500">(Click to expand)</span>
-                      </span>
-                    </summary>
-                  )}
+                  {!conn ? (
+                    <p className="text-xs leading-relaxed text-zinc-600">{spec.tagline}</p>
+                  ) : (
+                    <div className="space-y-2.5 rounded-xl border border-zinc-200/80 bg-white p-3.5 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-[11px] font-medium text-zinc-500">
+                            Connected Business Asset
+                          </div>
+                          <div className="mt-0.5 text-[13px] font-bold text-slate-900">
+                            {conn.displayName}
+                          </div>
+                        </div>
+                        {meta?.webhookAutoSubscribed && (
+                          <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 ring-1 ring-emerald-200">
+                            Live Webhooks Active
+                          </span>
+                        )}
+                      </div>
 
-              <form
-                key={selectedKind}
-                onSubmit={handleConnectSubmit}
-                className={`space-y-4 text-[13px] ${selectedKind.startsWith("google") ? "mt-3.5 border-t border-zinc-200/80 pt-3.5" : ""}`}
-              >
-                {selectedKind === "whatsapp_cloud" && (
-                  <>
-                    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                      <div className="min-w-0">
-                        <label className="rsl-label">Friendly Line Label *</label>
-                        <input
-                          name="displayName"
-                          required
-                          placeholder="e.g. Main Tally & Sales WhatsApp"
-                          className="rsl-input"
-                        />
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-zinc-600">
+                        {spec.kind === "whatsapp_cloud" && meta?.displayPhone && (
+                          <span>
+                            Number:{" "}
+                            <strong className="font-semibold text-slate-900">
+                              {meta.displayPhone}
+                            </strong>
+                          </span>
+                        )}
+                        {spec.kind === "instagram_business" && meta?.pageName && (
+                          <span>
+                            Linked Page:{" "}
+                            <strong className="font-semibold text-slate-900">
+                              {meta.pageName}
+                            </strong>
+                          </span>
+                        )}
+                        {spec.kind === "facebook_page" && meta?.primaryCategory && (
+                          <span>
+                            Category:{" "}
+                            <strong className="font-semibold text-slate-900">
+                              {meta.primaryCategory}
+                            </strong>
+                          </span>
+                        )}
+                        {spec.kind === "meta_ads_pixel" && (
+                          <>
+                            {meta?.currencyCode && (
+                              <span>
+                                Currency:{" "}
+                                <strong className="font-semibold text-slate-900">
+                                  {meta.currencyCode}
+                                </strong>
+                              </span>
+                            )}
+                            <span>
+                              Pixel:{" "}
+                              <strong className="font-mono text-slate-900">
+                                {meta?.pixelId || "None selected"}
+                              </strong>
+                            </span>
+                          </>
+                        )}
                       </div>
-                      <div className="min-w-0">
-                        <label className="rsl-label">Registered WhatsApp Number</label>
-                        <input
-                          name="displayPhone"
-                          placeholder="e.g. +91 98200 11223"
-                          className="rsl-input"
-                        />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                      <div className="min-w-0">
-                        <label className="rsl-label">Phone Number ID * (Meta API ID)</label>
-                        <input
-                          name="phoneNumberId"
-                          required
-                          placeholder="e.g. 109283746501928"
-                          className="rsl-input font-mono"
-                        />
-                        <p className="mt-1 text-[11px] text-zinc-500">
-                          15-digit ID from Meta App → WhatsApp → API Setup (not your +91 mobile).
-                        </p>
-                      </div>
-                      <div className="min-w-0">
-                        <label className="rsl-label">WhatsApp Business Account (WABA) ID *</label>
-                        <input
-                          name="wabaId"
-                          required
-                          placeholder="e.g. 108293847561029"
-                          className="rsl-input font-mono"
-                        />
-                        <p className="mt-1 text-[11px] text-zinc-500">
-                          Used to sync WhatsApp templates &amp; route incoming webhooks.
-                        </p>
-                      </div>
-                    </div>
-                    <div className="min-w-0">
-                      <label className="rsl-label">Meta App ID (Optional)</label>
-                      <input
-                        name="metaAppId"
-                        placeholder="e.g. 827364519283746"
-                        className="rsl-input font-mono"
-                      />
-                    </div>
-                  </>
-                )}
 
-                {selectedKind === "instagram_business" && (
-                  <>
-                    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                      <div className="min-w-0">
-                        <label className="rsl-label">Account Label *</label>
-                        <input
-                          name="displayName"
-                          required
-                          placeholder="e.g. Official Instagram Business"
-                          className="rsl-input"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <label className="rsl-label">Instagram @Handle *</label>
-                        <input
-                          name="igHandle"
-                          required
-                          placeholder="e.g. @rapidshiftlabs"
-                          className="rsl-input"
-                        />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                      <div className="min-w-0">
-                        <label className="rsl-label">Instagram Business User ID * (17-digit)</label>
-                        <input
-                          name="igUserId"
-                          required
-                          placeholder="e.g. 17841405822304914"
-                          className="rsl-input font-mono"
-                        />
-                        <p className="mt-1 text-[11px] text-zinc-500">
-                          Numeric IG Graph ID from `instagram_business_account.id`.
-                        </p>
-                      </div>
-                      <div className="min-w-0">
-                        <label className="rsl-label">Linked Facebook Page ID *</label>
-                        <input
-                          name="linkedPageId"
-                          required
-                          placeholder="e.g. 104928374619203"
-                          className="rsl-input font-mono"
-                        />
-                        <p className="mt-1 text-[11px] text-zinc-500">
-                          Facebook Page connected to this Instagram Business profile.
-                        </p>
-                      </div>
-                    </div>
-                  </>
-                )}
+                      {/* 1-Click Post-Login Asset Selectors (when 2+ assets discovered) */}
+                      {canManage && spec.kind === "whatsapp_cloud" && wabaPhones.length > 1 && (
+                        <div className="pt-1">
+                          <label className="mb-1 block text-[11px] font-semibold text-slate-700">
+                            Switch WhatsApp Business Number ({wabaPhones.length} found)
+                          </label>
+                          <select
+                            disabled={Boolean(isSwitching)}
+                            value={meta?.phoneNumberId || conn.externalAccountId}
+                            onChange={(e) => handleSwitchMetaAsset(conn.id, e.target.value)}
+                            className="rsl-input py-1.5 text-xs"
+                          >
+                            {wabaPhones.map((ph) => (
+                              <option key={ph.phoneNumberId} value={ph.phoneNumberId}>
+                                {ph.verifiedName} ({ph.displayPhone})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
 
-                {selectedKind === "facebook_page" && (
-                  <>
-                    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                      <div className="min-w-0">
-                        <label className="rsl-label">Connection Label *</label>
-                        <input
-                          name="displayName"
-                          required
-                          placeholder="e.g. RSL Facebook Page & Messenger"
-                          className="rsl-input"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <label className="rsl-label">Facebook Page Name</label>
-                        <input
-                          name="pageName"
-                          placeholder="e.g. RSL Marketing India"
-                          className="rsl-input"
-                        />
-                      </div>
-                    </div>
-                    <div className="min-w-0">
-                      <label className="rsl-label">Facebook Page ID * (Numeric)</label>
-                      <input
-                        name="pageId"
-                        required
-                        placeholder="e.g. 104928374619203"
-                        className="rsl-input font-mono"
-                      />
-                      <p className="mt-1 text-[11px] text-zinc-500">
-                        Found on your Facebook Page → About → Page Transparency.
-                      </p>
-                    </div>
-                  </>
-                )}
+                      {canManage && spec.kind === "instagram_business" && igAccounts.length > 1 && (
+                        <div className="pt-1">
+                          <label className="mb-1 block text-[11px] font-semibold text-slate-700">
+                            Switch Instagram Business Account ({igAccounts.length} found)
+                          </label>
+                          <select
+                            disabled={Boolean(isSwitching)}
+                            value={meta?.igUserId || conn.externalAccountId}
+                            onChange={(e) => handleSwitchMetaAsset(conn.id, e.target.value)}
+                            className="rsl-input py-1.5 text-xs"
+                          >
+                            {igAccounts.map((ig) => (
+                              <option key={ig.igUserId} value={ig.igUserId}>
+                                {ig.igUsername ? `@${ig.igUsername}` : ig.name || ig.igUserId}
+                                {ig.linkedPageName ? ` — ${ig.linkedPageName}` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
 
-                {selectedKind === "meta_ads_pixel" && (
-                  <>
-                    <div className="min-w-0">
-                      <label className="rsl-label">Ad Account Label *</label>
-                      <input
-                        name="displayName"
-                        required
-                        placeholder="e.g. Growth Meta Ad Account & Website CAPI"
-                        className="rsl-input"
-                      />
-                    </div>
-                    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                      <div className="min-w-0">
-                        <label className="rsl-label">Meta Ad Account ID * (act_...)</label>
-                        <input
-                          name="adAccountId"
-                          required
-                          placeholder="e.g. act_293847561029384"
-                          className="rsl-input font-mono"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <label className="rsl-label">Dataset / Conversions Pixel ID</label>
-                        <input
-                          name="pixelId"
-                          placeholder="e.g. 918273645019283"
-                          className="rsl-input font-mono"
-                        />
-                      </div>
-                    </div>
-                  </>
-                )}
+                      {canManage && spec.kind === "facebook_page" && pages.length > 1 && (
+                        <div className="pt-1">
+                          <label className="mb-1 block text-[11px] font-semibold text-slate-700">
+                            Switch Active Facebook Page ({pages.length} found)
+                          </label>
+                          <select
+                            disabled={Boolean(isSwitching)}
+                            value={meta?.pageId || conn.externalAccountId}
+                            onChange={(e) => handleSwitchMetaAsset(conn.id, e.target.value)}
+                            className="rsl-input py-1.5 text-xs"
+                          >
+                            {pages.map((p) => (
+                              <option key={p.pageId} value={p.pageId}>
+                                {p.pageName}
+                                {p.category ? ` (${p.category})` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
 
-                {selectedKind === "google_ads" && (
-                  <>
-                    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                      <div className="min-w-0">
-                        <label className="rsl-label">Google Ads Account Label *</label>
-                        <input
-                          name="displayName"
-                          required
-                          placeholder="e.g. Radiant Industrial Google Ads"
-                          className="rsl-input"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <label className="rsl-label">10-Digit Customer ID * (xxx-xxx-xxxx)</label>
-                        <input
-                          name="customerId"
-                          required
-                          placeholder="e.g. 123-456-7890"
-                          className="rsl-input font-mono"
-                        />
-                      </div>
-                    </div>
-                    <div className="min-w-0">
-                      <label className="rsl-label">MCC Login Customer ID (Optional — if managed under MCC)</label>
-                      <input
-                        name="loginCustomerId"
-                        placeholder="e.g. 998-877-6655"
-                        className="rsl-input font-mono"
-                      />
-                    </div>
-                  </>
-                )}
+                      {canManage && spec.kind === "meta_ads_pixel" && adAccounts.length > 1 && (
+                        <div className="pt-1">
+                          <label className="mb-1 block text-[11px] font-semibold text-slate-700">
+                            Switch Active Ad Account ({adAccounts.length} found)
+                          </label>
+                          <select
+                            disabled={Boolean(isSwitching)}
+                            value={meta?.adAccountId || conn.externalAccountId}
+                            onChange={(e) => handleSwitchMetaAsset(conn.id, e.target.value)}
+                            className="rsl-input py-1.5 text-xs"
+                          >
+                            {adAccounts.map((a) => (
+                              <option key={a.adAccountId} value={a.adAccountId}>
+                                {a.name} ({a.adAccountId} • {a.currency || "INR"})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
 
-                {selectedKind === "google_business" && (
-                  <>
-                    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                      <div className="min-w-0">
-                        <label className="rsl-label">Storefront Connection Label *</label>
-                        <input
-                          name="displayName"
-                          required
-                          placeholder="e.g. Mumbai Head Office Listing"
-                          className="rsl-input"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <label className="rsl-label">Store Display Name</label>
-                        <input
-                          name="storeName"
-                          placeholder="e.g. RSL Marketing — Nariman Point"
-                          className="rsl-input"
-                        />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                      <div className="min-w-0">
-                        <label className="rsl-label">GBP Location ID *</label>
-                        <input
-                          name="locationId"
-                          required
-                          placeholder="e.g. locations/1492837465019283746"
-                          className="rsl-input font-mono"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <label className="rsl-label">GBP Account ID (Optional)</label>
-                        <input
-                          name="accountId"
-                          placeholder="e.g. accounts/1092837465019"
-                          className="rsl-input font-mono"
-                        />
-                      </div>
-                    </div>
-                  </>
-                )}
+                      {canManage && spec.kind === "meta_ads_pixel" && availablePixels.length > 1 && (
+                        <div className="pt-1">
+                          <label className="mb-1 block text-[11px] font-semibold text-slate-700">
+                            Switch Active Conversions Pixel ({availablePixels.length} found)
+                          </label>
+                          <select
+                            disabled={Boolean(isSwitching)}
+                            value={meta?.pixelId || ""}
+                            onChange={(e) =>
+                              handleSwitchMetaAsset(
+                                conn.id,
+                                meta?.adAccountId || conn.externalAccountId,
+                                e.target.value
+                              )
+                            }
+                            className="rsl-input py-1.5 text-xs"
+                          >
+                            {availablePixels.map((px) => (
+                              <option key={px.pixelId} value={px.pixelId}>
+                                {px.name} ({px.pixelId})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
 
-                {selectedKind === "google_drive" && (
-                  <>
-                    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                      <div className="min-w-0">
-                        <label className="rsl-label">Backup Vault Label *</label>
-                        <input
-                          name="displayName"
-                          required
-                          placeholder="e.g. Company Drive Encrypted Backups"
-                          className="rsl-input"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <label className="rsl-label">Google Account Email</label>
-                        <input
-                          name="driveEmail"
-                          type="email"
-                          placeholder="e.g. backups@yourcompany.in"
-                          className="rsl-input"
-                        />
-                      </div>
-                    </div>
-                    <div className="min-w-0">
-                      <label className="rsl-label">Google Drive Folder ID *</label>
-                      <input
-                        name="folderId"
-                        required
-                        placeholder="e.g. 1A2b3C4d5E6f7G8h9I0jKlMnOpQr"
-                        className="rsl-input font-mono"
-                      />
-                    </div>
-                  </>
-                )}
-
-                {selectedKind === "google_sheets" && (
-                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                    <div className="min-w-0">
-                      <label className="rsl-label">CA Workbook Label *</label>
-                      <input
-                        name="displayName"
-                        required
-                        placeholder="e.g. CA Live Tally & GST Workbook"
-                        className="rsl-input"
-                      />
-                    </div>
-                    <div className="min-w-0">
-                      <label className="rsl-label">Existing Spreadsheet ID (Optional)</label>
-                      <input
-                        name="spreadsheetId"
-                        placeholder="Auto-created if left blank"
-                        className="rsl-input font-mono"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {selectedKind === "google_search_console" && (
-                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                    <div className="min-w-0">
-                      <label className="rsl-label">Search Console Property Label *</label>
-                      <input
-                        name="displayName"
-                        required
-                        placeholder="e.g. Official Website SEO Console"
-                        className="rsl-input"
-                      />
-                    </div>
-                    <div className="min-w-0">
-                      <label className="rsl-label">Verified Site URL / sc-domain *</label>
-                      <input
-                        name="siteUrl"
-                        required
-                        placeholder="e.g. sc-domain:yourcompany.in or https://yourcompany.in/"
-                        className="rsl-input font-mono"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Access Token + Sandbox Helper */}
-                <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/70 p-3.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <label className="text-xs font-semibold text-slate-900">
-                      {selectedKind.startsWith("google")
-                        ? "Google OAuth 2.0 Access Token *"
-                        : "Permanent System User / Page Access Token *"}
-                    </label>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleFillSandboxToken}
-                        className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-zinc-100"
-                      >
-                        Fill Sandbox Token
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setShowAccessToken((v) => !v)}
-                        className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-zinc-100"
-                      >
-                        {showAccessToken ? "Hide" : "Show"}
-                      </button>
-                    </div>
-                  </div>
-                  <input
-                    name="accessToken"
-                    type={showAccessToken ? "text" : "password"}
-                    required
-                    value={accessTokenInput}
-                    onChange={(e) => setAccessTokenInput(e.target.value)}
-                    placeholder={
-                      selectedKind.startsWith("google")
-                        ? "ya29.a0AfB_byC..."
-                        : "EAAGm0PX4ZCpsBA..."
-                    }
-                    className="rsl-input mt-2 bg-white font-mono text-xs"
-                  />
-
-                  {selectedKind.startsWith("google") && (
-                    <div className="mt-3">
-                      <label className="rsl-label">OAuth Refresh Token (Optional — Auto-Renew)</label>
-                      <input
-                        name="refreshToken"
-                        type="password"
-                        placeholder="1//0g..."
-                        className="rsl-input bg-white font-mono text-xs"
-                      />
-                    </div>
-                  )}
-
-                  <label className="mt-3 flex items-center gap-2 text-xs text-zinc-600">
-                    <input
-                      type="checkbox"
-                      checked={testLiveAfterSave}
-                      onChange={(e) => setTestLiveAfterSave(e.target.checked)}
-                      className="h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
-                    />
-                    <span>
-                      Verify token live against{" "}
-                      {selectedKind.startsWith("google")
-                        ? "Google OAuth2 API"
-                        : "Meta Graph API v21.0"}{" "}
-                      immediately after saving
-                    </span>
-                  </label>
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                  <button
-                    type="submit"
-                    disabled={isConnecting}
-                    className="rsl-btn-primary inline-flex items-center gap-2"
-                  >
-                    {isConnecting && <IosSpinner size="xs" className="text-white" />}
-                    <span>
-                      {isConnecting
-                        ? "Encrypting & Verifying..."
-                        : `Connect ${activeBlueprint.shortLabel}`}
-                    </span>
-                  </button>
-                  <Link
-                    href="/settings/tokens"
-                    className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 hover:underline"
-                  >
-                    Manage All API Tokens in One Page →
-                  </Link>
-                </div>
-              </form>
-                </details>
-              </div>
-            )}
-          </SectionCard>
-
-          {/* Inbound Webhook Callback URL + Verify Token Card */}
-          {activeBlueprint.webhookMode !== "none" && (
-            <SectionCard
-              title="Inbound Webhook Callback URL & Verify Token"
-              subtitle={`Paste these exact values inside Meta App Dashboard → ${
-                activeBlueprint.webhookMode === "whatsapp" ? "WhatsApp → Configuration" : "Webhooks"
-              }`}
-            >
-              <div className="space-y-3.5 text-[13px]">
-                <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/75 p-3.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-xs font-semibold text-slate-900">
-                      1. HTTPS Callback URL ({activeBlueprint.shortLabel})
-                    </span>
-                    <CopyTextButton
-                      text={activeCallbackUrl}
-                      label="Copy Callback URL"
-                      copiedLabel="Copied URL"
-                    />
-                  </div>
-                  <div className="mt-1.5 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-xs font-semibold text-emerald-800">
-                    {activeCallbackUrl}
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/75 p-3.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-xs font-semibold text-slate-900">
-                      2. Meta Webhook Verify Token
-                    </span>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <CopyTextButton
-                        text={verifyToken}
-                        label="Copy Verify Token"
-                        copiedLabel="Copied Token"
-                      />
-                      {canManage && (
-                        <button
-                          type="button"
-                          disabled={isRotatingVerify}
-                          onClick={handleRotateVerifyToken}
-                          className="rsl-btn-secondary inline-flex items-center gap-1.5 py-1 text-xs"
-                        >
-                          {isRotatingVerify && <IosSpinner size="xs" />}
-                          <span>Rotate Token</span>
-                        </button>
+                      {conn.status === "needs_reauth" && meta?.lastLiveCheckMessage && (
+                        <div className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] text-rose-800">
+                          {meta.lastLiveCheckMessage}
+                        </div>
                       )}
                     </div>
-                  </div>
-                  <div className="mt-1.5 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-xs font-semibold text-slate-900">
-                    {verifyToken}
-                  </div>
+                  )}
                 </div>
 
-                <div>
-                  <div className="text-xs font-semibold text-slate-800">
-                    3. Required Webhook Subscription Fields:
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {activeBlueprint.webhookFields.map((field) => (
-                      <span
-                        key={field}
-                        className="rounded-lg border border-emerald-200 bg-emerald-50/80 px-2.5 py-1 font-mono text-[11px] font-semibold text-emerald-900"
-                      >
-                        {field}
+                {/* Card Footer Actions */}
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-200/60 pt-3.5">
+                  {!conn ? (
+                    canManage ? (
+                      <ConnectWithFacebookButton
+                        purpose={spec.kind}
+                        label={spec.connectLabel}
+                        configured={metaConfigured}
+                        size="sm"
+                      />
+                    ) : (
+                      <span className="text-xs text-zinc-500">
+                        Ask your Business Owner to connect this channel.
                       </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </SectionCard>
-          )}
-        </div>
-
-        {/* Right Column: Step-by-Step Provider Whitelisting & Go-Live Checklist */}
-        <div className="min-w-0 xl:col-span-6">
-          <SectionCard
-            title={`${activeBlueprint.shortLabel} — Whitelisting & Go-Live Steps`}
-            subtitle="Complete every step below so Meta / Google does not block webhook delivery, DM access, or permanent tokens"
-          >
-            <div className="space-y-3 text-[13px]">
-              {/* Copyable Required Scopes Pill Strip */}
-              <div className="rounded-xl border border-emerald-200/90 bg-emerald-50/65 p-3.5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs font-bold tracking-wide text-emerald-950 uppercase">
-                    Required Token Permission Scopes
-                  </span>
-                  <CopyTextButton
-                    text={activeBlueprint.requiredScopes.join(", ")}
-                    label="Copy Scopes"
-                    copiedLabel="Copied Scopes"
-                  />
-                </div>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {activeBlueprint.requiredScopes.map((sc) => (
-                    <span
-                      key={sc}
-                      className="break-all rounded-md border border-emerald-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-800"
-                    >
-                      {sc}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              {/* Numbered Checklist Cards */}
-              <div className="space-y-2.5">
-                {activeBlueprint.steps.map((step) => (
-                  <div
-                    key={step.title}
-                    className="rounded-xl border border-zinc-200/90 bg-zinc-50/60 p-3.5"
-                  >
-                    <div className="font-semibold text-slate-900">{step.title}</div>
-                    <p className="mt-1 text-xs leading-relaxed text-zinc-600">{step.detail}</p>
-                    {step.codeHint && (
-                      <div className="mt-2 break-all rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 font-mono text-[11px] text-slate-800">
-                        {step.codeHint}
+                    )
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Link
+                          href={spec.proceedHref}
+                          className="rsl-btn-primary py-1.5 text-xs"
+                        >
+                          {spec.proceedLabel}
+                        </Link>
+                        {spec.secondaryHref && spec.secondaryLabel && (
+                          <Link
+                            href={spec.secondaryHref}
+                            className="rsl-btn-secondary py-1.5 text-xs"
+                          >
+                            {spec.secondaryLabel}
+                          </Link>
+                        )}
                       </div>
+
+                      {canManage && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            disabled={Boolean(pendingKey)}
+                            onClick={() => handleRefreshMetaAssets(conn.id)}
+                            className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-zinc-50"
+                            title="Re-fetch Pages, Ad Accounts, and WhatsApp numbers from Facebook"
+                          >
+                            {isRefreshing ? "Syncing..." : "Sync Assets"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={Boolean(pendingKey)}
+                            onClick={() => handleVerify(conn)}
+                            className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-zinc-50"
+                          >
+                            {isVerifying ? "Checking..." : "Check"}
+                          </button>
+                          <ConnectWithFacebookButton
+                            purpose={spec.kind}
+                            label="Reconnect"
+                            configured={metaConfigured}
+                            variant="outline"
+                            size="sm"
+                          />
+                          <button
+                            type="button"
+                            disabled={Boolean(pendingKey)}
+                            onClick={() => handleDisconnect(conn)}
+                            className="rounded-lg border border-rose-200 bg-rose-50/70 px-2.5 py-1 text-[11px] font-semibold text-rose-700 transition hover:bg-rose-100"
+                          >
+                            {isDisconnecting ? "..." : "Disconnect"}
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </SectionCard>
+
+      {/* SECTION 2: GOOGLE BUSINESS & WORKSPACE SUITE */}
+      <SectionCard
+        title="Google Business & Workspace Suite"
+        subtitle="Sign in with your Google account in one click to sync Google Maps reviews, launch Google Ads, automate Drive backups, and share live Tally sheets with your CA."
+        action={
+          canManage ? (
+            <ConnectToGoogleDriveButton
+              purpose="google_all"
+              returnTo="/connections"
+              label={
+                googleConnectedCount === GOOGLE_CHANNELS.length
+                  ? "Reconnect All with Google"
+                  : "Connect All with Google"
+              }
+              size="sm"
+              configured={googleAllConfigured}
+            />
+          ) : undefined
+        }
+      >
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {GOOGLE_CHANNELS.map((spec) => {
+            const conn = byKind.get(spec.kind);
+            const meta = conn?.metadata;
+            const pill = conn ? getStatusPillProps(conn.status) : null;
+            const isConfigured = isGooglePurposeConfigured(spec.kind);
+            const isVerifying = conn && pendingKey === `verify:${conn.id}`;
+            const isDisconnecting = conn && pendingKey === `disc:${conn.id}`;
+            const isSyncingGbp = conn && pendingKey === `sync-gbp:${conn.id}`;
+            const isSwitchingGbp = conn && pendingKey === `switch-gbp:${conn.id}`;
+            const isSwitchingGads = conn && pendingKey === `switch-gads:${conn.id}`;
+            const isSwitchingGsc = conn && pendingKey === `switch-gsc:${conn.id}`;
+
+            const locations = meta?.availableLocations ?? [];
+            const adCustomers = meta?.availableAdCustomers ?? [];
+            const gscSites = meta?.availableSearchConsoleSites ?? [];
+
+            return (
+              <div
+                key={spec.kind}
+                className={`flex flex-col justify-between rounded-2xl border p-5 transition ${
+                  conn
+                    ? "border-emerald-200/80 bg-emerald-50/20"
+                    : "border-zinc-200/90 bg-white hover:border-zinc-300"
+                }`}
+              >
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-zinc-200/90 bg-white shadow-2xs">
+                        <GoogleGLogo className="h-4 w-4" />
+                      </span>
+                      <div>
+                        <h3 className="text-[14px] font-bold text-slate-900">{spec.title}</h3>
+                        <div className="text-[11px] text-zinc-500">
+                          {conn
+                            ? meta?.driveEmail || "1-Click Google Sign-In"
+                            : "Not connected yet"}
+                        </div>
+                      </div>
+                    </div>
+                    {pill ? (
+                      <StatusPill label={pill.label} tone={pill.tone} />
+                    ) : (
+                      <StatusPill label="Not Connected" tone="stone" />
+                    )}
+                  </div>
+
+                  {!conn ? (
+                    <p className="text-xs leading-relaxed text-zinc-600">{spec.tagline}</p>
+                  ) : (
+                    <div className="space-y-2.5 rounded-xl border border-zinc-200/80 bg-white p-3.5 text-xs">
+                      <div>
+                        <div className="text-[11px] font-medium text-zinc-500">
+                          Connected Account
+                        </div>
+                        <div className="mt-0.5 text-[13px] font-bold text-slate-900 break-words">
+                          {spec.kind === "google_business"
+                            ? meta?.storeName || conn.displayName
+                            : spec.kind === "google_drive"
+                              ? `Folder: ${meta?.folderName || "RapidShift Labs Backups"}`
+                              : spec.kind === "google_search_console"
+                                ? meta?.searchConsoleSiteUrl || conn.displayName
+                                : conn.displayName}
+                        </div>
+                      </div>
+
+                      {spec.kind === "google_business" && (
+                        <div className="space-y-1 text-[11.5px] text-zinc-600">
+                          {meta?.storeAddress && <div>{meta.storeAddress}</div>}
+                          {typeof meta?.totalReviewsCount === "number" && (
+                            <div>
+                              Rating:{" "}
+                              <strong className="text-slate-900">
+                                {Number(meta.averageRating || 0).toFixed(1)} ★
+                              </strong>{" "}
+                              ({meta.totalReviewsCount} review
+                              {meta.totalReviewsCount === 1 ? "" : "s"})
+                            </div>
+                          )}
+                          {meta?.gbpDiscoveryStatus &&
+                            meta.gbpDiscoveryStatus !== "verified_locations" &&
+                            meta.gbpDiscoveryDetail && (
+                              <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-2.5 py-1.5 text-[11px] text-amber-900">
+                                {meta.gbpDiscoveryDetail}
+                              </div>
+                            )}
+                        </div>
+                      )}
+
+                      {spec.kind === "google_ads" && meta?.formattedCustomerId && (
+                        <div className="text-[11.5px] text-zinc-600">
+                          Customer ID:{" "}
+                          <strong className="font-mono text-slate-900">
+                            {meta.formattedCustomerId}
+                          </strong>
+                          {meta.currencyCode ? ` • ${meta.currencyCode}` : ""}
+                        </div>
+                      )}
+
+                      {spec.kind === "google_drive" && meta?.folderWebViewLink && (
+                        <div>
+                          <a
+                            href={meta.folderWebViewLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-emerald-800 hover:underline"
+                          >
+                            Open Backup Folder in Google Drive ↗
+                          </a>
+                        </div>
+                      )}
+
+                      {spec.kind === "google_sheets" && meta?.caSpreadsheetUrl && (
+                        <div>
+                          <a
+                            href={meta.caSpreadsheetUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-emerald-800 hover:underline"
+                          >
+                            Open Live CA Google Sheet ↗
+                          </a>
+                        </div>
+                      )}
+
+                      {/* 1-Click Multi-Branch / Multi-Account Selectors */}
+                      {canManage && spec.kind === "google_business" && locations.length > 1 && (
+                        <div className="pt-1">
+                          <label className="mb-1 block text-[11px] font-semibold text-slate-700">
+                            Switch Storefront Location ({locations.length} branches)
+                          </label>
+                          <select
+                            disabled={Boolean(isSwitchingGbp)}
+                            value={meta?.locationId || ""}
+                            onChange={(e) => handleSwitchGbpLocation(conn.id, e.target.value)}
+                            className="rsl-input py-1.5 text-xs"
+                          >
+                            {locations.map((loc) => (
+                              <option key={loc.locationId} value={loc.locationId}>
+                                {loc.title}
+                                {loc.storeAddress ? ` — ${loc.storeAddress}` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {canManage && spec.kind === "google_ads" && adCustomers.length > 1 && (
+                        <div className="pt-1">
+                          <label className="mb-1 block text-[11px] font-semibold text-slate-700">
+                            Switch Google Ads Account ({adCustomers.length} found)
+                          </label>
+                          <select
+                            disabled={Boolean(isSwitchingGads)}
+                            value={meta?.customerId || ""}
+                            onChange={(e) =>
+                              handleSwitchGoogleAdsCustomer(conn.id, e.target.value)
+                            }
+                            className="rsl-input py-1.5 text-xs"
+                          >
+                            {adCustomers.map((c) => (
+                              <option key={c.customerId} value={c.customerId}>
+                                {c.descriptiveName} ({c.formattedCustomerId})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {canManage && spec.kind === "google_search_console" && gscSites.length > 1 && (
+                        <div className="pt-1">
+                          <label className="mb-1 block text-[11px] font-semibold text-slate-700">
+                            Switch Verified Website ({gscSites.length} found)
+                          </label>
+                          <select
+                            disabled={Boolean(isSwitchingGsc)}
+                            value={meta?.searchConsoleSiteUrl || ""}
+                            onChange={(e) => handleSwitchGscSite(conn.id, e.target.value)}
+                            className="rsl-input py-1.5 text-xs"
+                          >
+                            {gscSites.map((site) => (
+                              <option key={site} value={site}>
+                                {site}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Card Footer Actions */}
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-200/60 pt-3.5">
+                  {!conn ? (
+                    canManage ? (
+                      <ConnectToGoogleDriveButton
+                        purpose={spec.kind}
+                        returnTo="/connections"
+                        label={spec.connectLabel}
+                        variant="white"
+                        size="sm"
+                        configured={isConfigured}
+                      />
+                    ) : (
+                      <span className="text-xs text-zinc-500">
+                        Ask your Business Owner to connect this account.
+                      </span>
+                    )
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Link
+                          href={spec.proceedHref}
+                          className="rsl-btn-primary py-1.5 text-xs"
+                        >
+                          {spec.proceedLabel}
+                        </Link>
+                        {canManage && spec.kind === "google_business" && (
+                          <button
+                            type="button"
+                            disabled={Boolean(pendingKey)}
+                            onClick={() => handleSyncGbpReviews(conn.id)}
+                            className="rsl-btn-secondary py-1.5 text-xs"
+                          >
+                            {isSyncingGbp ? "Syncing..." : "Sync Profile"}
+                          </button>
+                        )}
+                      </div>
+
+                      {canManage && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            disabled={Boolean(pendingKey)}
+                            onClick={() => handleVerify(conn)}
+                            className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-zinc-50"
+                          >
+                            {isVerifying ? "Checking..." : "Check"}
+                          </button>
+                          <ConnectToGoogleDriveButton
+                            purpose={spec.kind}
+                            returnTo="/connections"
+                            label="Switch"
+                            variant="white"
+                            size="sm"
+                            configured={isConfigured}
+                          />
+                          <button
+                            type="button"
+                            disabled={Boolean(pendingKey)}
+                            onClick={() => handleDisconnect(conn)}
+                            className="rounded-lg border border-rose-200 bg-rose-50/70 px-2.5 py-1 text-[11px] font-semibold text-rose-700 transition hover:bg-rose-100"
+                          >
+                            {isDisconnecting ? "..." : "Disconnect"}
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </SectionCard>
+
+      {/* SECTION 3: TALLY PRIME DESKTOP SYNC */}
+      <SectionCard
+        title="Tally Prime Desktop Sync"
+        subtitle="Connect your office Windows PC running Tally Prime to sync GST bills, receipts, stock items, and party ledgers automatically."
+        action={
+          <StatusPill
+            label={
+              onlineTallyDevices.length > 0
+                ? `${onlineTallyDevices.length} PC Online`
+                : tallyDevices.length > 0
+                  ? `${tallyDevices.length} PC Paired`
+                  : "Ready to Pair"
+            }
+            tone={
+              onlineTallyDevices.length > 0
+                ? "emerald"
+                : tallyDevices.length > 0
+                  ? "amber"
+                  : "stone"
+            }
+          />
+        }
+      >
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+          <div className="space-y-1 text-xs text-zinc-600">
+            {tallyDevices.length === 0 ? (
+              <p>
+                Pair your office PC with a one-click 6-digit pairing code or load the Tally Prime{" "}
+                <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[11px]">.tdl</code>{" "}
+                add-on from Tally Prime &amp; Bills.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                {tallyDevices.map((d) => (
+                  <div key={d.id} className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="font-semibold text-slate-900">{d.deviceName}</span>
+                    <span className="text-zinc-400">•</span>
+                    <span>{d.activeCompanyName || "Awaiting open Tally company"}</span>
+                    {d.lastHeartbeatAt && (
+                      <>
+                        <span className="text-zinc-400">•</span>
+                        <span className="text-zinc-500">
+                          Synced {new Date(d.lastHeartbeatAt).toLocaleString("en-IN")}
+                        </span>
+                      </>
                     )}
                   </div>
                 ))}
               </div>
-            </div>
-          </SectionCard>
+            )}
+          </div>
+          {canAccessTally && (
+            <Link href="/tally?tab=connect" className="rsl-btn-secondary shrink-0 text-xs">
+              {tallyDevices.length > 0 ? "Manage Tally Sync →" : "Connect Tally Prime →"}
+            </Link>
+          )}
         </div>
-      </div>
+      </SectionCard>
 
-      {/* Connected Channels Management List */}
-      <SectionCard
-        title={`Active Connected Channels (${connections.length})`}
-        subtitle="Test live Graph/OAuth connectivity, rotate tokens in place without losing webhook routing, or disconnect anytime"
-      >
-        {connections.length === 0 ? (
-          <EmptyWorkspaceState
-            title="No external channels connected yet"
-            description="Choose WhatsApp Cloud API, Instagram Business, Facebook Page, Meta Ads, or Google Business above, follow the whitelisting steps, and connect your first channel."
-          />
-        ) : (
-          <div className="divide-y divide-zinc-200/80 text-[13px]">
-            {connections.map((c) => {
-              const statusLabel =
-                c.status === "healthy"
-                  ? "Healthy"
-                  : c.status === "expiring"
-                    ? "Expiring Soon"
-                    : "Needs Re-Auth";
-              const statusTone =
-                c.status === "healthy" ? "emerald" : c.status === "expiring" ? "amber" : "ruby";
-              const isVerifying = pendingCardAction === `verify:${c.id}`;
-              const isDisconnecting = pendingCardAction === `disconnect:${c.id}`;
-              const isUpdating = pendingCardAction === `update:${c.id}`;
-              const isEditing = editingId === c.id;
+      {/* SECTION 4: STRICTLY BACKEND-ENABLED MANUAL CREDENTIALS OVERRIDE */}
+      {allowManualCredentials && canManage && (
+        <details className="group rounded-2xl border border-amber-200/90 bg-amber-50/30 p-5 shadow-2xs">
+          <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-bold text-slate-900">
+                  Manual API Credentials Override
+                </span>
+                <StatusPill label="Enabled for This Account" tone="amber" />
+              </div>
+              <p className="text-xs text-zinc-600">
+                Custom System User token &amp; webhook configuration enabled for your workspace.
+                Click to expand.
+              </p>
+            </div>
+            <span className="rounded-lg border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-900">
+              Expand Manual Setup
+            </span>
+          </summary>
 
-              return (
-                <div key={c.id} className="py-4 first:pt-0 last:pb-0">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1 space-y-1.5">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-bold text-slate-900">{c.displayName}</span>
-                        <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
-                          {CHANNEL_LABEL_BY_KIND[c.channelKind] ?? c.provider.toUpperCase()}
-                        </span>
-                        <StatusPill label={statusLabel} tone={statusTone} />
-                        {c.metadata.tokenMode === "sandbox" && (
-                          <StatusPill label="Sandbox Token" tone="stone" showDot={false} />
-                        )}
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-600 tabular-nums">
-                        {c.channelKind === "google_business" ? (
-                          <>
-                            {c.metadata.locationId ? (
-                              <span>
-                                Location:{" "}
-                                <strong className="font-mono text-slate-800">
-                                  {c.metadata.locationId}
-                                </strong>
-                              </span>
-                            ) : (
-                              <span>
-                                Google Account:{" "}
-                                <strong className="text-slate-800">
-                                  {c.metadata.driveEmail || c.externalAccountId}
-                                </strong>
-                              </span>
-                            )}
-                            {c.metadata.driveEmail && c.metadata.locationId && (
-                              <span>
-                                • Google:{" "}
-                                <strong className="text-slate-800">{c.metadata.driveEmail}</strong>
-                              </span>
-                            )}
-                            {c.metadata.primaryCategory && (
-                              <span>
-                                • Category:{" "}
-                                <strong className="text-slate-800">
-                                  {c.metadata.primaryCategory}
-                                </strong>
-                              </span>
-                            )}
-                            {c.metadata.storeAddress && (
-                              <span>
-                                • Address:{" "}
-                                <strong className="text-slate-800">
-                                  {c.metadata.storeAddress}
-                                </strong>
-                              </span>
-                            )}
-                            {typeof c.metadata.totalReviewsCount === "number" && (
-                              <span>
-                                • Reviews:{" "}
-                                <strong className="text-slate-800">
-                                  {c.metadata.totalReviewsCount}
-                                </strong>
-                              </span>
-                            )}
-                          </>
-                        ) : (
-                          <span>
-                            Primary ID:{" "}
-                            <strong className="font-mono text-slate-800">{c.externalAccountId}</strong>
-                          </span>
-                        )}
-                        {c.metadata.wabaId && (
-                          <span>
-                            • WABA: <strong className="font-mono text-slate-800">{c.metadata.wabaId}</strong>
-                          </span>
-                        )}
-                        {c.metadata.phoneNumberId && (
-                          <span>
-                            • Phone ID:{" "}
-                            <strong className="font-mono text-slate-800">
-                              {c.metadata.phoneNumberId}
-                            </strong>
-                          </span>
-                        )}
-                        {c.metadata.igUserId && (
-                          <span>
-                            • IG ID:{" "}
-                            <strong className="font-mono text-slate-800">{c.metadata.igUserId}</strong>
-                          </span>
-                        )}
-                        {(c.metadata.pageId || c.metadata.linkedPageId) && (
-                          <span>
-                            • Page ID:{" "}
-                            <strong className="font-mono text-slate-800">
-                              {c.metadata.pageId || c.metadata.linkedPageId}
-                            </strong>
-                          </span>
-                        )}
-                        <span>
-                          • Token:{" "}
-                          <code className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-800">
-                            {c.maskedTokenHint}
-                          </code>
-                        </span>
-                      </div>
-
-                      <div
-                        className={`text-xs ${
-                          c.status === "needs_reauth"
-                            ? "font-medium text-rose-700"
-                            : "text-zinc-500"
-                        }`}
+          <div className="mt-5 space-y-5 border-t border-amber-200/70 pt-5">
+            {/* Webhook Endpoints for Custom App Setups */}
+            {whatsappWebhookUrl && metaWebhookUrl && (
+              <div className="grid grid-cols-1 gap-3 rounded-xl border border-zinc-200 bg-white p-4 text-xs lg:grid-cols-3">
+                <div>
+                  <div className="flex items-center justify-between gap-2 font-semibold text-slate-800">
+                    <span>WhatsApp Webhook URL</span>
+                    <CopyTextButton text={whatsappWebhookUrl} label="Copy" />
+                  </div>
+                  <div className="mt-1 break-all font-mono text-[11px] text-emerald-800">
+                    {whatsappWebhookUrl}
+                  </div>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between gap-2 font-semibold text-slate-800">
+                    <span>Meta / IG Webhook URL</span>
+                    <CopyTextButton text={metaWebhookUrl} label="Copy" />
+                  </div>
+                  <div className="mt-1 break-all font-mono text-[11px] text-emerald-800">
+                    {metaWebhookUrl}
+                  </div>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between gap-2 font-semibold text-slate-800">
+                    <span>Webhook Verify Token</span>
+                    <div className="flex items-center gap-1.5">
+                      <CopyTextButton text={verifyToken} label="Copy" />
+                      <button
+                        type="button"
+                        disabled={pendingKey === "rotate-verify"}
+                        onClick={handleRotateVerifyToken}
+                        className="rounded border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-zinc-100"
                       >
-                        {c.metadata.lastLiveCheckMessage
-                          ? c.metadata.lastLiveCheckMessage
-                          : "Stored encrypted in workspace vault."}{" "}
-                        {c.lastHealthCheckAt && (
-                          <span className="text-zinc-400">
-                            (Checked {new Date(c.lastHealthCheckAt).toLocaleString("en-IN")})
-                          </span>
-                        )}
-                      </div>
+                        Rotate
+                      </button>
                     </div>
+                  </div>
+                  <div className="mt-1 break-all font-mono text-[11px] text-slate-800">
+                    {verifyToken}
+                  </div>
+                </div>
+              </div>
+            )}
 
-                    {canManage && (
-                      <div className="flex flex-wrap items-center gap-2">
-                        {c.channelKind === "google_drive" && c.metadata.folderWebViewLink && (
-                          <a
-                            href={c.metadata.folderWebViewLink}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="rsl-btn-secondary py-1.5 text-xs"
+            {/* Add / Override Manual Channel Token */}
+            <form
+              onSubmit={handleManualConnectSubmit}
+              className="space-y-3.5 rounded-xl border border-zinc-200 bg-white p-4 text-xs"
+            >
+              <div className="font-bold text-slate-900">
+                Link Channel via Manual Access Token
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div>
+                  <label className="mb-1 block font-semibold text-slate-700">Channel Type</label>
+                  <select
+                    name="channelKind"
+                    value={manualKind}
+                    onChange={(e) => setManualKind(e.target.value as ConnectionChannelKind)}
+                    className="rsl-input text-xs"
+                  >
+                    <option value="whatsapp_cloud">WhatsApp Business Cloud API</option>
+                    <option value="instagram_business">Instagram Business</option>
+                    <option value="facebook_page">Facebook Page</option>
+                    <option value="meta_ads_pixel">Meta Ads &amp; Pixel</option>
+                    <option value="google_business">Google Business Profile</option>
+                    <option value="google_ads">Google Ads</option>
+                    <option value="google_drive">Google Drive</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block font-semibold text-slate-700">
+                    Account / Display Name *
+                  </label>
+                  <input
+                    name="displayName"
+                    required
+                    placeholder="e.g. Main Business WhatsApp"
+                    className="rsl-input text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block font-semibold text-slate-700">
+                    Primary Account / Asset ID *
+                  </label>
+                  <input
+                    name="externalAccountId"
+                    required
+                    placeholder={
+                      manualKind === "whatsapp_cloud"
+                        ? "Phone Number ID (15 digits)"
+                        : manualKind === "meta_ads_pixel"
+                          ? "act_1234567890"
+                          : "Numeric Page / IG / Customer ID"
+                    }
+                    className="rsl-input font-mono text-xs"
+                  />
+                </div>
+              </div>
+
+              {manualKind === "whatsapp_cloud" && (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block font-semibold text-slate-700">
+                      WABA ID (Optional)
+                    </label>
+                    <input
+                      name="wabaId"
+                      placeholder="WhatsApp Business Account ID"
+                      className="rsl-input font-mono text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block font-semibold text-slate-700">
+                      Display Phone Number (Optional)
+                    </label>
+                    <input
+                      name="displayPhone"
+                      placeholder="+91 98765 43210"
+                      className="rsl-input text-xs"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {manualKind === "meta_ads_pixel" && (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block font-semibold text-slate-700">
+                      Meta Pixel ID (Optional)
+                    </label>
+                    <input
+                      name="pixelId"
+                      placeholder="15-digit Pixel ID"
+                      className="rsl-input font-mono text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block font-semibold text-slate-700">
+                      Linked Facebook Page ID (Optional)
+                    </label>
+                    <input
+                      name="pageId"
+                      placeholder="Facebook Page ID for ad creatives"
+                      className="rsl-input font-mono text-xs"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block font-semibold text-slate-700">
+                    Access Token *
+                  </label>
+                  <input
+                    name="accessToken"
+                    type="password"
+                    required
+                    minLength={8}
+                    placeholder="Paste permanent System User or OAuth access token"
+                    className="rsl-input font-mono text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block font-semibold text-slate-700">
+                    Refresh Token (Optional — Google OAuth)
+                  </label>
+                  <input
+                    name="refreshToken"
+                    type="password"
+                    placeholder="Optional OAuth refresh token"
+                    className="rsl-input font-mono text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={pendingKey === "manual-connect"}
+                  className="rsl-btn-primary inline-flex items-center gap-2 py-2 text-xs"
+                >
+                  {pendingKey === "manual-connect" && (
+                    <IosSpinner size="xs" className="text-white" />
+                  )}
+                  <span>
+                    {pendingKey === "manual-connect"
+                      ? "Saving & Verifying..."
+                      : "Save Manual Credentials"}
+                  </span>
+                </button>
+              </div>
+            </form>
+
+            {/* Rotate Manual Token on Existing Connected Channels */}
+            {connections.length > 0 && (
+              <div className="space-y-2 rounded-xl border border-zinc-200 bg-white p-4 text-xs">
+                <div className="font-bold text-slate-900">
+                  Rotate Token on Existing Connection
+                </div>
+                <div className="divide-y divide-zinc-100">
+                  {connections.map((c) => {
+                    const isEditing = rotatingConnId === c.id;
+                    const isSaving = pendingKey === `manual-rotate:${c.id}`;
+                    return (
+                      <div key={c.id} className="py-2.5 first:pt-1 last:pb-0">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <span className="font-semibold text-slate-900">{c.displayName}</span>{" "}
+                            <span className="font-mono text-[11px] text-zinc-500">
+                              ({c.externalAccountId})
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setRotatingConnId(isEditing ? null : c.id)}
+                            className="rsl-btn-secondary py-1 text-xs"
                           >
-                            Open Drive Folder ↗
-                          </a>
-                        )}
-                        {c.channelKind === "google_business" && (
-                          <>
+                            {isEditing ? "Cancel" : "Rotate Token"}
+                          </button>
+                        </div>
+                        {isEditing && (
+                          <form
+                            onSubmit={(e) => handleManualRotateSubmit(c.id, e)}
+                            className="mt-2.5 flex flex-wrap items-center gap-2"
+                          >
+                            <input
+                              name="accessToken"
+                              type="password"
+                              required
+                              minLength={6}
+                              placeholder="New access token..."
+                              className="rsl-input min-w-[220px] flex-1 font-mono text-xs"
+                            />
                             <button
-                              type="button"
-                              disabled={Boolean(pendingCardAction)}
-                              onClick={() => handleSyncGoogleBusiness(c.id)}
+                              type="submit"
+                              disabled={isSaving}
                               className="rsl-btn-primary inline-flex items-center gap-1.5 py-1.5 text-xs"
                             >
-                              {pendingCardAction === `syncgbp:${c.id}` && (
-                                <IosSpinner size="xs" className="text-white" />
-                              )}
-                              <span>
-                                {pendingCardAction === `syncgbp:${c.id}`
-                                  ? "Syncing..."
-                                  : "Sync Profile & Reviews"}
-                              </span>
+                              {isSaving && <IosSpinner size="xs" className="text-white" />}
+                              <span>Save Token</span>
                             </button>
-                            <Link href="/reviews" className="rsl-btn-secondary py-1.5 text-xs">
-                              Open Reviews →
-                            </Link>
-                          </>
+                          </form>
                         )}
-                        {(c.channelKind === "google_drive" ||
-                          c.channelKind === "google_business") && (
-                          <ConnectToGoogleDriveButton
-                            purpose={c.channelKind}
-                            returnTo={`/connections?tab=${c.channelKind}`}
-                            label={
-                              c.channelKind === "google_drive"
-                                ? "Reconnect Google Drive"
-                                : "Reconnect Google"
-                            }
-                            variant="white"
-                            size="sm"
-                          />
-                        )}
-                        <button
-                          type="button"
-                          disabled={Boolean(pendingCardAction)}
-                          onClick={() => handleVerifyLive(c)}
-                          className="rsl-btn-secondary inline-flex items-center gap-1.5 py-1.5 text-xs"
-                        >
-                          {isVerifying && <IosSpinner size="xs" />}
-                          <span>{isVerifying ? "Testing API..." : "Test Live API"}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingId(isEditing ? null : c.id)}
-                          className="rsl-btn-secondary py-1.5 text-xs"
-                        >
-                          {isEditing ? "Cancel" : "Rotate Token / Edit"}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={Boolean(pendingCardAction)}
-                          onClick={() => handleDisconnect(c)}
-                          className="rsl-btn-danger-soft inline-flex items-center gap-1.5 py-1.5 text-xs"
-                        >
-                          {isDisconnecting && <IosSpinner size="xs" />}
-                          <span>{isDisconnecting ? "Removing..." : "Disconnect"}</span>
-                        </button>
                       </div>
-                    )}
-                  </div>
-
-                  {/* Inline Token Rotation & ID Update Panel */}
-                  {isEditing && canManage && (
-                    <form
-                      onSubmit={(e) => handleInlineUpdate(c.id, e)}
-                      className="mt-3.5 rounded-xl border border-zinc-200 bg-zinc-50/80 p-4"
-                    >
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                        <div className="min-w-0">
-                          <label className="rsl-label">Display Label</label>
-                          <input
-                            name="displayName"
-                            defaultValue={c.displayName}
-                            className="rsl-input bg-white"
-                          />
-                        </div>
-                        <div className="min-w-0">
-                          <label className="rsl-label">Primary External ID</label>
-                          <input
-                            name="externalAccountId"
-                            defaultValue={c.externalAccountId}
-                            className="rsl-input bg-white font-mono"
-                          />
-                        </div>
-                        <div className="min-w-0">
-                          <label className="rsl-label">
-                            New Access Token (Leave blank to keep current)
-                          </label>
-                          <input
-                            name="accessToken"
-                            type="password"
-                            placeholder="Paste replacement token to rotate..."
-                            className="rsl-input bg-white font-mono text-xs"
-                          />
-                        </div>
-                      </div>
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <button
-                          type="submit"
-                          disabled={isUpdating}
-                          className="rsl-btn-primary inline-flex items-center gap-1.5 py-1.5 text-xs"
-                        >
-                          {isUpdating && <IosSpinner size="xs" className="text-white" />}
-                          <span>{isUpdating ? "Saving & Testing..." : "Save & Verify Token"}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingId(null)}
-                          className="rsl-btn-secondary py-1.5 text-xs"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </form>
-                  )}
+                    );
+                  })}
                 </div>
-              );
-            })}
+              </div>
+            )}
           </div>
-        )}
-      </SectionCard>
+        </details>
+      )}
     </div>
   );
 }

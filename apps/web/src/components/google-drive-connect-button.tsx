@@ -34,6 +34,7 @@ export function ConnectToGoogleDriveButton({
   returnTo?: string;
   label?: string;
   purpose?:
+    | "google_all"
     | "google_drive"
     | "google_business"
     | "google_ads"

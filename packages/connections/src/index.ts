@@ -14,7 +14,40 @@ import {
 export interface StoredTokenPayload {
   accessToken: string;
   refreshToken?: string;
+  oauthUserToken?: string;
   issuedAt: number;
+}
+
+export interface MetaDiscoveredPageSummary {
+  pageId: string;
+  pageName: string;
+  category?: string;
+  igUserId?: string;
+  igUsername?: string;
+}
+
+export interface MetaDiscoveredInstagramSummary {
+  igUserId: string;
+  igUsername?: string;
+  name?: string;
+  linkedPageId: string;
+  linkedPageName?: string;
+}
+
+export interface MetaDiscoveredAdAccountSummary {
+  adAccountId: string;
+  name: string;
+  currency?: string;
+  pixelId?: string;
+  availablePixels?: Array<{ pixelId: string; name: string }>;
+}
+
+export interface MetaDiscoveredWabaPhoneSummary {
+  phoneNumberId: string;
+  displayPhone: string;
+  verifiedName: string;
+  wabaId: string;
+  wabaName?: string;
 }
 
 export type ConnectionChannelKind =
@@ -122,6 +155,11 @@ export interface ConnectionMetadata {
   lastCaSheetSyncedAt?: number;
   searchConsoleSiteUrl?: string;
   availableSearchConsoleSites?: string[];
+  availableMetaPages?: MetaDiscoveredPageSummary[];
+  availableInstagramAccounts?: MetaDiscoveredInstagramSummary[];
+  availableMetaAdAccounts?: MetaDiscoveredAdAccountSummary[];
+  availableWabaPhones?: MetaDiscoveredWabaPhoneSummary[];
+  webhookAutoSubscribed?: boolean;
   driveEmail?: string;
   googleUserName?: string;
   oauthConnected?: boolean;
@@ -257,8 +295,52 @@ function parseMetadataSafe(rawJson: string | null | undefined): ConnectionMetada
   return {};
 }
 
+export function isManualCredentialsEnabledForWorkspace(workspaceId: string): boolean {
+  const row = controlDb()
+    .select({ allowManualCredentials: controlSchema.workspaces.allowManualCredentials })
+    .from(controlSchema.workspaces)
+    .where(eq(controlSchema.workspaces.id, workspaceId))
+    .get();
+  return Boolean(row?.allowManualCredentials);
+}
+
+export function assertManualCredentialsAllowedForWorkspace(workspaceId: string): void {
+  if (!isManualCredentialsEnabledForWorkspace(workspaceId)) {
+    throw new RslError(
+      "RSL-AUTH-1003",
+      "Manual credential entry is disabled for this workspace. Please use 1-Click Sign-In, or contact RapidShift Support if manual token access is required."
+    );
+  }
+}
+
+export function staffSetWorkspaceManualCredentialsPolicy(params: {
+  workspaceId: string;
+  enabled: boolean;
+}): { enabled: boolean } {
+  const db = controlDb();
+  const ws = db
+    .select({ id: controlSchema.workspaces.id })
+    .from(controlSchema.workspaces)
+    .where(eq(controlSchema.workspaces.id, params.workspaceId))
+    .get();
+  if (!ws) {
+    throw new RslError("RSL-VAL-1001", "Workspace not found.");
+  }
+
+  db.update(controlSchema.workspaces)
+    .set({
+      allowManualCredentials: params.enabled,
+      updatedAt: Date.now(),
+    })
+    .where(eq(controlSchema.workspaces.id, params.workspaceId))
+    .run();
+
+  return { enabled: params.enabled };
+}
+
 export function listWorkspaceConnections(workspaceId: string) {
   const db = controlDb();
+  const allowManualCredentials = isManualCredentialsEnabledForWorkspace(workspaceId);
   const conns = db
     .select({
       id: controlSchema.connections.id,
@@ -357,6 +439,7 @@ export function listWorkspaceConnections(workspaceId: string) {
       };
     }),
     tallyDevices,
+    allowManualCredentials,
   };
 }
 
@@ -794,9 +877,9 @@ export const verifyExternalConnectionHealth = defineAction({
             const errMsg = body.error?.message || `HTTP ${resp.status}`;
             nextStatus = "needs_reauth";
             if (errCode === 190) {
-              liveMessage = `Meta Graph API rejected token (Error 190: ${errMsg}). Generate a Permanent System User Token in Meta Business Settings with whitelisted scopes.`;
+              liveMessage = `Meta session expired (${errMsg}). Click 'Reconnect with Facebook' to refresh access in one click.`;
             } else if (errCode === 10 || errCode === 200 || errCode === 100) {
-              liveMessage = `Meta Graph API permission/asset error (Code ${errCode}: ${errMsg}). Complete the Whitelisting Steps (assign asset to System User & enable scopes).`;
+              liveMessage = `Meta permission or asset check failed (Code ${errCode}: ${errMsg}). Click 'Reconnect with Facebook' and ensure all business permissions are approved.`;
             } else {
               liveMessage = `Meta Graph API check failed: ${errMsg}`;
             }
@@ -924,6 +1007,7 @@ export const verifyExternalConnectionHealth = defineAction({
  * ============================================================================ */
 
 export type GoogleOAuthPurpose =
+  | "google_all"
   | "google_drive"
   | "google_business"
   | "google_ads"
@@ -945,6 +1029,9 @@ export function generateGoogleOAuthPkcePair(): {
 export function isGoogleOAuthPurposeConfigured(purpose: GoogleOAuthPurpose = "google_drive"): boolean {
   const cfg = getPlatformGoogleOAuthConfig();
   if (!cfg.isReady) return false;
+  if (purpose === "google_all") {
+    return Boolean(cfg.enableDriveOAuth || cfg.enableGbpOAuth || cfg.enableGoogleAdsOAuth);
+  }
   if (purpose === "google_drive" || purpose === "google_sheets" || purpose === "google_search_console") {
     return cfg.enableDriveOAuth;
   }
@@ -976,7 +1063,22 @@ export function buildGoogleOAuthAuthorizeUrl(params: {
   }
 
   const scopes =
-    params.purpose === "google_drive"
+    params.purpose === "google_all"
+      ? [
+          "openid",
+          "email",
+          "profile",
+          ...(cfg.enableDriveOAuth
+            ? [
+                "https://www.googleapis.com/auth/drive.file",
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/webmasters.readonly",
+              ]
+            : []),
+          ...(cfg.enableGbpOAuth ? ["https://www.googleapis.com/auth/business.manage"] : []),
+          ...(cfg.enableGoogleAdsOAuth ? ["https://www.googleapis.com/auth/adwords"] : []),
+        ]
+      : params.purpose === "google_drive"
       ? [
           "openid",
           "email",
@@ -1234,6 +1336,8 @@ export async function completeGoogleOAuthConnection(params: {
   formattedCustomerId?: string;
   adsDiscoveryStatus?: GoogleAdsDiscoveryStatus;
   adsDiscoveryDetail?: string;
+  connectedLabels?: string[];
+  summaryMessage?: string;
 }> {
   const cfg = getPlatformGoogleOAuthConfig();
   if (!cfg.isReady) {
@@ -1306,7 +1410,23 @@ export async function completeGoogleOAuthConnection(params: {
   const now = Date.now();
   const expiresAt = now + expiresInSec * 1000;
 
-  if (params.purpose === "google_drive") {
+  const persistSinglePurpose = async (
+    targetPurpose: Exclude<GoogleOAuthPurpose, "google_all">
+  ): Promise<{
+    connectionId: string;
+    email: string;
+    displayName: string;
+    folderName?: string;
+    locationId?: string;
+    storeName?: string;
+    gbpDiscoveryStatus?: GoogleBusinessDiscoveryStatus;
+    gbpDiscoveryDetail?: string;
+    customerId?: string;
+    formattedCustomerId?: string;
+    adsDiscoveryStatus?: GoogleAdsDiscoveryStatus;
+    adsDiscoveryDetail?: string;
+  }> => {
+  if (targetPurpose === "google_drive") {
     const folder = await ensureGoogleDriveBackupFolder(accessToken, cfg.defaultDriveFolderName);
 
     const existing = db
@@ -1462,8 +1582,8 @@ export async function completeGoogleOAuthConnection(params: {
     };
   }
 
-  if (params.purpose === "google_sheets" || params.purpose === "google_search_console") {
-    const providerKey = params.purpose;
+  if (targetPurpose === "google_sheets" || targetPurpose === "google_search_console") {
+    const providerKey = targetPurpose;
     const existingTool = db
       .select()
       .from(controlSchema.connections)
@@ -1497,7 +1617,7 @@ export async function completeGoogleOAuthConnection(params: {
 
     let searchConsoleSiteUrl = existingMeta.searchConsoleSiteUrl;
     let availableSearchConsoleSites = existingMeta.availableSearchConsoleSites;
-    if (params.purpose === "google_search_console") {
+    if (targetPurpose === "google_search_console") {
       try {
         const sitesResp = await fetch("https://www.googleapis.com/webmasters/v3/sites", {
           headers: { Authorization: `Bearer ${accessToken}` },
@@ -1521,7 +1641,7 @@ export async function completeGoogleOAuthConnection(params: {
     }
 
     const displayName =
-      params.purpose === "google_sheets"
+      targetPurpose === "google_sheets"
         ? `Google Sheets CA Sync (${email})`
         : searchConsoleSiteUrl
           ? `Google Search Console (${searchConsoleSiteUrl})`
@@ -1529,7 +1649,7 @@ export async function completeGoogleOAuthConnection(params: {
 
     const meta: ConnectionMetadata = {
       ...existingMeta,
-      channelKind: params.purpose,
+      channelKind: targetPurpose,
       driveEmail: email,
       googleUserName,
       googleSub: googleSub || existingMeta.googleSub || undefined,
@@ -1539,7 +1659,7 @@ export async function completeGoogleOAuthConnection(params: {
       maskedTokenHint: maskSecretToken(accessToken),
       tokenMode: "live",
       lastLiveCheckMessage:
-        params.purpose === "google_sheets"
+        targetPurpose === "google_sheets"
           ? `Connected Google Sheets CA Export (${email})`
           : `Connected Google Search Console (${searchConsoleSiteUrl || email})`,
       lastLiveCheckedAccountName: email,
@@ -1601,7 +1721,7 @@ export async function completeGoogleOAuthConnection(params: {
     };
   }
 
-  if (params.purpose === "google_ads") {
+  if (targetPurpose === "google_ads") {
     const existingAds = db
       .select()
       .from(controlSchema.connections)
@@ -1844,6 +1964,93 @@ export async function completeGoogleOAuthConnection(params: {
     gbpDiscoveryStatus: hydrated.gbpDiscoveryStatus,
     gbpDiscoveryDetail: hydrated.gbpDiscoveryDetail,
   };
+  };
+
+  if (params.purpose === "google_all") {
+    const suiteTargets: Array<Exclude<GoogleOAuthPurpose, "google_all">> = [];
+    if (cfg.enableGbpOAuth) suiteTargets.push("google_business");
+    if (cfg.enableGoogleAdsOAuth) suiteTargets.push("google_ads");
+    if (cfg.enableDriveOAuth) {
+      suiteTargets.push("google_drive", "google_sheets", "google_search_console");
+    }
+
+    const connectedLabels: string[] = [];
+    let primaryConnId = "";
+    let primaryDisplay = `Google Suite (${email})`;
+    for (const tgt of suiteTargets) {
+      try {
+        const out = await persistSinglePurpose(tgt);
+        if (!primaryConnId) {
+          primaryConnId = out.connectionId;
+          primaryDisplay = out.displayName;
+        }
+        connectedLabels.push(out.displayName);
+      } catch {
+        // Isolate individual Google API failures so remaining channels still connect cleanly
+      }
+    }
+
+    const summaryMessage =
+      connectedLabels.length > 0
+        ? `Connected ${connectedLabels.length} Google channel(s) (${email}): ${connectedLabels.join(" • ")}`
+        : `Signed in with Google (${email}), but no Google channels could be activated yet.`;
+
+    return {
+      connectionId: primaryConnId || newId(),
+      email,
+      displayName: primaryDisplay,
+      connectedLabels,
+      summaryMessage,
+    };
+  }
+
+  return persistSinglePurpose(params.purpose);
+}
+
+export function selectGoogleSearchConsoleSite(params: {
+  workspaceId: string;
+  connectionId: string;
+  siteUrl: string;
+}): { displayName: string; siteUrl: string } {
+  const db = controlDb();
+  const conn = db
+    .select()
+    .from(controlSchema.connections)
+    .where(
+      and(
+        eq(controlSchema.connections.id, params.connectionId),
+        eq(controlSchema.connections.workspaceId, params.workspaceId)
+      )
+    )
+    .get();
+  if (!conn) {
+    throw new RslError("RSL-VAL-1001", "Google Search Console connection not found.");
+  }
+
+  const nextSite = params.siteUrl.trim();
+  if (!nextSite) {
+    throw new RslError("RSL-VAL-1001", "Select a valid Search Console website property.");
+  }
+
+  const meta = parseMetadataSafe(conn.metadataJson);
+  const displayName = `Google Search Console (${nextSite})`;
+  const nextMeta: ConnectionMetadata = {
+    ...meta,
+    searchConsoleSiteUrl: nextSite,
+    lastLiveCheckMessage: `Active Search Console property: ${nextSite}`,
+  };
+
+  db.update(controlSchema.connections)
+    .set({
+      displayName,
+      externalAccountId: nextSite,
+      metadataJson: JSON.stringify(nextMeta),
+      updatedAt: Date.now(),
+    })
+    .where(eq(controlSchema.connections.id, conn.id))
+    .run();
+
+  return { displayName, siteUrl: nextSite };
 }
 
 interface RawGbpPostalAddress {
@@ -3549,7 +3756,7 @@ export function buildMetaOAuthAuthorizeUrl(params: {
   if (!cfg.isReady || !cfg.enableMetaOAuth) {
     throw new RslError(
       "RSL-VAL-1001",
-      "Meta 1-click Facebook Login is not configured yet on this platform. You can connect using a System User Token below or configure Meta App ID + Secret in Platform Credentials."
+      "Facebook / Meta 1-click sign-in is pending platform setup. Please contact your workspace administrator or try again shortly."
     );
   }
 
@@ -3593,6 +3800,356 @@ export function buildMetaOAuthAuthorizeUrl(params: {
   return url.toString();
 }
 
+async function autoSubscribeMetaWebhookAsset(params: {
+  graphVersion: string;
+  assetType: "page" | "waba";
+  assetId: string;
+  accessToken: string;
+}): Promise<boolean> {
+  if (!params.assetId || !params.accessToken) return false;
+  try {
+    const url = `https://graph.facebook.com/${params.graphVersion}/${encodeURIComponent(params.assetId)}/subscribed_apps`;
+    const init: RequestInit =
+      params.assetType === "page"
+        ? {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${params.accessToken}`,
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+              subscribed_fields: "messages,messaging_postbacks,feed,leadgen",
+            }).toString(),
+            signal: AbortSignal.timeout(6000),
+          }
+        : {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${params.accessToken}`,
+            },
+            signal: AbortSignal.timeout(6000),
+          };
+    const resp = await fetch(url, init);
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function discoverMetaGraphAssets(params: {
+  userToken: string;
+  graphVersion: string;
+  appId?: string;
+  appSecret?: string;
+  purpose: MetaOAuthPurpose;
+}): Promise<{
+  pages: Array<MetaDiscoveredPageSummary & { pageAccessToken: string }>;
+  instagramAccounts: Array<MetaDiscoveredInstagramSummary & { pageAccessToken: string }>;
+  adAccounts: MetaDiscoveredAdAccountSummary[];
+  wabaPhones: MetaDiscoveredWabaPhoneSummary[];
+}> {
+  const { userToken, graphVersion: v, purpose } = params;
+  const debugWabaIds = new Set<string>();
+  const debugPageIds = new Set<string>();
+
+  // 0. Inspect granular_scopes via /debug_token (captures Embedded Signup WABA & granular Page selections)
+  if (params.appId && params.appSecret) {
+    try {
+      const dbgUrl = new URL(`https://graph.facebook.com/${v}/debug_token`);
+      dbgUrl.searchParams.set("input_token", userToken);
+      dbgUrl.searchParams.set("access_token", `${params.appId}|${params.appSecret}`);
+      const dbgResp = await fetch(dbgUrl.toString(), {
+        signal: AbortSignal.timeout(6000),
+      });
+      if (dbgResp.ok) {
+        const dbgBody = (await dbgResp.json()) as {
+          data?: {
+            granular_scopes?: Array<{
+              scope?: string;
+              target_ids?: string[];
+            }>;
+          };
+        };
+        for (const gs of dbgBody.data?.granular_scopes ?? []) {
+          const scope = (gs.scope || "").toLowerCase();
+          for (const tid of gs.target_ids ?? []) {
+            if (!tid) continue;
+            if (
+              scope === "whatsapp_business_management" ||
+              scope === "whatsapp_business_messaging"
+            ) {
+              debugWabaIds.add(String(tid));
+            } else if (
+              scope === "pages_show_list" ||
+              scope === "pages_manage_posts" ||
+              scope === "pages_messaging"
+            ) {
+              debugPageIds.add(String(tid));
+            }
+          }
+        }
+      }
+    } catch {
+      // Optional granular scope enrichment
+    }
+  }
+
+  const pages: Array<MetaDiscoveredPageSummary & { pageAccessToken: string }> = [];
+  const instagramAccounts: Array<MetaDiscoveredInstagramSummary & { pageAccessToken: string }> = [];
+  const adAccounts: MetaDiscoveredAdAccountSummary[] = [];
+  const wabaPhones: MetaDiscoveredWabaPhoneSummary[] = [];
+
+  // 1. Discover Facebook Pages & Linked Instagram Business Accounts
+  if (
+    purpose === "facebook_page" ||
+    purpose === "instagram_business" ||
+    purpose === "meta_ads_pixel" ||
+    purpose === "meta_all"
+  ) {
+    const seenPageIds = new Set<string>();
+    const collectPageNode = (node: {
+      id?: string;
+      name?: string;
+      category?: string;
+      access_token?: string;
+      instagram_business_account?: { id?: string; username?: string; name?: string };
+    }) => {
+      if (!node.id || seenPageIds.has(node.id)) return;
+      seenPageIds.add(node.id);
+      const pagePermToken = node.access_token || userToken;
+      const pageName = node.name || `Facebook Page (${node.id})`;
+      const ig = node.instagram_business_account;
+      pages.push({
+        pageId: node.id,
+        pageName,
+        category: node.category,
+        igUserId: ig?.id,
+        igUsername: ig?.username,
+        pageAccessToken: pagePermToken,
+      });
+      if (ig?.id) {
+        instagramAccounts.push({
+          igUserId: ig.id,
+          igUsername: ig.username,
+          name: ig.name,
+          linkedPageId: node.id,
+          linkedPageName: pageName,
+          pageAccessToken: pagePermToken,
+        });
+      }
+    };
+
+    try {
+      const pagesResp = await fetch(
+        `https://graph.facebook.com/${v}/me/accounts?fields=id,name,category,access_token,instagram_business_account{id,username,name}&limit=50`,
+        {
+          headers: { Authorization: `Bearer ${userToken}` },
+          signal: AbortSignal.timeout(8000),
+        }
+      );
+      if (pagesResp.ok) {
+        const pagesBody = (await pagesResp.json()) as {
+          data?: Array<{
+            id?: string;
+            name?: string;
+            category?: string;
+            access_token?: string;
+            instagram_business_account?: { id?: string; username?: string; name?: string };
+          }>;
+        };
+        for (const p of pagesBody.data ?? []) {
+          collectPageNode(p);
+        }
+      }
+    } catch {
+      // Continue
+    }
+
+    for (const pid of debugPageIds) {
+      if (seenPageIds.has(pid)) continue;
+      try {
+        const pResp = await fetch(
+          `https://graph.facebook.com/${v}/${encodeURIComponent(pid)}?fields=id,name,category,access_token,instagram_business_account{id,username,name}`,
+          {
+            headers: { Authorization: `Bearer ${userToken}` },
+            signal: AbortSignal.timeout(5000),
+          }
+        );
+        if (pResp.ok) {
+          const pNode = (await pResp.json()) as {
+            id?: string;
+            name?: string;
+            category?: string;
+            access_token?: string;
+            instagram_business_account?: { id?: string; username?: string; name?: string };
+          };
+          collectPageNode(pNode);
+        }
+      } catch {
+        // Ignore individual page lookup error
+      }
+    }
+  }
+
+  // 2. Discover Meta Ad Accounts & Pixels
+  if (purpose === "meta_ads_pixel" || purpose === "meta_all") {
+    try {
+      const adResp = await fetch(
+        `https://graph.facebook.com/${v}/me/adaccounts?fields=id,account_id,name,currency,account_status&limit=50`,
+        {
+          headers: { Authorization: `Bearer ${userToken}` },
+          signal: AbortSignal.timeout(8000),
+        }
+      );
+      if (adResp.ok) {
+        const adBody = (await adResp.json()) as {
+          data?: Array<{
+            id?: string;
+            account_id?: string;
+            name?: string;
+            currency?: string;
+            account_status?: number;
+          }>;
+        };
+        const rawList = [...(adBody.data ?? [])].filter((a) => Boolean(a.id || a.account_id));
+        rawList.sort((a, b) => {
+          const score = (x: typeof a) =>
+            (x.account_status === 1 ? 10 : 0) + (x.currency === "INR" ? 5 : 0);
+          return score(b) - score(a);
+        });
+
+        for (let idx = 0; idx < rawList.length; idx += 1) {
+          const acc = rawList[idx]!;
+          const rawId = acc.id || acc.account_id || "";
+          const actId = rawId.startsWith("act_")
+            ? rawId
+            : `act_${acc.account_id || rawId}`;
+          let availablePixels: Array<{ pixelId: string; name: string }> = [];
+          if (idx < 6) {
+            try {
+              const pxResp = await fetch(
+                `https://graph.facebook.com/${v}/${encodeURIComponent(actId)}/adspixels?fields=id,name&limit=10`,
+                {
+                  headers: { Authorization: `Bearer ${userToken}` },
+                  signal: AbortSignal.timeout(5000),
+                }
+              );
+              if (pxResp.ok) {
+                const pxBody = (await pxResp.json()) as {
+                  data?: Array<{ id?: string; name?: string }>;
+                };
+                availablePixels = (pxBody.data ?? [])
+                  .filter((px): px is { id: string; name?: string } => Boolean(px.id))
+                  .map((px) => ({
+                    pixelId: px.id,
+                    name: px.name || `Pixel ${px.id}`,
+                  }));
+              }
+            } catch {
+              // Optional pixel lookup
+            }
+          }
+
+          adAccounts.push({
+            adAccountId: actId,
+            name: acc.name || `Ad Account ${actId}`,
+            currency: acc.currency || "INR",
+            pixelId: availablePixels[0]?.pixelId,
+            availablePixels,
+          });
+        }
+      }
+    } catch {
+      // Continue
+    }
+  }
+
+  // 3. Discover WhatsApp Business Accounts (Owned + Client/Partner + Embedded Signup granular_scopes)
+  if (purpose === "whatsapp_cloud" || purpose === "meta_all") {
+    const wabaMap = new Map<string, { id: string; name?: string }>();
+    for (const wid of debugWabaIds) {
+      wabaMap.set(wid, { id: wid });
+    }
+
+    try {
+      const bizResp = await fetch(
+        `https://graph.facebook.com/${v}/me/businesses?fields=id,name,owned_whatsapp_business_accounts{id,name},client_whatsapp_business_accounts{id,name}&limit=25`,
+        {
+          headers: { Authorization: `Bearer ${userToken}` },
+          signal: AbortSignal.timeout(8000),
+        }
+      );
+      if (bizResp.ok) {
+        const bizBody = (await bizResp.json()) as {
+          data?: Array<{
+            id?: string;
+            name?: string;
+            owned_whatsapp_business_accounts?: { data?: Array<{ id?: string; name?: string }> };
+            client_whatsapp_business_accounts?: { data?: Array<{ id?: string; name?: string }> };
+          }>;
+        };
+        for (const biz of bizBody.data ?? []) {
+          for (const w of biz.owned_whatsapp_business_accounts?.data ?? []) {
+            if (w.id) wabaMap.set(w.id, { id: w.id, name: w.name });
+          }
+          for (const w of biz.client_whatsapp_business_accounts?.data ?? []) {
+            if (w.id && !wabaMap.has(w.id)) {
+              wabaMap.set(w.id, { id: w.id, name: w.name });
+            }
+          }
+        }
+      }
+    } catch {
+      // Continue with any debug_token WABAs
+    }
+
+    const seenPhones = new Set<string>();
+    for (const waba of Array.from(wabaMap.values()).slice(0, 15)) {
+      try {
+        const phoneResp = await fetch(
+          `https://graph.facebook.com/${v}/${encodeURIComponent(waba.id)}/phone_numbers?fields=id,display_phone_number,verified_name&limit=20`,
+          {
+            headers: { Authorization: `Bearer ${userToken}` },
+            signal: AbortSignal.timeout(6000),
+          }
+        );
+        if (phoneResp.ok) {
+          const phoneBody = (await phoneResp.json()) as {
+            data?: Array<{
+              id?: string;
+              display_phone_number?: string;
+              verified_name?: string;
+            }>;
+          };
+          for (const ph of phoneBody.data ?? []) {
+            if (!ph.id || seenPhones.has(ph.id)) continue;
+            seenPhones.add(ph.id);
+            wabaPhones.push({
+              phoneNumberId: ph.id,
+              displayPhone: ph.display_phone_number || ph.id,
+              verifiedName:
+                ph.verified_name ||
+                waba.name ||
+                `WhatsApp (${ph.display_phone_number || ph.id})`,
+              wabaId: waba.id,
+              wabaName: waba.name,
+            });
+          }
+        }
+      } catch {
+        // Ignore individual WABA lookup error
+      }
+    }
+  }
+
+  return {
+    pages,
+    instagramAccounts,
+    adAccounts,
+    wabaPhones,
+  };
+}
+
 export async function completeMetaOAuthConnection(params: {
   workspaceId: string;
   actorId: string;
@@ -3605,7 +4162,10 @@ export async function completeMetaOAuthConnection(params: {
 }> {
   const cfg = getPlatformMetaAppConfig();
   if (!cfg.isReady) {
-    throw new RslError("RSL-VAL-1001", "Meta App ID and App Secret are not configured on this platform.");
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Facebook / Meta 1-click sign-in is pending platform setup. Please try again shortly."
+    );
   }
 
   const v = cfg.graphVersion || "v21.0";
@@ -3628,7 +4188,7 @@ export async function completeMetaOAuthConnection(params: {
   if (!tokenResp.ok || !tokenData.access_token) {
     throw new RslError(
       "RSL-VAL-1001",
-      `Meta OAuth token exchange failed: ${tokenData.error?.message || `HTTP ${tokenResp.status}`}. Ensure '${params.redirectUri}' is added to Valid OAuth Redirect URIs in Meta App Settings.`
+      `Facebook sign-in could not be completed: ${tokenData.error?.message || `HTTP ${tokenResp.status}`}. Please try signing in again.`
     );
   }
 
@@ -3658,6 +4218,20 @@ export async function completeMetaOAuthConnection(params: {
   const userExpiresAt = now + Math.max(86_400, expiresInSec) * 1000;
   const connectedLabels: string[] = [];
 
+  const findExistingChannel = (provider: "meta" | "whatsapp", channelKind: ConnectionChannelKind) => {
+    const existingRows = db
+      .select()
+      .from(controlSchema.connections)
+      .where(
+        and(
+          eq(controlSchema.connections.workspaceId, params.workspaceId),
+          eq(controlSchema.connections.provider, provider)
+        )
+      )
+      .all();
+    return existingRows.find((r) => parseMetadataSafe(r.metadataJson).channelKind === channelKind);
+  };
+
   const upsertDiscoveredChannel = (item: {
     provider: "meta" | "whatsapp";
     channelKind: ConnectionChannelKind;
@@ -3667,7 +4241,6 @@ export async function completeMetaOAuthConnection(params: {
     expiresAt: number | null;
     scopes: string[];
     meta: ConnectionMetadata;
-    assetType: "fb_page" | "ig_account" | "ad_account" | "waba_phone";
   }) => {
     const existingRows = db
       .select()
@@ -3680,17 +4253,14 @@ export async function completeMetaOAuthConnection(params: {
       )
       .all();
 
-    const existing = existingRows.find((r) => {
-      const m = parseMetadataSafe(r.metadataJson);
-      return (
-        r.externalAccountId === item.externalAccountId ||
-        m.channelKind === item.channelKind
-      );
-    });
+    const existing =
+      existingRows.find((r) => parseMetadataSafe(r.metadataJson).channelKind === item.channelKind) ??
+      existingRows.find((r) => r.externalAccountId === item.externalAccountId);
 
     const enc = encryptEnvelope(
       JSON.stringify({
         accessToken: item.accessToken,
+        oauthUserToken: userToken,
         issuedAt: now,
       } satisfies StoredTokenPayload)
     );
@@ -3700,7 +4270,7 @@ export async function completeMetaOAuthConnection(params: {
       oauthConnected: true,
       maskedTokenHint: maskSecretToken(item.accessToken),
       tokenMode: "live",
-      lastLiveCheckMessage: `Connected via 1-Click Meta Login (${item.displayName}).`,
+      lastLiveCheckMessage: `Connected via 1-Click Facebook Login (${item.displayName}).`,
       lastLiveCheckedAccountName: item.displayName,
     };
 
@@ -3751,224 +4321,178 @@ export async function completeMetaOAuthConnection(params: {
     connectedLabels.push(item.displayName);
   };
 
-  let primaryPageId: string | undefined;
+  const discovered = await discoverMetaGraphAssets({
+    userToken,
+    graphVersion: v,
+    appId: cfg.appId,
+    appSecret: cfg.appSecret,
+    purpose: params.purpose,
+  });
 
-  // 1. Discover Facebook Pages & Linked Instagram Business Accounts
+  const cleanPages: MetaDiscoveredPageSummary[] = discovered.pages.map(
+    ({ pageAccessToken: _pt, ...rest }) => rest
+  );
+  const cleanIgAccounts: MetaDiscoveredInstagramSummary[] = discovered.instagramAccounts.map(
+    ({ pageAccessToken: _pt, ...rest }) => rest
+  );
+
+  let primaryPageId: string | undefined = discovered.pages[0]?.pageId;
+
+  // 1. Facebook Page
   if (
-    params.purpose === "facebook_page" ||
-    params.purpose === "instagram_business" ||
-    params.purpose === "meta_ads_pixel" ||
-    params.purpose === "meta_all"
+    discovered.pages.length > 0 &&
+    (params.purpose === "facebook_page" || params.purpose === "meta_all")
   ) {
-    try {
-      const pagesResp = await fetch(
-        `https://graph.facebook.com/${v}/me/accounts?fields=id,name,access_token,instagram_business_account{id,username,name}&limit=25`,
-        {
-          headers: { Authorization: `Bearer ${userToken}` },
-          signal: AbortSignal.timeout(8000),
-        }
-      );
-      if (pagesResp.ok) {
-        const pagesBody = (await pagesResp.json()) as {
-          data?: Array<{
-            id: string;
-            name: string;
-            access_token?: string;
-            instagram_business_account?: { id: string; username?: string; name?: string };
-          }>;
-        };
-        const firstPage = pagesBody.data?.[0];
-        if (firstPage?.id) {
-          primaryPageId = firstPage.id;
-          const pagePermToken = firstPage.access_token || userToken;
-          if (params.purpose === "facebook_page" || params.purpose === "meta_all") {
-            upsertDiscoveredChannel({
-              provider: "meta",
-              channelKind: "facebook_page",
-              displayName: firstPage.name,
-              externalAccountId: firstPage.id,
-              accessToken: pagePermToken,
-              expiresAt: null, // Page tokens derived from long-lived user tokens do not expire
-              scopes: ["pages_show_list", "pages_manage_posts", "pages_messaging", "leads_retrieval"],
-              meta: {
-                pageId: firstPage.id,
-                pageName: firstPage.name,
-              },
-              assetType: "fb_page",
-            });
-          }
+    const existingFb = findExistingChannel("meta", "facebook_page");
+    const prevPageId = existingFb ? parseMetadataSafe(existingFb.metadataJson).pageId : undefined;
+    const chosenPage =
+      discovered.pages.find((p) => p.pageId === prevPageId) ?? discovered.pages[0]!;
+    primaryPageId = chosenPage.pageId;
 
-          const ig = firstPage.instagram_business_account;
-          if (
-            ig?.id &&
-            (params.purpose === "instagram_business" || params.purpose === "meta_all")
-          ) {
-            const igDisplay = ig.username ? `@${ig.username}` : ig.name || `Instagram (${ig.id})`;
-            upsertDiscoveredChannel({
-              provider: "meta",
-              channelKind: "instagram_business",
-              displayName: igDisplay,
-              externalAccountId: ig.id,
-              accessToken: pagePermToken,
-              expiresAt: null,
-              scopes: ["instagram_basic", "instagram_content_publish", "instagram_manage_messages"],
-              meta: {
-                igUserId: ig.id,
-                igHandle: ig.username ? `@${ig.username}` : undefined,
-                linkedPageId: firstPage.id,
-                pageId: firstPage.id,
-              },
-              assetType: "ig_account",
-            });
-          }
-        }
-      }
-    } catch {
-      // Continue to ad account discovery
-    }
+    const pageSubscribed = await autoSubscribeMetaWebhookAsset({
+      graphVersion: v,
+      assetType: "page",
+      assetId: chosenPage.pageId,
+      accessToken: chosenPage.pageAccessToken,
+    });
+
+    upsertDiscoveredChannel({
+      provider: "meta",
+      channelKind: "facebook_page",
+      displayName: chosenPage.pageName,
+      externalAccountId: chosenPage.pageId,
+      accessToken: chosenPage.pageAccessToken,
+      expiresAt: null,
+      scopes: ["pages_show_list", "pages_manage_posts", "pages_messaging", "leads_retrieval"],
+      meta: {
+        pageId: chosenPage.pageId,
+        pageName: chosenPage.pageName,
+        primaryCategory: chosenPage.category,
+        availableMetaPages: cleanPages,
+        webhookAutoSubscribed: pageSubscribed,
+      },
+    });
   }
 
-  // 2. Discover Meta Ad Accounts & Pixels
-  if (params.purpose === "meta_ads_pixel" || params.purpose === "meta_all") {
-    try {
-      const adResp = await fetch(
-        `https://graph.facebook.com/${v}/me/adaccounts?fields=id,account_id,name,currency,account_status&limit=25`,
-        {
-          headers: { Authorization: `Bearer ${userToken}` },
-          signal: AbortSignal.timeout(8000),
-        }
-      );
-      if (adResp.ok) {
-        const adBody = (await adResp.json()) as {
-          data?: Array<{
-            id: string;
-            account_id?: string;
-            name?: string;
-            currency?: string;
-            account_status?: number;
-          }>;
-        };
-        const activeAdAcc =
-          adBody.data?.find((a) => a.account_status === 1 && a.currency === "INR") ||
-          adBody.data?.find((a) => a.account_status === 1) ||
-          adBody.data?.[0];
+  // 2. Instagram Business Account
+  if (
+    discovered.instagramAccounts.length > 0 &&
+    (params.purpose === "instagram_business" || params.purpose === "meta_all")
+  ) {
+    const existingIg = findExistingChannel("meta", "instagram_business");
+    const prevIgId = existingIg ? parseMetadataSafe(existingIg.metadataJson).igUserId : undefined;
+    const chosenIg =
+      discovered.instagramAccounts.find((ig) => ig.igUserId === prevIgId) ??
+      discovered.instagramAccounts[0]!;
+    const igDisplay = chosenIg.igUsername
+      ? `@${chosenIg.igUsername}`
+      : chosenIg.name || `Instagram (${chosenIg.igUserId})`;
 
-        if (activeAdAcc?.id) {
-          const actId = activeAdAcc.id.startsWith("act_")
-            ? activeAdAcc.id
-            : `act_${activeAdAcc.account_id || activeAdAcc.id}`;
+    const igPageSubscribed = await autoSubscribeMetaWebhookAsset({
+      graphVersion: v,
+      assetType: "page",
+      assetId: chosenIg.linkedPageId,
+      accessToken: chosenIg.pageAccessToken,
+    });
 
-          let discoveredPixelId: string | undefined;
-          try {
-            const pxResp = await fetch(
-              `https://graph.facebook.com/${v}/${actId}/adspixels?fields=id,name&limit=5`,
-              {
-                headers: { Authorization: `Bearer ${userToken}` },
-                signal: AbortSignal.timeout(6000),
-              }
-            );
-            if (pxResp.ok) {
-              const pxBody = (await pxResp.json()) as { data?: Array<{ id: string }> };
-              discoveredPixelId = pxBody.data?.[0]?.id;
-            }
-          } catch {
-            // Optional pixel discovery
-          }
-
-          const adLabel = activeAdAcc.name
-            ? `${activeAdAcc.name} (${actId})`
-            : `Meta Ads (${actId})`;
-
-          upsertDiscoveredChannel({
-            provider: "meta",
-            channelKind: "meta_ads_pixel",
-            displayName: adLabel,
-            externalAccountId: actId,
-            accessToken: userToken,
-            expiresAt: userExpiresAt,
-            scopes: ["ads_management", "ads_read", "business_management", "leads_retrieval"],
-            meta: {
-              adAccountId: actId,
-              pixelId: discoveredPixelId,
-              pageId: primaryPageId,
-              currencyCode: activeAdAcc.currency || "INR",
-            },
-            assetType: "ad_account",
-          });
-        }
-      }
-    } catch {
-      // Continue to WABA discovery
-    }
+    upsertDiscoveredChannel({
+      provider: "meta",
+      channelKind: "instagram_business",
+      displayName: igDisplay,
+      externalAccountId: chosenIg.igUserId,
+      accessToken: chosenIg.pageAccessToken,
+      expiresAt: null,
+      scopes: ["instagram_basic", "instagram_content_publish", "instagram_manage_messages"],
+      meta: {
+        igUserId: chosenIg.igUserId,
+        igHandle: chosenIg.igUsername ? `@${chosenIg.igUsername}` : undefined,
+        linkedPageId: chosenIg.linkedPageId,
+        pageId: chosenIg.linkedPageId,
+        pageName: chosenIg.linkedPageName,
+        availableInstagramAccounts: cleanIgAccounts,
+        webhookAutoSubscribed: igPageSubscribed,
+      },
+    });
   }
 
-  // 3. Discover WhatsApp Business Accounts (WABA)
-  if (params.purpose === "whatsapp_cloud" || params.purpose === "meta_all") {
-    try {
-      const bizResp = await fetch(
-        `https://graph.facebook.com/${v}/me/businesses?fields=id,name,owned_whatsapp_business_accounts{id,name}&limit=10`,
-        {
-          headers: { Authorization: `Bearer ${userToken}` },
-          signal: AbortSignal.timeout(8000),
-        }
-      );
-      if (bizResp.ok) {
-        const bizBody = (await bizResp.json()) as {
-          data?: Array<{
-            id: string;
-            owned_whatsapp_business_accounts?: { data?: Array<{ id: string; name?: string }> };
-          }>;
-        };
-        const firstWaba = bizBody.data
-          ?.flatMap((b) => b.owned_whatsapp_business_accounts?.data ?? [])
-          .find((w) => Boolean(w.id));
-        if (firstWaba?.id) {
-          const phoneResp = await fetch(
-            `https://graph.facebook.com/${v}/${firstWaba.id}/phone_numbers?fields=id,display_phone_number,verified_name&limit=5`,
-            {
-              headers: { Authorization: `Bearer ${userToken}` },
-              signal: AbortSignal.timeout(6000),
-            }
-          );
-          if (phoneResp.ok) {
-            const phoneBody = (await phoneResp.json()) as {
-              data?: Array<{ id: string; display_phone_number?: string; verified_name?: string }>;
-            };
-            const firstPhone = phoneBody.data?.[0];
-            if (firstPhone?.id) {
-              const wabaLabel =
-                firstPhone.verified_name ||
-                firstWaba.name ||
-                `WhatsApp (${firstPhone.display_phone_number || firstPhone.id})`;
-              upsertDiscoveredChannel({
-                provider: "whatsapp",
-                channelKind: "whatsapp_cloud",
-                displayName: wabaLabel,
-                externalAccountId: firstPhone.id,
-                accessToken: userToken,
-                expiresAt: userExpiresAt,
-                scopes: ["whatsapp_business_management", "whatsapp_business_messaging"],
-                meta: {
-                  wabaId: firstWaba.id,
-                  phoneNumberId: firstPhone.id,
-                  displayPhone: firstPhone.display_phone_number,
-                  metaAppId: cfg.appId,
-                },
-                assetType: "waba_phone",
-              });
-            }
-          }
-        }
-      }
-    } catch {
-      // Non-fatal
-    }
+  // 3. Meta Ad Accounts & Pixels
+  if (
+    discovered.adAccounts.length > 0 &&
+    (params.purpose === "meta_ads_pixel" || params.purpose === "meta_all")
+  ) {
+    const existingAds = findExistingChannel("meta", "meta_ads_pixel");
+    const prevAdsMeta = existingAds ? parseMetadataSafe(existingAds.metadataJson) : undefined;
+    const chosenAdAcc =
+      discovered.adAccounts.find((a) => a.adAccountId === prevAdsMeta?.adAccountId) ??
+      discovered.adAccounts[0]!;
+    const chosenPixelId =
+      (prevAdsMeta?.pixelId &&
+      chosenAdAcc.availablePixels?.some((px) => px.pixelId === prevAdsMeta.pixelId)
+        ? prevAdsMeta.pixelId
+        : chosenAdAcc.pixelId) || undefined;
+    const adLabel = `${chosenAdAcc.name} (${chosenAdAcc.adAccountId})`;
+
+    upsertDiscoveredChannel({
+      provider: "meta",
+      channelKind: "meta_ads_pixel",
+      displayName: adLabel,
+      externalAccountId: chosenAdAcc.adAccountId,
+      accessToken: userToken,
+      expiresAt: userExpiresAt,
+      scopes: ["ads_management", "ads_read", "business_management", "leads_retrieval"],
+      meta: {
+        adAccountId: chosenAdAcc.adAccountId,
+        pixelId: chosenPixelId,
+        pageId: primaryPageId,
+        currencyCode: chosenAdAcc.currency || "INR",
+        availableMetaAdAccounts: discovered.adAccounts,
+      },
+    });
+  }
+
+  // 4. WhatsApp Business Accounts (WABA) & Phone Numbers
+  if (
+    discovered.wabaPhones.length > 0 &&
+    (params.purpose === "whatsapp_cloud" || params.purpose === "meta_all")
+  ) {
+    const existingWa = findExistingChannel("whatsapp", "whatsapp_cloud");
+    const prevPhoneId = existingWa
+      ? parseMetadataSafe(existingWa.metadataJson).phoneNumberId
+      : undefined;
+    const chosenPhone =
+      discovered.wabaPhones.find((ph) => ph.phoneNumberId === prevPhoneId) ??
+      discovered.wabaPhones[0]!;
+
+    const wabaSubscribed = await autoSubscribeMetaWebhookAsset({
+      graphVersion: v,
+      assetType: "waba",
+      assetId: chosenPhone.wabaId,
+      accessToken: userToken,
+    });
+
+    upsertDiscoveredChannel({
+      provider: "whatsapp",
+      channelKind: "whatsapp_cloud",
+      displayName: chosenPhone.verifiedName,
+      externalAccountId: chosenPhone.phoneNumberId,
+      accessToken: userToken,
+      expiresAt: userExpiresAt,
+      scopes: ["whatsapp_business_management", "whatsapp_business_messaging"],
+      meta: {
+        wabaId: chosenPhone.wabaId,
+        phoneNumberId: chosenPhone.phoneNumberId,
+        displayPhone: chosenPhone.displayPhone,
+        metaAppId: cfg.appId,
+        availableWabaPhones: discovered.wabaPhones,
+        webhookAutoSubscribed: wabaSubscribed,
+      },
+    });
   }
 
   const summaryMessage =
     connectedLabels.length > 0
-      ? `Connected via 1-Click Meta Login: ${connectedLabels.join(" • ")}`
-      : "Signed in with Facebook, but Meta returned 0 Pages, Instagram Business accounts, or Ad Accounts assigned to this profile. Ensure your Facebook account is an Admin of your Business Manager assets.";
+      ? `Connected via 1-Click Facebook Login: ${connectedLabels.join(" • ")}`
+      : "Signed in with Facebook, but no Facebook Pages, Instagram Business profiles, Ad Accounts, or WhatsApp Business numbers were found on this account. Make sure you sign in with the Facebook profile that manages your business assets.";
 
   appendActionLog({
     workspaceId: params.workspaceId,
@@ -3985,6 +4509,347 @@ export async function completeMetaOAuthConnection(params: {
 
   return {
     connectedLabels,
+    summaryMessage,
+  };
+}
+
+export async function selectMetaChannelAsset(params: {
+  workspaceId: string;
+  actorId: string;
+  connectionId: string;
+  assetId: string;
+  secondaryPixelId?: string;
+}): Promise<{
+  connectionId: string;
+  channelKind: ConnectionChannelKind;
+  displayName: string;
+  externalAccountId: string;
+  webhookAutoSubscribed: boolean;
+}> {
+  const db = controlDb();
+  const conn = db
+    .select()
+    .from(controlSchema.connections)
+    .where(
+      and(
+        eq(controlSchema.connections.id, params.connectionId),
+        eq(controlSchema.connections.workspaceId, params.workspaceId)
+      )
+    )
+    .get();
+
+  if (!conn) {
+    throw new RslError("RSL-VAL-1001", "Connected channel not found in this workspace.");
+  }
+
+  const meta = parseMetadataSafe(conn.metadataJson);
+  const channelKind =
+    meta.channelKind ||
+    (conn.provider === "whatsapp" ? "whatsapp_cloud" : "facebook_page");
+
+  let stored: StoredTokenPayload = { accessToken: "", issuedAt: Date.now() };
+  try {
+    stored = JSON.parse(decryptEnvelope(conn.encryptedTokens)) as StoredTokenPayload;
+  } catch {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Stored connection credentials could not be read. Please reconnect with 1-Click Facebook Login."
+    );
+  }
+
+  const cfg = getPlatformMetaAppConfig();
+  const v = cfg.graphVersion || "v21.0";
+  const userToken = stored.oauthUserToken || stored.accessToken;
+  const now = Date.now();
+
+  let nextDisplayName = conn.displayName;
+  let nextExternalId = conn.externalAccountId;
+  let nextAccessToken = stored.accessToken;
+  let webhookAutoSubscribed = Boolean(meta.webhookAutoSubscribed);
+
+  if (channelKind === "facebook_page") {
+    const targetPage = (meta.availableMetaPages ?? []).find(
+      (p) => p.pageId === params.assetId
+    );
+    if (!targetPage) {
+      throw new RslError("RSL-VAL-1001", "Selected Facebook Page was not found in your discovered pages.");
+    }
+    nextDisplayName = targetPage.pageName;
+    nextExternalId = targetPage.pageId;
+
+    if (userToken && !/^(rsl_sandbox_|sandbox_|test_)/i.test(userToken)) {
+      try {
+        const pResp = await fetch(
+          `https://graph.facebook.com/${v}/${encodeURIComponent(targetPage.pageId)}?fields=access_token,name`,
+          {
+            headers: { Authorization: `Bearer ${userToken}` },
+            signal: AbortSignal.timeout(6000),
+          }
+        );
+        if (pResp.ok) {
+          const pData = (await pResp.json()) as { access_token?: string; name?: string };
+          if (pData.access_token) nextAccessToken = pData.access_token;
+          if (pData.name) nextDisplayName = pData.name;
+        }
+      } catch {
+        // Keep current token on offline/network error
+      }
+      webhookAutoSubscribed = await autoSubscribeMetaWebhookAsset({
+        graphVersion: v,
+        assetType: "page",
+        assetId: targetPage.pageId,
+        accessToken: nextAccessToken,
+      });
+    }
+
+    meta.pageId = targetPage.pageId;
+    meta.pageName = nextDisplayName;
+    meta.primaryCategory = targetPage.category;
+    meta.webhookAutoSubscribed = webhookAutoSubscribed;
+    upsertRoutingEntry("meta", targetPage.pageId, params.workspaceId, now);
+  } else if (channelKind === "instagram_business") {
+    const targetIg = (meta.availableInstagramAccounts ?? []).find(
+      (ig) => ig.igUserId === params.assetId
+    );
+    if (!targetIg) {
+      throw new RslError(
+        "RSL-VAL-1001",
+        "Selected Instagram Business account was not found in your discovered accounts."
+      );
+    }
+    nextDisplayName = targetIg.igUsername
+      ? `@${targetIg.igUsername}`
+      : targetIg.name || `Instagram (${targetIg.igUserId})`;
+    nextExternalId = targetIg.igUserId;
+
+    if (userToken && !/^(rsl_sandbox_|sandbox_|test_)/i.test(userToken)) {
+      try {
+        const pResp = await fetch(
+          `https://graph.facebook.com/${v}/${encodeURIComponent(targetIg.linkedPageId)}?fields=access_token`,
+          {
+            headers: { Authorization: `Bearer ${userToken}` },
+            signal: AbortSignal.timeout(6000),
+          }
+        );
+        if (pResp.ok) {
+          const pData = (await pResp.json()) as { access_token?: string };
+          if (pData.access_token) nextAccessToken = pData.access_token;
+        }
+      } catch {
+        // Keep current token
+      }
+      webhookAutoSubscribed = await autoSubscribeMetaWebhookAsset({
+        graphVersion: v,
+        assetType: "page",
+        assetId: targetIg.linkedPageId,
+        accessToken: nextAccessToken,
+      });
+    }
+
+    meta.igUserId = targetIg.igUserId;
+    meta.igHandle = targetIg.igUsername ? `@${targetIg.igUsername}` : undefined;
+    meta.linkedPageId = targetIg.linkedPageId;
+    meta.pageId = targetIg.linkedPageId;
+    meta.pageName = targetIg.linkedPageName;
+    meta.webhookAutoSubscribed = webhookAutoSubscribed;
+    upsertRoutingEntry("meta", targetIg.igUserId, params.workspaceId, now);
+    upsertRoutingEntry("meta", targetIg.linkedPageId, params.workspaceId, now);
+  } else if (channelKind === "meta_ads_pixel") {
+    const targetAd = (meta.availableMetaAdAccounts ?? []).find(
+      (a) => a.adAccountId === params.assetId
+    );
+    if (!targetAd) {
+      throw new RslError(
+        "RSL-VAL-1001",
+        "Selected Meta Ad Account was not found in your discovered ad accounts."
+      );
+    }
+    const chosenPixel =
+      params.secondaryPixelId !== undefined
+        ? params.secondaryPixelId.trim() || undefined
+        : targetAd.pixelId;
+    nextDisplayName = `${targetAd.name} (${targetAd.adAccountId})`;
+    nextExternalId = targetAd.adAccountId;
+    meta.adAccountId = targetAd.adAccountId;
+    meta.currencyCode = targetAd.currency || meta.currencyCode || "INR";
+    meta.pixelId = chosenPixel;
+    upsertRoutingEntry("meta", targetAd.adAccountId, params.workspaceId, now);
+  } else if (channelKind === "whatsapp_cloud") {
+    const targetPhone = (meta.availableWabaPhones ?? []).find(
+      (ph) => ph.phoneNumberId === params.assetId
+    );
+    if (!targetPhone) {
+      throw new RslError(
+        "RSL-VAL-1001",
+        "Selected WhatsApp Business number was not found in your discovered numbers."
+      );
+    }
+    nextDisplayName = targetPhone.verifiedName;
+    nextExternalId = targetPhone.phoneNumberId;
+
+    if (userToken && !/^(rsl_sandbox_|sandbox_|test_)/i.test(userToken)) {
+      webhookAutoSubscribed = await autoSubscribeMetaWebhookAsset({
+        graphVersion: v,
+        assetType: "waba",
+        assetId: targetPhone.wabaId,
+        accessToken: userToken,
+      });
+    }
+
+    meta.wabaId = targetPhone.wabaId;
+    meta.phoneNumberId = targetPhone.phoneNumberId;
+    meta.displayPhone = targetPhone.displayPhone;
+    meta.webhookAutoSubscribed = webhookAutoSubscribed;
+    upsertRoutingEntry("whatsapp", targetPhone.phoneNumberId, params.workspaceId, now);
+    upsertRoutingEntry("whatsapp", targetPhone.wabaId, params.workspaceId, now);
+  } else {
+    throw new RslError("RSL-VAL-1001", `Channel kind '${channelKind}' does not use Meta asset switching.`);
+  }
+
+  meta.maskedTokenHint = maskSecretToken(nextAccessToken);
+  meta.lastLiveCheckedAccountName = nextDisplayName;
+  meta.lastLiveCheckMessage = `Active asset switched to ${nextDisplayName}.`;
+
+  const nextEnc = encryptEnvelope(
+    JSON.stringify({
+      accessToken: nextAccessToken,
+      oauthUserToken: stored.oauthUserToken,
+      refreshToken: stored.refreshToken,
+      issuedAt: now,
+    } satisfies StoredTokenPayload)
+  );
+
+  db.update(controlSchema.connections)
+    .set({
+      displayName: nextDisplayName,
+      externalAccountId: nextExternalId,
+      encryptedTokens: nextEnc,
+      metadataJson: JSON.stringify(meta),
+      status: "healthy",
+      updatedAt: now,
+    })
+    .where(eq(controlSchema.connections.id, conn.id))
+    .run();
+
+  appendActionLog({
+    workspaceId: params.workspaceId,
+    actorType: "user",
+    actorId: params.actorId,
+    source: "web",
+    action: "connections.updated",
+    outcome: "success",
+    requestId: newId(),
+    correlationId: newId(),
+    durationMs: 12,
+    summary: `Switched active ${channelKind} asset to ${nextDisplayName} (${nextExternalId})`,
+  });
+
+  return {
+    connectionId: conn.id,
+    channelKind,
+    displayName: nextDisplayName,
+    externalAccountId: nextExternalId,
+    webhookAutoSubscribed,
+  };
+}
+
+export async function refreshMetaChannelAssets(params: {
+  workspaceId: string;
+  actorId: string;
+  connectionId: string;
+}): Promise<{
+  connectionId: string;
+  discoveredCount: number;
+  summaryMessage: string;
+}> {
+  const db = controlDb();
+  const conn = db
+    .select()
+    .from(controlSchema.connections)
+    .where(
+      and(
+        eq(controlSchema.connections.id, params.connectionId),
+        eq(controlSchema.connections.workspaceId, params.workspaceId)
+      )
+    )
+    .get();
+
+  if (!conn) {
+    throw new RslError("RSL-VAL-1001", "Connected channel not found in this workspace.");
+  }
+
+  let stored: StoredTokenPayload;
+  try {
+    stored = JSON.parse(decryptEnvelope(conn.encryptedTokens)) as StoredTokenPayload;
+  } catch {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Stored connection credentials could not be read. Click 'Reconnect with Facebook' to refresh."
+    );
+  }
+
+  const userToken = stored.oauthUserToken || stored.accessToken;
+  if (!userToken) {
+    throw new RslError("RSL-VAL-1001", "No OAuth token available. Click 'Reconnect with Facebook'.");
+  }
+
+  const cfg = getPlatformMetaAppConfig();
+  const meta = parseMetadataSafe(conn.metadataJson);
+  const channelKind =
+    meta.channelKind ||
+    (conn.provider === "whatsapp" ? "whatsapp_cloud" : "facebook_page");
+
+  const purposeMap: Record<string, MetaOAuthPurpose> = {
+    facebook_page: "facebook_page",
+    instagram_business: "instagram_business",
+    meta_ads_pixel: "meta_ads_pixel",
+    whatsapp_cloud: "whatsapp_cloud",
+  };
+  const purpose = purposeMap[channelKind] || "meta_all";
+
+  const discovered = await discoverMetaGraphAssets({
+    userToken,
+    graphVersion: cfg.graphVersion || "v21.0",
+    appId: cfg.appId,
+    appSecret: cfg.appSecret,
+    purpose,
+  });
+
+  let discoveredCount = 0;
+  if (channelKind === "facebook_page") {
+    meta.availableMetaPages = discovered.pages.map(({ pageAccessToken: _pt, ...rest }) => rest);
+    discoveredCount = meta.availableMetaPages.length;
+  } else if (channelKind === "instagram_business") {
+    meta.availableInstagramAccounts = discovered.instagramAccounts.map(
+      ({ pageAccessToken: _pt, ...rest }) => rest
+    );
+    discoveredCount = meta.availableInstagramAccounts.length;
+  } else if (channelKind === "meta_ads_pixel") {
+    meta.availableMetaAdAccounts = discovered.adAccounts;
+    discoveredCount = meta.availableMetaAdAccounts.length;
+  } else if (channelKind === "whatsapp_cloud") {
+    meta.availableWabaPhones = discovered.wabaPhones;
+    discoveredCount = meta.availableWabaPhones.length;
+  }
+
+  const summaryMessage =
+    discoveredCount > 0
+      ? `Synced ${discoveredCount} business asset${discoveredCount === 1 ? "" : "s"} from Facebook.`
+      : "No additional assets returned by Facebook for this channel.";
+  meta.lastLiveCheckMessage = summaryMessage;
+
+  db.update(controlSchema.connections)
+    .set({
+      metadataJson: JSON.stringify(meta),
+      lastHealthCheckAt: Date.now(),
+      updatedAt: Date.now(),
+    })
+    .where(eq(controlSchema.connections.id, conn.id))
+    .run();
+
+  return {
+    connectionId: conn.id,
+    discoveredCount,
     summaryMessage,
   };
 }

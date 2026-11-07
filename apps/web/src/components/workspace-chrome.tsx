@@ -227,13 +227,13 @@ const WORKSPACE_NAV_SECTIONS: Array<{
       {
         href: "/connections",
         label: "Connected Channels",
-        keywords: "whatsapp meta facebook instagram google drive connect whitelisting webhook verify",
-        helpTitle: "Connecting WhatsApp, Instagram, Facebook & Google",
+        keywords: "whatsapp meta facebook instagram google drive ads reviews connect oauth",
+        helpTitle: "1-Click Connected Accounts (Meta & Google)",
         helpSummary:
-          "Follow step-by-step whitelisting checklists and link WhatsApp Cloud API, Instagram Business, Facebook Pages, and Google Business Profile.",
+          "Sign in with Facebook or Google in one click to connect WhatsApp Business, Instagram, Facebook Pages, Meta Ads, Google Business Profile, Google Ads, and Google Drive.",
         helpSteps: [
-          "Complete the Meta / Google whitelisting checklist for your channel.",
-          "Paste your Permanent System User token and click Test Live API to verify connectivity.",
+          "Click 'Connect All with Facebook' or 'Connect All with Google' (or connect any individual channel).",
+          "Approve your business account on Facebook or Google — assets and webhooks configure automatically.",
         ],
         guideSlug: "connecting-channels-whatsapp-meta-google",
       },

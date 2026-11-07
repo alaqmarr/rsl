@@ -1207,6 +1207,64 @@ export async function staffUpdateClientProfileAction(formData: FormData) {
   return flashAdminRedirect(returnTo, "notice", `Saved business profile & status (${billingStatus}).`);
 }
 
+export async function staffToggleManualCredentialsAction(formData: FormData) {
+  const workspaceId = String(formData.get("workspaceId") || "").trim();
+  const returnTo = safeReturnTo(
+    formData.get("returnTo"),
+    `/clients/${workspaceId}?tab=profile`
+  );
+  const staff = await requireStaffWithPermission(
+    ["staff:clients.manage", "staff:ops.manage"],
+    returnTo
+  );
+  const enabled = String(formData.get("enabled") || "false") === "true";
+
+  const db = controlDb();
+  const ws = db
+    .select({
+      id: controlSchema.workspaces.id,
+      name: controlSchema.workspaces.name,
+    })
+    .from(controlSchema.workspaces)
+    .where(eq(controlSchema.workspaces.id, workspaceId))
+    .get();
+
+  if (!ws) {
+    return flashAdminRedirect(returnTo, "error", "Client workspace not found.");
+  }
+
+  db.update(controlSchema.workspaces)
+    .set({
+      allowManualCredentials: enabled,
+      updatedAt: Date.now(),
+    })
+    .where(eq(controlSchema.workspaces.id, workspaceId))
+    .run();
+
+  platformLogsDb()
+    .insert(platformLogsSchema.staffActionLogs)
+    .values({
+      id: newEntityId("act", workspaceId),
+      ts: Date.now(),
+      staffId: staff.id,
+      action: "client.manual_credentials_policy",
+      targetTenantId: workspaceId,
+      summary: `${
+        enabled ? "Enabled" : "Disabled"
+      } manual channel credential entry for client '${ws.name}'`,
+      correlationId: newEntityId("req", workspaceId),
+    })
+    .run();
+
+  return flashAdminRedirect(
+    returnTo,
+    "notice",
+    enabled
+      ? `Manual credential entry ENABLED for '${ws.name}'. The client can now see the support override section on Connected Channels.`
+      : `Manual credential entry DISABLED for '${ws.name}'. Only clean 1-click Facebook & Google sign-in buttons are shown.`
+  );
+}
+
 export async function staffResetClientPasswordAction(formData: FormData) {
   const workspaceId = String(formData.get("workspaceId") || "").trim();
   const userId = String(formData.get("userId") || "").trim();

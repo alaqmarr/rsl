@@ -111,6 +111,7 @@ export const workspaces = sqliteTable("workspaces", {
   freeAccessNote: text("free_access_note"),
   freeAccessGrantedBy: text("free_access_granted_by"),
   autoBillingReminders: integer("auto_billing_reminders", { mode: "boolean" }).notNull().default(true),
+  allowManualCredentials: integer("allow_manual_credentials", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });

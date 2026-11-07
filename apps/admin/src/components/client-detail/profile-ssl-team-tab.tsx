@@ -4,6 +4,7 @@ import { SubmitButton } from "@/components/ios-feedback";
 import {
   staffProvisionClientSslAction,
   staffResetClientPasswordAction,
+  staffToggleManualCredentialsAction,
   staffUpdateClientProfileAction,
   staffVerifyClientEmailAction,
 } from "@/lib/actions";
@@ -61,6 +62,7 @@ export function ClientProfileSslTeamTab({
     industry: string | null;
     stateCode: string;
     gstin: string | null;
+    allowManualCredentials?: boolean;
   };
   isPaused: boolean;
   canManageClients: boolean;
@@ -75,9 +77,64 @@ export function ClientProfileSslTeamTab({
   teamMembers: ClientTeamMemberInfo[];
 }) {
   const returnToProfile = `/clients/${workspace.id}?tab=profile`;
+  const manualEnabled = Boolean(workspace.allowManualCredentials);
 
   return (
     <div className="space-y-6">
+      <SectionCard
+        title="Connection Suite Policy — Manual API Credential Entry"
+        subtitle="By default, clients only see clean 1-click Facebook & Google sign-in buttons. Enable manual credential entry only when a specific client requires custom System User Tokens or support-assisted manual overrides."
+        action={
+          <StatusPill
+            label={
+              manualEnabled
+                ? "Manual Credentials Enabled"
+                : "1-Click Sign-In Only (Default)"
+            }
+            tone={manualEnabled ? "amber" : "emerald"}
+          />
+        }
+      >
+        <div className="flex flex-col justify-between gap-4 rounded-xl border border-zinc-200/90 bg-zinc-50/70 p-4 sm:flex-row sm:items-center">
+          <div className="space-y-1 text-xs">
+            <div className="font-bold text-slate-900">
+              {manualEnabled
+                ? "Support Manual Credential Override is ACTIVE for this client"
+                : "Strict 1-Click OAuth Mode is ACTIVE for this client"}
+            </div>
+            <p className="max-w-2xl leading-relaxed text-zinc-600">
+              {manualEnabled
+                ? "This client can currently view the collapsible 'Manual API Credentials Override' section on Connected Channels & API Tokens and submit custom access tokens."
+                : "All raw token forms, webhook callback URLs, and manual credential inputs are hidden and blocked on the server for this client."}
+            </p>
+          </div>
+          {canProvisionSsl && (
+            <form action={staffToggleManualCredentialsAction} className="shrink-0">
+              <input type="hidden" name="workspaceId" value={workspace.id} />
+              <input
+                type="hidden"
+                name="enabled"
+                value={manualEnabled ? "false" : "true"}
+              />
+              <input type="hidden" name="returnTo" value={returnToProfile} />
+              <SubmitButton
+                className={
+                  manualEnabled
+                    ? "adm-btn-secondary text-xs"
+                    : "adm-btn-dark text-xs"
+                }
+                spinnerSize="xs"
+                pendingText="Updating Policy..."
+              >
+                {manualEnabled
+                  ? "Disable Manual Credentials (1-Click Only)"
+                  : "Enable Manual Credentials for Client"}
+              </SubmitButton>
+            </form>
+          )}
+        </div>
+      </SectionCard>
+
       <SectionCard
         title="Client Wildcard Subdomains & Queued SSL Certificates"
         subtitle={`Dedicated HTTPS ingress endpoints under ${clientEndpoints.tallyWildcardPattern} and ${clientEndpoints.apiWildcardPattern} managed automatically through the backend SSL queue`}

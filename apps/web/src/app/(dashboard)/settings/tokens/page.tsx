@@ -124,7 +124,7 @@ export default async function UnifiedApiTokensPage({
             )}
             {canAccessConnections && (
               <Link href="/connections" className="rsl-btn-secondary">
-                Channel Whitelisting Steps
+                Connected Accounts
               </Link>
             )}
             {canManageTally && (
@@ -194,6 +194,7 @@ export default async function UnifiedApiTokensPage({
           tokenMode: c.metadata.tokenMode,
         }))}
         canManageConnections={canManageConnections}
+        allowManualCredentials={Boolean(connectionsData.allowManualCredentials)}
         tallyToken={canManageTally ? tallyEndpoint.webhookToken : "••••••••••••••••"}
         tallyWebhookUrl={tallyWebhookUrl}
         tallyCleanEndpointUrl={endpoints.tallyWebhookUrl}

@@ -53,13 +53,17 @@ import {
   verifyRazorpayCheckoutAndCreditWallet,
 } from "@rsl/billing";
 import {
+  assertManualCredentialsAllowedForWorkspace,
   disconnectExternalConnection,
   formatGoogleAdsCustomerId,
   linkExternalConnection,
   normalizeGoogleAdsCustomerId,
+  refreshMetaChannelAssets,
   rotateWorkspaceWebhookVerifyToken,
   selectGoogleAdsCustomer,
   selectGoogleBusinessLocation,
+  selectGoogleSearchConsoleSite,
+  selectMetaChannelAsset,
   updateExternalConnection,
   uploadFileToWorkspaceGoogleDrive,
   verifyExternalConnectionHealth,
@@ -2188,6 +2192,11 @@ export async function generateReviewDraftAction(formData: FormData) {
 
 export async function connectAccountAction(formData: FormData) {
   const session = await requireWebSession();
+  try {
+    assertManualCredentialsAllowedForWorkspace(session.workspace.id);
+  } catch (err) {
+    return goWithError("/connections", friendlyMessage(err));
+  }
   const provider = String(formData.get("provider") || "whatsapp") as "meta" | "whatsapp" | "google" | "gdrive";
   const assetTypeRaw = String(formData.get("assetType") || "");
   const res = await linkExternalConnection(session.ctx, {
@@ -3263,6 +3272,7 @@ export async function connectChannelJsonAction(formData: FormData): Promise<{
 }> {
   try {
     const session = await requireWebSession();
+    assertManualCredentialsAllowedForWorkspace(session.workspace.id);
     const channelKindRaw = String(formData.get("channelKind") || "whatsapp_cloud").trim();
     const channelKind = (
       channelKindRaw in CHANNEL_DEFAULTS ? channelKindRaw : "whatsapp_cloud"
@@ -3392,6 +3402,7 @@ export async function updateConnectionJsonAction(formData: FormData): Promise<{
 }> {
   try {
     const session = await requireWebSession();
+    assertManualCredentialsAllowedForWorkspace(session.workspace.id);
     const connectionId = String(formData.get("connectionId") || "").trim();
     const displayName = String(formData.get("displayName") || "").trim() || undefined;
     const externalAccountId = String(formData.get("externalAccountId") || "").trim() || undefined;
@@ -3582,6 +3593,90 @@ export async function selectGoogleAdsCustomerJsonAction(formData: FormData): Pro
     return {
       ok: true,
       message: `Active Google Ads account set to '${selected.data.displayName}' (${selected.data.formattedCustomerId}).`,
+    };
+  } catch (err) {
+    return { ok: false, message: friendlyMessage(err) };
+  }
+}
+
+export async function selectGoogleSearchConsoleSiteJsonAction(formData: FormData): Promise<{
+  ok: boolean;
+  message: string;
+}> {
+  try {
+    const session = await requireWebSession();
+    authorize(session.ctx, "connections:manage");
+    const connectionId = String(formData.get("connectionId") || "").trim();
+    const siteUrl = String(formData.get("siteUrl") || "").trim();
+    const selected = selectGoogleSearchConsoleSite({
+      workspaceId: session.workspace.id,
+      connectionId,
+      siteUrl,
+    });
+    revalidatePath("/connections");
+    revalidatePath("/campaigns");
+    return {
+      ok: true,
+      message: `Active Search Console property set to '${selected.siteUrl}'.`,
+    };
+  } catch (err) {
+    return { ok: false, message: friendlyMessage(err) };
+  }
+}
+
+export async function selectMetaChannelAssetJsonAction(formData: FormData): Promise<{
+  ok: boolean;
+  message: string;
+}> {
+  try {
+    const session = await requireWebSession();
+    authorize(session.ctx, "connections:manage");
+    const connectionId = String(formData.get("connectionId") || "").trim();
+    const assetId = String(formData.get("assetId") || "").trim();
+    const secondaryPixelRaw = formData.get("secondaryPixelId");
+    const secondaryPixelId =
+      secondaryPixelRaw !== null ? String(secondaryPixelRaw).trim() : undefined;
+
+    const selected = await selectMetaChannelAsset({
+      workspaceId: session.workspace.id,
+      actorId: session.user.id,
+      connectionId,
+      assetId,
+      secondaryPixelId,
+    });
+
+    revalidatePath("/connections");
+    revalidatePath("/whatsapp");
+    revalidatePath("/inbox");
+    revalidatePath("/campaigns");
+    revalidatePath("/settings/tokens");
+
+    return {
+      ok: true,
+      message: `Active account switched to '${selected.displayName}'.`,
+    };
+  } catch (err) {
+    return { ok: false, message: friendlyMessage(err) };
+  }
+}
+
+export async function refreshMetaChannelAssetsJsonAction(formData: FormData): Promise<{
+  ok: boolean;
+  message: string;
+}> {
+  try {
+    const session = await requireWebSession();
+    authorize(session.ctx, "connections:manage");
+    const connectionId = String(formData.get("connectionId") || "").trim();
+    const refreshed = await refreshMetaChannelAssets({
+      workspaceId: session.workspace.id,
+      actorId: session.user.id,
+      connectionId,
+    });
+    revalidatePath("/connections");
+    return {
+      ok: true,
+      message: refreshed.summaryMessage,
     };
   } catch (err) {
     return { ok: false, message: friendlyMessage(err) };
@@ -3974,6 +4069,7 @@ export async function rotateMetaVerifyTokenJsonAction(): Promise<{
   try {
     const session = await requireWebSession();
     authorize(session.ctx, "connections:manage");
+    assertManualCredentialsAllowedForWorkspace(session.workspace.id);
     const verifyToken = rotateWorkspaceWebhookVerifyToken(session.workspace.id);
 
     appendActionLog({

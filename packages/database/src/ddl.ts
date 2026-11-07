@@ -804,6 +804,13 @@ export const CONTROL_MIGRATIONS: SqlMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_web_push_user ON web_push_subscriptions(user_id);
     `,
   },
+  {
+    version: 11,
+    name: "0011_workspace_manual_credentials_policy",
+    sql: `
+      ALTER TABLE workspaces ADD COLUMN allow_manual_credentials INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 export const INGRESS_MIGRATIONS: SqlMigration[] = [

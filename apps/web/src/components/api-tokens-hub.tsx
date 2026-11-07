@@ -60,6 +60,7 @@ export interface ApiTokensHubProps {
   workspaceSlug: string;
   channels: TokenChannelItem[];
   canManageConnections: boolean;
+  allowManualCredentials?: boolean;
   tallyToken: string;
   tallyWebhookUrl: string;
   tallyCleanEndpointUrl?: string;
@@ -122,6 +123,7 @@ export function ApiTokensHub({
   workspaceSlug,
   channels,
   canManageConnections,
+  allowManualCredentials = false,
   tallyToken: initialTallyToken,
   tallyWebhookUrl: initialTallyUrl,
   tallyCleanEndpointUrl,
@@ -512,19 +514,19 @@ export function ApiTokensHub({
 
       {/* SECTION 1: External Channel Access Tokens */}
       <SectionCard
-        title={`1. External Channel Access Tokens (${channels.length})`}
-        subtitle="Encrypted OAuth & System User tokens for WhatsApp Cloud API, Instagram Business, Facebook Pages, Meta Ads, and Google"
+        title={`1. Connected Channel Sessions (${channels.length})`}
+        subtitle="Encrypted 1-Click OAuth sessions for WhatsApp Business, Instagram, Facebook Pages, Meta Ads, and Google"
         action={
           <Link href="/connections" className="rsl-btn-primary py-1.5 text-xs">
-            + Connect Channel &amp; Whitelisting Steps
+            Connected Accounts →
           </Link>
         }
       >
         {channels.length === 0 ? (
           <EmptyWorkspaceState
-            title="No external channel tokens stored yet"
-            description="Open the Connected Channels & Whitelisting Studio to link WhatsApp Business Cloud API, Instagram Business, Facebook Page, or Google Business Profile."
-            actionLabel="Open Channel Whitelisting Studio"
+            title="No channels connected yet"
+            description="Open Connected Accounts to link WhatsApp Business, Instagram, Facebook, Meta Ads, or Google in one click."
+            actionLabel="Open Connected Accounts"
             actionHref="/connections"
           />
         ) : (
@@ -585,15 +587,17 @@ export function ApiTokensHub({
                           className="rsl-btn-secondary inline-flex items-center gap-1.5 py-1.5 text-xs"
                         >
                           {isVerifying && <IosSpinner size="xs" />}
-                          <span>{isVerifying ? "Testing..." : "Test Live API"}</span>
+                          <span>{isVerifying ? "Checking..." : "Check Status"}</span>
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setRotatingChannelId(isRotating ? null : ch.id)}
-                          className="rsl-btn-secondary py-1.5 text-xs"
-                        >
-                          {isRotating ? "Cancel" : "Rotate Token"}
-                        </button>
+                        {allowManualCredentials && (
+                          <button
+                            type="button"
+                            onClick={() => setRotatingChannelId(isRotating ? null : ch.id)}
+                            className="rsl-btn-secondary py-1.5 text-xs"
+                          >
+                            {isRotating ? "Cancel" : "Rotate Token"}
+                          </button>
+                        )}
                         <button
                           type="button"
                           disabled={Boolean(pendingActionKey)}
@@ -607,7 +611,7 @@ export function ApiTokensHub({
                     )}
                   </div>
 
-                  {isRotating && canManageConnections && (
+                  {allowManualCredentials && isRotating && canManageConnections && (
                     <form
                       onSubmit={(e) => handleChannelRotateSubmit(ch.id, e)}
                       className="mt-3 flex flex-wrap items-center gap-2.5 rounded-xl border border-zinc-200 bg-zinc-50/80 p-3"
@@ -637,8 +641,14 @@ export function ApiTokensHub({
         )}
       </SectionCard>
 
-      {/* SECTION 2: Tally Prime Webhook Token & Meta Inbound Verify Token */}
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+      {/* SECTION 2: Tally Prime Webhook Token & Optional Support Meta Verify Token */}
+      <div
+        className={
+          allowManualCredentials
+            ? "grid grid-cols-1 gap-6 xl:grid-cols-2"
+            : "grid grid-cols-1 gap-6"
+        }
+      >
         <SectionCard
           title="2. Tally Prime Inbound Webhook Token"
           subtitle={tallyStatusSub}
@@ -715,65 +725,67 @@ export function ApiTokensHub({
           </div>
         </SectionCard>
 
-        <SectionCard
-          title="3. Meta & WhatsApp Inbound Webhook Verify Token"
-          subtitle="Used when verifying Callback URLs in Meta App Dashboard (WhatsApp, Instagram & Pages)"
-        >
-          <div className="space-y-3.5 text-[13px]">
-            <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/75 p-3.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-slate-900">
-                  Verify Token (hub.verify_token)
-                </span>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setRevealVerify((v) => !v)}
-                    className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-zinc-100"
-                  >
-                    {revealVerify ? "Hide" : "Reveal"}
-                  </button>
-                  <CopyTextButton text={verifyToken} label="Copy Verify Token" copiedLabel="Copied" />
-                  {canManageConnections && (
+        {allowManualCredentials && (
+          <SectionCard
+            title="3. Meta & WhatsApp Inbound Webhook Verify Token"
+            subtitle="Used when verifying Callback URLs in Meta App Dashboard (Support Override Mode)"
+          >
+            <div className="space-y-3.5 text-[13px]">
+              <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/75 p-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-slate-900">
+                    Verify Token (hub.verify_token)
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      disabled={isRotatingVerify}
-                      onClick={handleRotateVerify}
-                      className="rsl-btn-secondary inline-flex items-center gap-1.5 py-1 text-xs"
+                      onClick={() => setRevealVerify((v) => !v)}
+                      className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-zinc-100"
                     >
-                      {isRotatingVerify && <IosSpinner size="xs" />}
-                      <span>Rotate Token</span>
+                      {revealVerify ? "Hide" : "Reveal"}
                     </button>
-                  )}
+                    <CopyTextButton text={verifyToken} label="Copy Verify Token" copiedLabel="Copied" />
+                    {canManageConnections && (
+                      <button
+                        type="button"
+                        disabled={isRotatingVerify}
+                        onClick={handleRotateVerify}
+                        className="rsl-btn-secondary inline-flex items-center gap-1.5 py-1 text-xs"
+                      >
+                        {isRotatingVerify && <IosSpinner size="xs" />}
+                        <span>Rotate Token</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-2 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-xs font-semibold text-slate-900">
+                  {revealVerify ? verifyToken : maskMiddle(verifyToken)}
                 </div>
               </div>
-              <div className="mt-2 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-xs font-semibold text-slate-900">
-                {revealVerify ? verifyToken : maskMiddle(verifyToken)}
-              </div>
-            </div>
 
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-              <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/75 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-semibold text-slate-800">WhatsApp URL</span>
-                  <CopyTextButton text={whatsappWebhookUrl} label="Copy" />
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/75 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold text-slate-800">WhatsApp URL</span>
+                    <CopyTextButton text={whatsappWebhookUrl} label="Copy" />
+                  </div>
+                  <div className="mt-1 break-all font-mono text-[11px] text-emerald-800">
+                    {whatsappWebhookUrl}
+                  </div>
                 </div>
-                <div className="mt-1 break-all font-mono text-[11px] text-emerald-800">
-                  {whatsappWebhookUrl}
-                </div>
-              </div>
-              <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/75 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-semibold text-slate-800">IG &amp; Page URL</span>
-                  <CopyTextButton text={metaWebhookUrl} label="Copy" />
-                </div>
-                <div className="mt-1 break-all font-mono text-[11px] text-emerald-800">
-                  {metaWebhookUrl}
+                <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/75 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold text-slate-800">IG &amp; Page URL</span>
+                    <CopyTextButton text={metaWebhookUrl} label="Copy" />
+                  </div>
+                  <div className="mt-1 break-all font-mono text-[11px] text-emerald-800">
+                    {metaWebhookUrl}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </SectionCard>
+          </SectionCard>
+        )}
       </div>
 
       {/* SECTION 3: Platform Developer REST API Keys & Outbound Signed Webhooks */}

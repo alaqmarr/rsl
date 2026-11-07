@@ -51,15 +51,17 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const rawPurpose = (sp.get("purpose") || "google_drive").trim();
   const purpose: GoogleOAuthPurpose =
-    rawPurpose === "google_business"
-      ? "google_business"
-      : rawPurpose === "google_ads"
-        ? "google_ads"
-        : rawPurpose === "google_sheets"
-          ? "google_sheets"
-          : rawPurpose === "google_search_console"
-            ? "google_search_console"
-            : "google_drive";
+    rawPurpose === "google_all"
+      ? "google_all"
+      : rawPurpose === "google_business"
+        ? "google_business"
+        : rawPurpose === "google_ads"
+          ? "google_ads"
+          : rawPurpose === "google_sheets"
+            ? "google_sheets"
+            : rawPurpose === "google_search_console"
+              ? "google_search_console"
+              : "google_drive";
   const defaultReturnTo =
     purpose === "google_drive"
       ? "/backups"

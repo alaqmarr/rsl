@@ -137,6 +137,9 @@ export default async function AdminClientDetailPage({
                 tone="emerald"
               />
             )}
+            {workspace.allowManualCredentials && (
+              <StatusPill label="Manual Credentials Enabled" tone="amber" />
+            )}
             {workspace.gstin && (
               <span className="rounded-md border border-zinc-200 bg-white px-2 py-0.5 font-mono text-[11px] font-medium text-zinc-600">
                 GSTIN: {workspace.gstin}

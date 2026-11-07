@@ -386,47 +386,40 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
   },
   {
     routePrefix: "/connections",
-    title: "Connecting WhatsApp Cloud API, Instagram, Facebook, Meta Pixel & Google",
+    title: "1-Click Connected Accounts (Meta & Google Suite)",
     summary:
-      "Follow exact console whitelisting checklists, paste permanent System User / OAuth tokens, verify webhook callback URLs, and run live API health checks.",
-    estimatedTime: "10 min one-time setup",
+      "Sign in with Facebook or Google in one click to connect WhatsApp Business, Instagram, Facebook Pages, Meta Ads, Google Business Profile, Google Ads, Drive Backups, and CA Sheets.",
+    estimatedTime: "2 min one-time sign-in",
     guideSlug: "connecting-channels-whatsapp-meta-google",
     prerequisites: [
-      "Requires Business Owner or Admin workspace role.",
-      "For Meta / WhatsApp / Instagram: have business.facebook.com/settings + developers.facebook.com/apps open. For Google Drive or Google Business Profile: just click the 1-click 'Connect with Google' button (no Google Cloud Console or Service Account JSON needed!).",
+      "Requires Business Owner or Workspace Admin role.",
+      "Sign in using the Facebook or Google account that manages your business pages, ad accounts, or storefront locations.",
     ],
     steps: [
       {
-        title: "Select the Channel Tab You Want to Connect",
+        title: "Click 'Connect All with Facebook' for Meta Business Channels",
         detail:
-          "Click WhatsApp Cloud API, Instagram Business, Facebook Page, Meta Ads & Pixel, Google Business, or Google Drive at the top of the hub. For Google Drive & Google Business, click the green 1-click Google Sign-In button to authorize via RapidShift Labs's official Google screen!",
+          "Approve permissions once on Facebook to automatically discover your WhatsApp Business numbers, Instagram Business account, Facebook Page, and Meta Ad Accounts & Pixels — webhooks subscribe automatically.",
       },
       {
-        title: "Create an Admin System User & Generate a 'Never' Expiring Token (Meta)",
+        title: "Click 'Connect All with Google' for Google Business & Workspace",
         detail:
-          "In business.facebook.com/settings -> Users -> System Users, create an Admin System User, click 'Assign Assets' (grant Full Control on your App + WABA / Page / IG Account), and click 'Generate New Token' with Expiration = 'Never' and all listed scopes.",
-        tip: "Never paste the 24-hour temporary token from Meta's 'API Setup' page — it expires the next day with OAuth Error 190!",
+          "Sign in with Google once to connect Google Business Profile (storefront reviews), Google Ads, Google Drive off-site backups, Google Sheets CA live sync, and Search Console.",
       },
       {
-        title: "Copy & Verify the Inbound Webhook Callback URL + Verify Token",
+        title: "Switch Multi-Branch Locations or Ad Accounts in 1 Click",
         detail:
-          "Copy the Callback URL (https://app.rapidshiftlabs.in/api/webhooks/whatsapp or /meta) and Verify Token shown on the left, paste them into Meta App Dashboard -> Webhooks, click 'Verify and save', and subscribe to 'messages' & 'message_template_status_update'.",
+          "If your account manages multiple Pages, WhatsApp numbers, Ad Accounts, or Google Business branches, use the inline dropdown right inside the connected card to switch anytime.",
       },
       {
-        title: "Enter Numeric Asset IDs (Never +91 Phone Numbers or @Handles)",
+        title: "Click 'Open →' to Proceed Directly to Your Connected Tool",
         detail:
-          "For WhatsApp, paste the 15-digit Phone Number ID & WABA ID. For Instagram, turn ON 'Allow access to messages' inside the Instagram mobile app (Settings -> Messages -> Connected tools) and paste your 17-digit IG Business Account ID. For Meta Ads, include the 'act_' prefix.",
-      },
-      {
-        title: "Keep 'Run Live API Check After Saving' Enabled & Save",
-        detail:
-          "Click Connect. RapidShift encrypts your token with AES-256-GCM, runs a live Graph/Google API ping immediately, and marks the connection card green ('Healthy').",
+          "Each connected card displays a direct button to open WhatsApp & Templates, Customer Inbox, Ads & Campaigns, Google Reviews, or Backups immediately.",
       },
     ],
     commonMistakes: [
-      "Pasting your 10-digit +91 mobile number into 'Phone Number ID' instead of Meta's 15-digit Phone Number ID.",
-      "Leaving 'Allow access to messages' turned OFF in the Instagram mobile app (Meta silently drops all Instagram DM webhooks until enabled).",
-      "Forgetting to attach a payment card in Meta Business Settings -> Billing & Payments (causes Meta Error #131042).",
+      "Signing in with a personal Facebook or Gmail profile that is not an Admin on your Business Manager or Google Business Profile.",
+      "Leaving 'Allow access to messages' turned OFF inside the Instagram mobile app (Settings → Messages and story replies → Message controls → Connected tools).",
     ],
   },
   {
