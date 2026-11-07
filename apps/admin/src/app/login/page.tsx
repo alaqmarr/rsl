@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
 import { countPlatformStaff } from "@rsl/auth";
 import { resolveEndpointsFromHeaders } from "@rsl/core";
+import { getPlatformCloudflareTurnstileConfig } from "@rsl/tenancy";
 import { BrandLogo, FlashBanner } from "@rsl/ui";
 import { AdminLoginForm } from "@/components/admin-auth-forms";
 import { getOptionalStaffSession, isSetupSubdomainHost } from "@/lib/session";
@@ -25,6 +26,7 @@ export default async function AdminLoginPage({
   const staffCount = countPlatformStaff();
   const isUninitialized = staffCount === 0;
   const setupHref = endpoints.isLocalDev ? "/setup" : endpoints.setupBaseUrl;
+  const turnstile = getPlatformCloudflareTurnstileConfig();
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-[#F8F9FB] p-6">
@@ -77,7 +79,7 @@ export default async function AdminLoginPage({
 
             <FlashBanner notice={sp.notice} error={sp.error} />
 
-            <AdminLoginForm />
+            <AdminLoginForm turnstileSiteKey={turnstile.isReady ? turnstile.siteKey : null} />
           </>
         )}
       </div>

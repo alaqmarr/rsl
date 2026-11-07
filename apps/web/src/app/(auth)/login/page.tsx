@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CheckCircle2 } from "lucide-react";
 import { confirmEmailVerificationCode } from "@rsl/notifications";
+import { getPlatformCloudflareTurnstileConfig } from "@rsl/tenancy";
 import { BrandLogo } from "@rsl/ui";
 import { WebLoginForm } from "@/components/auth-forms";
 import { FlashBanner } from "@/components/flash-banner";
@@ -117,7 +118,13 @@ export default async function LoginPage({
 
           <FlashBanner notice={verifyBanner} error={sp.error} />
 
-          <WebLoginForm />
+          <WebLoginForm
+            turnstileSiteKey={
+              getPlatformCloudflareTurnstileConfig().isReady
+                ? getPlatformCloudflareTurnstileConfig().siteKey
+                : null
+            }
+          />
         </div>
 
         <div className="flex w-full max-w-[400px] flex-wrap items-center justify-between gap-2 border-t border-zinc-200/80 pt-4 text-[11px] text-zinc-500">

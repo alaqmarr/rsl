@@ -95,6 +95,12 @@ export const workspaces = sqliteTable("workspaces", {
   defaultTallyCompany: text("default_tally_company"),
   webhookVerifyToken: text("webhook_verify_token"),
   gstin: text("gstin"),
+  upiVpa: text("upi_vpa"),
+  upiPayeeName: text("upi_payee_name"),
+  bankName: text("bank_name"),
+  bankBranch: text("bank_branch"),
+  bankAccountNumber: text("bank_account_number"),
+  bankIfsc: text("bank_ifsc"),
   stateCode: text("state_code").notNull().default("27"), // e.g. 27 = Maharashtra
   currency: text("currency").notNull().default("INR"),
   timezone: text("timezone").notNull().default("Asia/Kolkata"),
@@ -816,6 +822,51 @@ export const adSpendLedger = sqliteTable(
     uniqueIndex("uq_ad_spend_ledger_idempotency").on(t.workspaceId, t.idempotencyKey),
     index("idx_ad_spend_ledger_ws_ts").on(t.workspaceId, t.createdAt),
     index("idx_ad_spend_ledger_campaign").on(t.workspaceId, t.campaignId),
+  ]
+);
+
+// W3C WebAuthn Passkeys (Windows Hello, Touch ID, Android Biometrics)
+export const userPasskeys = sqliteTable(
+  "user_passkeys",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    credentialId: text("credential_id").notNull().unique(),
+    publicKeySpki: text("public_key_spki").notNull(),
+    algorithm: integer("algorithm").notNull().default(-7), // -7 = ES256, -257 = RS256
+    signCount: integer("sign_count").notNull().default(0),
+    transportsJson: text("transports_json").notNull().default("[]"),
+    deviceLabel: text("device_label").notNull().default("Passkey"),
+    lastUsedAt: integer("last_used_at"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [index("idx_user_passkeys_user").on(t.userId)]
+);
+
+// W3C Web Push (VAPID) Browser & Mobile PWA Subscriptions
+export const webPushSubscriptions = sqliteTable(
+  "web_push_subscriptions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    endpoint: text("endpoint").notNull().unique(),
+    p256dhKey: text("p256dh_key").notNull(),
+    authKey: text("auth_key").notNull(),
+    userAgent: text("user_agent"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    lastDeliveredAt: integer("last_delivered_at"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [
+    index("idx_web_push_ws_active").on(t.workspaceId, t.active),
+    index("idx_web_push_user").on(t.userId),
   ]
 );
 

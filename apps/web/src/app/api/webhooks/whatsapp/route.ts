@@ -4,14 +4,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { dispatchWorkspaceWebhookEvent } from "@rsl/api-keys";
 import { creditWallet } from "@rsl/billing";
 import { isValidMetaWebhookVerifyToken } from "@rsl/connections";
-import { newEntityId, newId, verifyHmac } from "@rsl/core";
+import { decryptEnvelope, newEntityId, newId, verifyHmac } from "@rsl/core";
 import { controlSchema, ingressSchema, tenantDataSchema, tenantLogsSchema } from "@rsl/database";
+import { sendWorkspaceWebPushNotification } from "@rsl/notifications";
 import {
   controlDb,
+  getPlatformCloudflareAiConfig,
   getPlatformMetaAppConfig,
   ingressDb,
   tenantDataDb,
   tenantLogsDb,
+  transcribeCloudflareWorkersAiAudio,
 } from "@rsl/tenancy";
 
 interface RawWhatsAppInboundMessage {
@@ -289,6 +292,24 @@ export async function POST(req: NextRequest) {
               })
               .where(eq(tenantDataSchema.whatsappTemplates.id, matchedTmpl.id))
               .run();
+
+            void sendWorkspaceWebPushNotification({
+              workspaceId: targetWorkspaceId,
+              payload: {
+                title:
+                  nextStatus === "APPROVED"
+                    ? `WhatsApp Template Approved: ${matchedTmpl.name}`
+                    : `WhatsApp Template ${nextStatus}: ${matchedTmpl.name}`,
+                body:
+                  nextStatus === "APPROVED"
+                    ? `Meta approved '${matchedTmpl.name}'. It is now ready for automations and broadcasts.`
+                    : rejReason
+                      ? `Reason: ${rejReason}`
+                      : `Meta updated status to ${nextStatus}.`,
+                url: "/whatsapp",
+                tag: `wa-tmpl-${matchedTmpl.id}`,
+              },
+            }).catch(() => undefined);
           }
         }
 
@@ -391,8 +412,57 @@ export async function POST(req: NextRequest) {
         for (const msg of ch.value?.messages ?? []) {
           const rawDigits = msg.from?.replace(/^\+/, "") || "";
           const fromPhone = rawDigits ? `+${rawDigits}` : null;
-          const bodyText = extractWhatsAppInboundText(msg);
+          let bodyText = extractWhatsAppInboundText(msg);
           if (!fromPhone || !bodyText) continue;
+
+          // Free Cloudflare Workers AI Whisper voice-note transcription when configured
+          if (msg.audio?.id && getPlatformCloudflareAiConfig().isReady) {
+            try {
+              const waConn = ctrl
+                .select({ encryptedTokens: controlSchema.connections.encryptedTokens })
+                .from(controlSchema.connections)
+                .where(
+                  and(
+                    eq(controlSchema.connections.workspaceId, targetWorkspaceId),
+                    eq(controlSchema.connections.provider, "whatsapp")
+                  )
+                )
+                .get();
+              if (waConn?.encryptedTokens) {
+                const dec = decryptEnvelope(waConn.encryptedTokens);
+                let accessToken = dec.trim();
+                try {
+                  const parsedTok = JSON.parse(dec) as { accessToken?: string };
+                  if (parsedTok.accessToken) accessToken = parsedTok.accessToken.trim();
+                } catch {
+                  // Plain string token
+                }
+                if (accessToken && !/^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken)) {
+                  const metaRes = await fetch(
+                    `https://graph.facebook.com/v21.0/${encodeURIComponent(msg.audio.id)}`,
+                    { headers: { Authorization: `Bearer ${accessToken}` } }
+                  );
+                  if (metaRes.ok) {
+                    const mediaInfo = (await metaRes.json()) as { url?: string };
+                    if (mediaInfo.url) {
+                      const binRes = await fetch(mediaInfo.url, {
+                        headers: { Authorization: `Bearer ${accessToken}` },
+                      });
+                      if (binRes.ok) {
+                        const audioBytes = new Uint8Array(await binRes.arrayBuffer());
+                        const whisper = await transcribeCloudflareWorkersAiAudio({ audioBytes });
+                        if (whisper.ok && whisper.transcript) {
+                          bodyText = `${bodyText} — "${whisper.transcript}"`;
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            } catch {
+              // Keep base voice-note label on failure
+            }
+          }
 
           if (/^(stop|unsubscribe)$/i.test(bodyText)) {
             logsDb
@@ -544,6 +614,16 @@ export async function POST(req: NextRequest) {
             messageType: msg.type || "text",
             body: bodyText,
           }).catch(() => 0);
+
+          void sendWorkspaceWebPushNotification({
+            workspaceId: targetWorkspaceId,
+            payload: {
+              title: `WhatsApp from ${contact.name}`,
+              body: bodyText.slice(0, 140),
+              url: `/inbox?conversation=${encodeURIComponent(conv.id)}`,
+              tag: `wa-conv-${conv.id}`,
+            },
+          }).catch(() => undefined);
         }
       }
     }

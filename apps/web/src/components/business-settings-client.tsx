@@ -27,6 +27,12 @@ export interface BusinessSettingsClientProps {
     defaultTallyCompany: string | null;
     stateCode: string | null;
     gstin: string | null;
+    upiVpa?: string | null;
+    upiPayeeName?: string | null;
+    bankName?: string | null;
+    bankBranch?: string | null;
+    bankAccountNumber?: string | null;
+    bankIfsc?: string | null;
     timezone: string;
     billingStatus: string;
     createdAt: number;
@@ -72,6 +78,22 @@ export function BusinessSettingsClient({
   const router = useRouter();
   const [selectedState, setSelectedState] = useState(workspace.stateCode || "27");
   const [gstinInput, setGstinInput] = useState(workspace.gstin || "");
+  const [cityInput, setCityInput] = useState(workspace.city || "");
+  const [pincodeInput, setPincodeInput] = useState(workspace.pincode || "");
+  const [upiVpaInput, setUpiVpaInput] = useState(workspace.upiVpa || "");
+  const [upiPayeeInput, setUpiPayeeInput] = useState(workspace.upiPayeeName || workspace.name || "");
+  const [bankIfscInput, setBankIfscInput] = useState(workspace.bankIfsc || "");
+  const [bankNameInput, setBankNameInput] = useState(workspace.bankName || "");
+  const [bankBranchInput, setBankBranchInput] = useState(workspace.bankBranch || "");
+  const [bankAccInput, setBankAccInput] = useState(workspace.bankAccountNumber || "");
+  const [gstinMeta, setGstinMeta] = useState<{
+    formatValid: boolean;
+    checksumValid: boolean;
+    pan: string | null;
+    suggestedGstin: string | null;
+    error: string | null;
+  } | null>(null);
+  const [lookupBusy, setLookupBusy] = useState<"pin" | "ifsc" | null>(null);
   const [isSaving, startSaveTransition] = useTransition();
   const [isCreatingBiz, startCreateBizTransition] = useTransition();
   const [isProvisioningSsl, startProvisionSslTransition] = useTransition();
@@ -99,6 +121,94 @@ export function BusinessSettingsClient({
   }
 
   const isIntraStateMaharashtra = selectedState === "27";
+
+  async function handleGstinLiveCheck(nextVal: string) {
+    const upper = nextVal.toUpperCase().replace(/\s+/g, "");
+    setGstinInput(upper);
+    if (/^\d{2}/.test(upper)) {
+      const st = upper.slice(0, 2);
+      if (gstStates.some(([c]) => c === st)) setSelectedState(st);
+    }
+    if (upper.length === 15) {
+      try {
+        const res = await fetch(`/api/tools/lookup?kind=gstin&q=${encodeURIComponent(upper)}`);
+        const json = (await res.json()) as {
+          ok: boolean;
+          result?: {
+            formatValid: boolean;
+            checksumValid: boolean;
+            pan: string | null;
+            suggestedGstin: string | null;
+            error: string | null;
+          };
+        };
+        if (json.result) setGstinMeta(json.result);
+      } catch {
+        // Non-blocking
+      }
+    } else {
+      setGstinMeta(null);
+    }
+  }
+
+  async function handlePincodeLookup(nextPin: string) {
+    const digits = nextPin.replace(/\D/g, "").slice(0, 6);
+    setPincodeInput(digits);
+    if (digits.length === 6) {
+      setLookupBusy("pin");
+      try {
+        const res = await fetch(`/api/tools/lookup?kind=pincode&q=${encodeURIComponent(digits)}`);
+        const json = (await res.json()) as {
+          ok: boolean;
+          result?: { district: string | null; gstStateCode: string | null };
+        };
+        if (json.ok && json.result) {
+          if (json.result.district && !cityInput.trim()) {
+            setCityInput(json.result.district);
+          }
+          if (json.result.gstStateCode && gstStates.some(([c]) => c === json.result!.gstStateCode)) {
+            setSelectedState(json.result.gstStateCode);
+          }
+        }
+      } catch {
+        // Non-blocking
+      } finally {
+        setLookupBusy(null);
+      }
+    }
+  }
+
+  async function handleIfscLookup(nextIfsc: string) {
+    const upper = nextIfsc.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11);
+    setBankIfscInput(upper);
+    if (upper.length === 11) {
+      setLookupBusy("ifsc");
+      try {
+        const res = await fetch(`/api/tools/lookup?kind=ifsc&q=${encodeURIComponent(upper)}`);
+        const json = (await res.json()) as {
+          ok: boolean;
+          result?: { bank: string | null; branch: string | null; city: string | null };
+        };
+        if (json.ok && json.result) {
+          if (json.result.bank) setBankNameInput(json.result.bank);
+          if (json.result.branch) {
+            setBankBranchInput(
+              json.result.city ? `${json.result.branch}, ${json.result.city}` : json.result.branch
+            );
+          }
+          sileo.success({
+            title: "IFSC Verified",
+            description: `${json.result.bank || "Bank"} — ${json.result.branch || upper}`,
+            duration: 3200,
+          });
+        }
+      } catch {
+        // Non-blocking
+      } finally {
+        setLookupBusy(null);
+      }
+    }
+  }
 
   function handleSaveBusiness(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -285,20 +395,29 @@ export function BusinessSettingsClient({
                       <label className="rsl-label">City / District</label>
                       <input
                         name="city"
-                        defaultValue={workspace.city || ""}
+                        value={cityInput}
+                        onChange={(e) => setCityInput(e.target.value)}
                         disabled={!canEditBusiness}
                         placeholder="e.g. Mumbai"
                         className="rsl-input"
                       />
                     </div>
                     <div className="min-w-0">
-                      <label className="rsl-label">6-Digit Indian PIN Code</label>
+                      <label className="rsl-label">
+                        6-Digit Indian PIN Code{" "}
+                        {lookupBusy === "pin" && (
+                          <span className="text-[11px] font-normal text-emerald-700">
+                            (Auto-filling...)
+                          </span>
+                        )}
+                      </label>
                       <input
                         name="pincode"
-                        defaultValue={workspace.pincode || ""}
+                        value={pincodeInput}
+                        onChange={(e) => handlePincodeLookup(e.target.value)}
                         maxLength={6}
                         disabled={!canEditBusiness}
-                        placeholder="e.g. 400021"
+                        placeholder="e.g. 400021 (auto-fills City & State)"
                         className="rsl-input font-mono"
                       />
                     </div>
@@ -322,16 +441,142 @@ export function BusinessSettingsClient({
                       </select>
                     </div>
                     <div className="min-w-0">
-                      <label className="rsl-label">15-Character GSTIN (For B2B Input Credit)</label>
+                      <label className="rsl-label">15-Character GSTIN (Modulo-36 Verified)</label>
                       <input
                         name="gstin"
                         value={gstinInput}
                         disabled={!canEditBusiness}
-                        onChange={(e) => setGstinInput(e.target.value.toUpperCase())}
+                        onChange={(e) => handleGstinLiveCheck(e.target.value)}
                         maxLength={15}
-                        placeholder={`${selectedState}AAAAA0000A1Z5`}
+                        placeholder={`${selectedState}AABCU9603R1ZM`}
                         className="rsl-input font-mono uppercase"
                       />
+                      {gstinMeta && (
+                        <div className="mt-1.5 text-[11px]">
+                          {gstinMeta.checksumValid ? (
+                            <span className="font-semibold text-emerald-700">
+                              ✓ Valid GSTN Checksum • PAN: {gstinMeta.pan}
+                            </span>
+                          ) : gstinMeta.suggestedGstin ? (
+                            <div className="flex flex-wrap items-center gap-2 text-amber-800">
+                              <span>
+                                Check-digit typo detected (expected{" "}
+                                <code className="font-mono font-bold">
+                                  {gstinMeta.suggestedGstin}
+                                </code>
+                                )
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleGstinLiveCheck(gstinMeta.suggestedGstin!)}
+                                className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-900 hover:bg-amber-200"
+                              >
+                                Apply Fix
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-rose-700">{gstinMeta.error}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Direct 0%-Fee NPCI UPI QR & NEFT Bank Account for Tally Bills */}
+                  <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/70 p-4 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <div className="text-xs font-bold text-slate-900">
+                          Zero-Fee Direct UPI QR &amp; NEFT Bank Details (Shown on Tally Bill Payment Links)
+                        </div>
+                        <p className="text-[11px] text-zinc-500">
+                          Every Tally WhatsApp reminder includes a signed{" "}
+                          <code className="font-mono">/pay/bill/...</code> portal with a dynamic NPCI{" "}
+                          <code className="font-mono">upi://pay</code> QR for the exact pending balance (0% gateway fee).
+                        </p>
+                      </div>
+                      <StatusPill
+                        label={upiVpaInput.trim() ? "Direct UPI QR Ready" : "Add Merchant UPI ID"}
+                        tone={upiVpaInput.trim() ? "emerald" : "amber"}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="rsl-label">Merchant UPI ID / VPA (0% Fee)</label>
+                        <input
+                          name="upiVpa"
+                          value={upiVpaInput}
+                          onChange={(e) => setUpiVpaInput(e.target.value)}
+                          disabled={!canEditBusiness}
+                          placeholder="yourbusiness@hdfcbank or 9876543210@okicici"
+                          className="rsl-input font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="rsl-label">UPI Payee Display Name</label>
+                        <input
+                          name="upiPayeeName"
+                          value={upiPayeeInput}
+                          onChange={(e) => setUpiPayeeInput(e.target.value)}
+                          disabled={!canEditBusiness}
+                          placeholder={workspace.name}
+                          className="rsl-input text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+                      <div>
+                        <label className="rsl-label">
+                          IFSC Code{" "}
+                          {lookupBusy === "ifsc" && (
+                            <span className="text-[10px] text-emerald-700">(Looking up...)</span>
+                          )}
+                        </label>
+                        <input
+                          name="bankIfsc"
+                          value={bankIfscInput}
+                          onChange={(e) => handleIfscLookup(e.target.value)}
+                          maxLength={11}
+                          disabled={!canEditBusiness}
+                          placeholder="HDFC0000001"
+                          className="rsl-input font-mono uppercase text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="rsl-label">Bank Name</label>
+                        <input
+                          name="bankName"
+                          value={bankNameInput}
+                          onChange={(e) => setBankNameInput(e.target.value)}
+                          disabled={!canEditBusiness}
+                          placeholder="Auto-filled from IFSC"
+                          className="rsl-input text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="rsl-label">Branch</label>
+                        <input
+                          name="bankBranch"
+                          value={bankBranchInput}
+                          onChange={(e) => setBankBranchInput(e.target.value)}
+                          disabled={!canEditBusiness}
+                          placeholder="Auto-filled from IFSC"
+                          className="rsl-input text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="rsl-label">Bank Account Number</label>
+                        <input
+                          name="bankAccountNumber"
+                          value={bankAccInput}
+                          onChange={(e) => setBankAccInput(e.target.value)}
+                          disabled={!canEditBusiness}
+                          placeholder="For NEFT / RTGS"
+                          className="rsl-input font-mono text-xs"
+                        />
+                      </div>
                     </div>
                   </div>
 

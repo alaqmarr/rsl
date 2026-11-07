@@ -1,4 +1,5 @@
-import { BrandLogo } from "@rsl/ui";
+import { getPlatformCloudflareTurnstileConfig } from "@rsl/tenancy";
+import { BrandLogo, TurnstileWidget } from "@rsl/ui";
 import { FlashBanner } from "@/components/flash-banner";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
 import { forgotPasswordAction } from "@/lib/actions";
@@ -41,6 +42,13 @@ export default async function ForgotPasswordPage({
               className="rsl-input"
             />
           </div>
+          <TurnstileWidget
+            siteKey={
+              getPlatformCloudflareTurnstileConfig().isReady
+                ? getPlatformCloudflareTurnstileConfig().siteKey
+                : null
+            }
+          />
           <SubmitButton className="rsl-btn-primary w-full" pendingText="Sending Reset Link...">
             Send Reset Link
           </SubmitButton>

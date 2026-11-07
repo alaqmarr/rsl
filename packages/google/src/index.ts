@@ -12,7 +12,8 @@ import {
 import { newId, RslError } from "@rsl/core";
 import { controlSchema, tenantDataSchema } from "@rsl/database";
 import { defineAction } from "@rsl/logging";
-import { controlDb, tenantDataDb } from "@rsl/tenancy";
+import { sendWorkspaceWebPushNotification } from "@rsl/notifications";
+import { controlDb, runCloudflareWorkersAiText, tenantDataDb } from "@rsl/tenancy";
 
 export function listGoogleReviews(workspaceId: string) {
   return tenantDataDb({ workspaceId })
@@ -521,6 +522,15 @@ export const recordGoogleReview = defineAction({
       comment: input.comment.trim(),
     }).catch(() => 0);
 
+    if (input.rating <= 2) {
+      void sendWorkspaceWebPushNotification(ctx.workspaceId, {
+        title: `Attention: ${input.rating}★ Google Review (${input.locationName.trim()})`,
+        body: `${input.reviewerName.trim()}: "${input.comment.trim().slice(0, 110)}"`,
+        url: "/reviews",
+        tag: `gbp-low-review-${id}`,
+      });
+    }
+
     return { reviewId: id };
   },
 });
@@ -533,7 +543,7 @@ export const generateSmartReviewDraft = defineAction({
     reviewId: z.string().min(10),
   }),
   summarize: () => "Prepared smart reply draft for Google Business review",
-  handler: (ctx, input) => {
+  handler: async (ctx, input) => {
     const db = tenantDataDb(ctx);
     const review = db
       .select()
@@ -557,12 +567,22 @@ export const generateSmartReviewDraft = defineAction({
       );
     }
 
-    const draftText = buildSmartReplyDraftText({
-      reviewerName: review.reviewerName,
-      locationName: review.locationName,
-      rating: review.rating,
-      comment: review.comment,
+    const aiReply = await runCloudflareWorkersAiText({
+      systemPrompt:
+        "You write warm, professional, concise owner replies to Google Business Profile reviews for Indian businesses. Address the customer by name, acknowledge their exact feedback, never invent discounts, and keep under 75 words. Output ONLY the reply text.",
+      userPrompt: `Business Location: ${review.locationName}\nReviewer: ${review.reviewerName}\nStar Rating: ${review.rating}/5\nReview Comment: ${review.comment}`,
+      maxTokens: 180,
     });
+
+    const draftText =
+      aiReply.ok && aiReply.text
+        ? aiReply.text
+        : buildSmartReplyDraftText({
+            reviewerName: review.reviewerName,
+            locationName: review.locationName,
+            rating: review.rating,
+            comment: review.comment,
+          });
 
     db.update(tenantDataSchema.reviews)
       .set({
@@ -822,3 +842,4 @@ export async function publishGoogleBusinessLocalPost(params: {
 }
 
 export * from "./ads";
+export * from "./free-google-tools";

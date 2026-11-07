@@ -2,7 +2,13 @@ import { headers } from "next/headers";
 import { AlertTriangle, CheckCircle2, Database, KeyRound, MailCheck, ShieldCheck } from "lucide-react";
 import { canStaffAccessAdminRoute, formatStaffRoleLabel } from "@rsl/auth";
 import { getEnv, isLoopbackUrlOrHost, resolveEndpointsFromHeaders } from "@rsl/core";
-import { getSafePlatformCredentialsAdminSnapshot, type CredentialSource } from "@rsl/tenancy";
+import {
+  buildCloudflareEmailWorkerSnippet,
+  buildPlatformCredentialsSeedTemplate,
+  getPlatformCloudflareEmailConfig,
+  getSafePlatformCredentialsAdminSnapshot,
+  type CredentialSource,
+} from "@rsl/tenancy";
 import {
   AccessRestrictedState,
   FlashBanner,
@@ -13,13 +19,19 @@ import {
 } from "@rsl/ui";
 import { AdminCopyButton, SubmitButton } from "@/components/ios-feedback";
 import {
+  staffBulkSeedPlatformCredentialsJsonAction,
   staffClearPlatformCredentialAction,
+  staffSaveBhashiniCredentialsAction,
+  staffSaveCloudflareAiAction,
+  staffSaveCloudflareEmailRoutingAction,
+  staffSaveCloudflareTurnstileAction,
   staffSaveGoogleAdsCredentialsAction,
   staffSaveGoogleOAuthCredentialsAction,
   staffSaveManagedR2CredentialsAction,
   staffSaveMetaAppCredentialsAction,
   staffSaveRazorpayCredentialsAction,
   staffSaveSmtpCredentialsAction,
+  staffSaveWebPushVapidAction,
   staffSendTestSmtpEmailAction,
 } from "@/lib/actions";
 import { requireStaffSession } from "@/lib/session";
@@ -66,7 +78,7 @@ export default async function AdminPlatformCredentialsPage({
       : `https://app.${endpoints.primaryDomain}`;
   const googleRedirectUri = `${googleOrigin}/api/oauth/google/callback`;
   const googleScopesText =
-    "openid, email, profile, https://www.googleapis.com/auth/drive.file, https://www.googleapis.com/auth/business.manage, https://www.googleapis.com/auth/adwords";
+    "openid, email, profile, https://www.googleapis.com/auth/drive.file, https://www.googleapis.com/auth/spreadsheets, https://www.googleapis.com/auth/webmasters.readonly, https://www.googleapis.com/auth/business.manage, https://www.googleapis.com/auth/adwords";
 
   const metaRedirectUri = `${googleOrigin}/api/oauth/meta/callback`;
   const metaWebhookUri = `${googleOrigin}/api/webhooks/meta`;
@@ -75,6 +87,10 @@ export default async function AdminPlatformCredentialsPage({
   const metaScopesText =
     "public_profile, business_management, ads_management, ads_read, pages_show_list, pages_read_engagement, pages_manage_posts, pages_manage_ads, pages_messaging, leads_retrieval, instagram_basic, instagram_content_publish, instagram_manage_messages, whatsapp_business_management, whatsapp_business_messaging";
 
+  const cfEmailFull = getPlatformCloudflareEmailConfig();
+  const cfEmailWorkerCode = buildCloudflareEmailWorkerSnippet(googleOrigin);
+  const seedTemplateJson = JSON.stringify(buildPlatformCredentialsSeedTemplate(), null, 2);
+
   const dbActiveCount = [
     snap.google.source,
     snap.googleAds.source,
@@ -82,6 +98,11 @@ export default async function AdminPlatformCredentialsPage({
     snap.r2.source,
     snap.meta.source,
     snap.razorpay.source,
+    snap.turnstile.source,
+    snap.cloudflareAi.source,
+    snap.cloudflareEmail.source,
+    snap.vapid.source,
+    snap.bhashini.source,
   ].filter((s) => s === "database").length;
 
   return (
@@ -128,11 +149,58 @@ export default async function AdminPlatformCredentialsPage({
         />
         <MetricCard
           label="DB-Controlled Providers"
-          value={`${dbActiveCount} / 6`}
+          value={`${dbActiveCount} / 11`}
           sublabel="Encrypted with KMS envelope keys in control.db"
           accent="emerald"
         />
       </div>
+
+      {/* Bulk Database Credential Seeder (1-Click JSON Seed or CLI Command) */}
+      <details className="group rounded-2xl border border-emerald-200/90 bg-emerald-50/35 shadow-2xs">
+        <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 px-6 py-4 select-none">
+          <div className="flex items-center gap-2.5">
+            <Database className="h-4 w-4 text-emerald-700" />
+            <div>
+              <div className="text-sm font-bold text-slate-900">
+                Bulk Seed Credentials Directly into Database (JSON Bundle or CLI Seeder)
+              </div>
+              <div className="text-xs text-zinc-600">
+                Seed all 11 providers at once via encrypted JSON paste/upload here, or via CLI:{" "}
+                <code className="rounded bg-white px-1.5 py-0.5 font-mono text-[11px] font-semibold text-emerald-900">
+                  pnpm db:seed-credentials --file ./credentials.seed.json
+                </code>
+              </div>
+            </div>
+          </div>
+          <AdminCopyButton text={seedTemplateJson} label="Copy JSON Seed Template" />
+        </summary>
+        <div className="space-y-3.5 border-t border-emerald-200/60 bg-white p-6 text-xs">
+          <p className="text-zinc-600">
+            Paste a partial or complete JSON object matching the template (any blank or omitted provider is untouched;{" "}
+            <code className="font-mono">web_push_vapid.autoGenerate: true</code> generates fresh P-256 keys automatically).
+          </p>
+          <form action={staffBulkSeedPlatformCredentialsJsonAction} className="space-y-3">
+            <textarea
+              name="credentialsJson"
+              rows={7}
+              placeholder={seedTemplateJson}
+              className="adm-input font-mono text-[11px]"
+            />
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <input
+                type="file"
+                name="credentialsJsonFile"
+                accept="application/json,.json"
+                className="text-xs text-zinc-600"
+              />
+              <SubmitButton className="adm-btn-primary" pendingText="Seeding into control.db...">
+                <Database className="h-3.5 w-3.5" />
+                <span>Encrypt &amp; Seed Bundle into Database</span>
+              </SubmitButton>
+            </div>
+          </form>
+        </div>
+      </details>
 
       {/* Complete Minute-by-Minute Admin Guide for Google OAuth Consent Screen (Auto-expands until Google OAuth is Ready) */}
       <details
@@ -1235,6 +1303,371 @@ export default async function AdminPlatformCredentialsPage({
         {snap.razorpay.source === "database" && (
           <form action={staffClearPlatformCredentialAction} className="mt-3 border-t border-zinc-100 pt-3">
             <input type="hidden" name="providerKey" value="razorpay" />
+            <SubmitButton className="adm-btn-secondary py-1 text-[11px]" pendingText="Clearing...">
+              Remove Database Override
+            </SubmitButton>
+          </form>
+        )}
+      </SectionCard>
+
+      {/* 7. Cloudflare Turnstile Bot Protection ($0 Free Unlimited) */}
+      <SectionCard
+        title="7. Cloudflare Turnstile Bot Protection ($0 Unlimited Free — Login, Signup & Password Reset)"
+        subtitle="Invisible privacy-preserving CAPTCHA replacement from dash.cloudflare.com -> Turnstile -> Add Widget"
+        action={sourcePill(snap.turnstile.source, snap.turnstile.isReady)}
+      >
+        <form action={staffSaveCloudflareTurnstileAction} className="space-y-3.5 text-xs">
+          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block font-semibold text-zinc-700">Turnstile Site Key *</label>
+              <input
+                name="siteKey"
+                required
+                defaultValue={snap.turnstile.siteKey}
+                placeholder="0x4AAAAAA..."
+                className="adm-input font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block font-semibold text-zinc-700">
+                Turnstile Secret Key{" "}
+                {snap.turnstile.maskedSecretKey ? `(${snap.turnstile.maskedSecretKey})` : "*"}
+              </label>
+              <input
+                name="secretKey"
+                type="password"
+                placeholder={
+                  snap.turnstile.maskedSecretKey
+                    ? "Leave blank to keep saved Secret Key"
+                    : "0x4AAAAAA..."
+                }
+                className="adm-input font-mono text-xs"
+              />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <label className="inline-flex items-center gap-2 font-semibold text-slate-800">
+              <input
+                type="checkbox"
+                name="enabled"
+                defaultChecked={snap.turnstile.enabled}
+                className="h-4 w-4 rounded border-zinc-300 text-emerald-600"
+              />
+              <span>Enable Turnstile on Login, Register &amp; Password Reset</span>
+            </label>
+            <SubmitButton className="adm-btn-primary" pendingText="Saving Turnstile...">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              <span>Save Turnstile Keys</span>
+            </SubmitButton>
+          </div>
+        </form>
+        {snap.turnstile.source === "database" && (
+          <form action={staffClearPlatformCredentialAction} className="mt-3 border-t border-zinc-100 pt-3">
+            <input type="hidden" name="providerKey" value="cloudflare_turnstile" />
+            <SubmitButton className="adm-btn-secondary py-1 text-[11px]" pendingText="Clearing...">
+              Remove Database Override
+            </SubmitButton>
+          </form>
+        )}
+      </SectionCard>
+
+      {/* 8. Cloudflare Workers AI (10,000 Free Neurons / Day) */}
+      <SectionCard
+        title="8. Cloudflare Workers AI (10,000 Free Neurons/Day — Smart Reviews, Ad Copy, Meta Risk Linter & Whisper)"
+        subtitle="Create an API Token at dash.cloudflare.com -> My Profile -> API Tokens with 'Workers AI: Read' permission"
+        action={sourcePill(snap.cloudflareAi.source, snap.cloudflareAi.isReady)}
+      >
+        <form action={staffSaveCloudflareAiAction} className="space-y-3.5 text-xs">
+          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <label className="mb-1 block font-semibold text-zinc-700">
+                Cloudflare Account ID *
+              </label>
+              <input
+                name="accountId"
+                required
+                defaultValue={snap.cloudflareAi.accountId || snap.r2.accountId}
+                placeholder="32-char Cloudflare Account ID"
+                className="adm-input font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block font-semibold text-zinc-700">
+                Workers AI API Token{" "}
+                {snap.cloudflareAi.maskedApiToken ? `(${snap.cloudflareAi.maskedApiToken})` : "*"}
+              </label>
+              <input
+                name="apiToken"
+                type="password"
+                placeholder={
+                  snap.cloudflareAi.maskedApiToken
+                    ? "Leave blank to keep saved API Token"
+                    : "Cloudflare Workers AI Token"
+                }
+                className="adm-input font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block font-semibold text-zinc-700">Text LLM Model</label>
+              <input
+                name="textModel"
+                defaultValue={snap.cloudflareAi.textModel}
+                className="adm-input font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block font-semibold text-zinc-700">Audio Whisper Model</label>
+              <input
+                name="whisperModel"
+                defaultValue={snap.cloudflareAi.whisperModel}
+                className="adm-input font-mono text-xs"
+              />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <label className="inline-flex items-center gap-2 font-semibold text-slate-800">
+              <input
+                type="checkbox"
+                name="enabled"
+                defaultChecked={snap.cloudflareAi.enabled}
+                className="h-4 w-4 rounded border-zinc-300 text-emerald-600"
+              />
+              <span>Enable Cloudflare Workers AI across Reviews, Ads, WhatsApp &amp; Vendor Bills</span>
+            </label>
+            <SubmitButton className="adm-btn-primary" pendingText="Saving Workers AI...">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              <span>Save Workers AI Credentials</span>
+            </SubmitButton>
+          </div>
+        </form>
+        {snap.cloudflareAi.source === "database" && (
+          <form action={staffClearPlatformCredentialAction} className="mt-3 border-t border-zinc-100 pt-3">
+            <input type="hidden" name="providerKey" value="cloudflare_ai" />
+            <SubmitButton className="adm-btn-secondary py-1 text-[11px]" pendingText="Clearing...">
+              Remove Database Override
+            </SubmitButton>
+          </form>
+        )}
+      </SectionCard>
+
+      {/* 9. Cloudflare Email Routing + Workers (Supplier Bill-to-Tally Inbox) */}
+      <SectionCard
+        title="9. Cloudflare Email Routing + Workers ($0 Inbound Vendor Bill-to-Tally Inbox)"
+        subtitle="Routes bills+<workspace-slug>@<domain> straight into each client's Tally Purchase Draft Inbox"
+        action={sourcePill(snap.cloudflareEmail.source, snap.cloudflareEmail.isReady)}
+      >
+        <form action={staffSaveCloudflareEmailRoutingAction} className="space-y-3.5 text-xs">
+          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block font-semibold text-zinc-700">
+                Inbound Email Subdomain / Domain *
+              </label>
+              <input
+                name="inboundDomain"
+                required
+                defaultValue={snap.cloudflareEmail.inboundDomain || `bills.${endpoints.primaryDomain}`}
+                placeholder="bills.rapidshiftlabs.in"
+                className="adm-input font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block font-semibold text-zinc-700">
+                Webhook Shared Secret{" "}
+                {snap.cloudflareEmail.maskedWebhookSecret
+                  ? `(${snap.cloudflareEmail.maskedWebhookSecret})`
+                  : "(Leave blank to auto-generate)"}
+              </label>
+              <input
+                name="webhookSecret"
+                type="password"
+                placeholder="Leave blank to auto-generate a 48-char HMAC secret"
+                className="adm-input font-mono text-xs"
+              />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <label className="inline-flex items-center gap-2 font-semibold text-slate-800">
+              <input
+                type="checkbox"
+                name="enabled"
+                defaultChecked={snap.cloudflareEmail.enabled}
+                className="h-4 w-4 rounded border-zinc-300 text-emerald-600"
+              />
+              <span>Enable Inbound Supplier Bill Webhook (/api/webhooks/cloudflare-email)</span>
+            </label>
+            <SubmitButton className="adm-btn-primary" pendingText="Saving Email Routing...">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              <span>Save Email Routing Config</span>
+            </SubmitButton>
+          </div>
+        </form>
+
+        <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-3.5 text-xs">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-900">
+              Copy-Paste Cloudflare Email Worker Script (Email -&gt; Email Routing -&gt; Email Workers)
+            </span>
+            <AdminCopyButton text={cfEmailWorkerCode} label="Copy Worker Script" />
+          </div>
+          <pre className="mt-2 max-h-44 overflow-x-auto rounded-lg border border-zinc-200 bg-white p-3 font-mono text-[11px] text-slate-800">
+            {cfEmailWorkerCode}
+          </pre>
+        </div>
+
+        {snap.cloudflareEmail.source === "database" && (
+          <form action={staffClearPlatformCredentialAction} className="mt-3 border-t border-zinc-100 pt-3">
+            <input type="hidden" name="providerKey" value="cloudflare_email_routing" />
+            <SubmitButton className="adm-btn-secondary py-1 text-[11px]" pendingText="Clearing...">
+              Remove Database Override
+            </SubmitButton>
+          </form>
+        )}
+      </SectionCard>
+
+      {/* 10. W3C Web Push VAPID Keys ($0 Zero External Account Needed) */}
+      <SectionCard
+        title="10. W3C Web Push Notifications — VAPID Keys ($0 Forever • Zero Third-Party Account Required)"
+        subtitle="RFC 8292 P-256 ECDSA keys for instant desktop & Android Chrome alerts on WhatsApp chats, Tally payments & Google reviews"
+        action={sourcePill(snap.vapid.source, snap.vapid.isReady)}
+      >
+        <form action={staffSaveWebPushVapidAction} className="space-y-3.5 text-xs">
+          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
+            <div>
+              <label className="mb-1 block font-semibold text-zinc-700">VAPID Subject (mailto:) *</label>
+              <input
+                name="subject"
+                required
+                defaultValue={snap.vapid.subject}
+                placeholder="mailto:info@thewebsensei.email"
+                className="adm-input font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block font-semibold text-zinc-700">VAPID Public Key</label>
+              <input
+                name="publicKey"
+                defaultValue={snap.vapid.publicKey}
+                placeholder="Auto-generated P-256 base64url public key"
+                className="adm-input font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block font-semibold text-zinc-700">
+                VAPID Private Key{" "}
+                {snap.vapid.maskedPrivateKey ? `(${snap.vapid.maskedPrivateKey})` : ""}
+              </label>
+              <input
+                name="privateKey"
+                type="password"
+                placeholder={
+                  snap.vapid.maskedPrivateKey
+                    ? "Leave blank to keep saved Private Key"
+                    : "Click 'Auto-Generate Keys' below or paste key"
+                }
+                className="adm-input font-mono text-xs"
+              />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <label className="inline-flex items-center gap-2 font-semibold text-slate-800">
+              <input
+                type="checkbox"
+                name="enabled"
+                defaultChecked={snap.vapid.enabled}
+                className="h-4 w-4 rounded border-zinc-300 text-emerald-600"
+              />
+              <span>Enable Browser &amp; Mobile Web Push Alerts</span>
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <SubmitButton className="adm-btn-primary" pendingText="Saving VAPID...">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                <span>Save VAPID Config</span>
+              </SubmitButton>
+            </div>
+          </div>
+        </form>
+        <form action={staffSaveWebPushVapidAction} className="mt-2.5">
+          <input type="hidden" name="autoGenerate" value="1" />
+          <input type="hidden" name="subject" value={snap.vapid.subject} />
+          <SubmitButton className="adm-btn-secondary py-1.5 text-xs" pendingText="Generating P-256 Keys...">
+            <KeyRound className="h-3.5 w-3.5" />
+            <span>1-Click Auto-Generate Fresh VAPID Keypair in Database</span>
+          </SubmitButton>
+        </form>
+      </SectionCard>
+
+      {/* 11. MeitY Digital India BHASHINI ($0 Regional Indian Language Translation) */}
+      <SectionCard
+        title="11. MeitY Digital India BHASHINI ($0 Government AI — 22 Indian Languages)"
+        subtitle="Optional: Register free at bhashini.gov.in/ulca for official NMT translation (Hindi, Gujarati, Marathi, Tamil, Telugu, Kannada, Bengali...). Falls back automatically to Cloudflare Workers AI when unconfigured."
+        action={sourcePill(snap.bhashini.source, snap.bhashini.isReady)}
+      >
+        <form action={staffSaveBhashiniCredentialsAction} className="space-y-3.5 text-xs">
+          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
+            <div>
+              <label className="mb-1 block font-semibold text-zinc-700">ULCA User ID *</label>
+              <input
+                name="userId"
+                required
+                defaultValue={snap.bhashini.userId}
+                placeholder="Your Bhashini ULCA userId"
+                className="adm-input font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block font-semibold text-zinc-700">
+                ULCA API Key{" "}
+                {snap.bhashini.maskedUlcaApiKey ? `(${snap.bhashini.maskedUlcaApiKey})` : ""}
+              </label>
+              <input
+                name="ulcaApiKey"
+                type="password"
+                placeholder={
+                  snap.bhashini.maskedUlcaApiKey
+                    ? "Leave blank to keep saved ULCA Key"
+                    : "Optional ULCA API Key"
+                }
+                className="adm-input font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block font-semibold text-zinc-700">
+                UDYAT Inference API Key{" "}
+                {snap.bhashini.maskedInferenceApiKey
+                  ? `(${snap.bhashini.maskedInferenceApiKey})`
+                  : "*"}
+              </label>
+              <input
+                name="inferenceApiKey"
+                type="password"
+                placeholder={
+                  snap.bhashini.maskedInferenceApiKey
+                    ? "Leave blank to keep saved Inference Key"
+                    : "Bhashini Inference Authorization Key"
+                }
+                className="adm-input font-mono text-xs"
+              />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <label className="inline-flex items-center gap-2 font-semibold text-slate-800">
+              <input
+                type="checkbox"
+                name="enabled"
+                defaultChecked={snap.bhashini.enabled}
+                className="h-4 w-4 rounded border-zinc-300 text-emerald-600"
+              />
+              <span>Enable Official Bhashini Regional Indian Translation</span>
+            </label>
+            <SubmitButton className="adm-btn-primary" pendingText="Saving Bhashini...">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              <span>Save Bhashini Credentials</span>
+            </SubmitButton>
+          </div>
+        </form>
+        {snap.bhashini.source === "database" && (
+          <form action={staffClearPlatformCredentialAction} className="mt-3 border-t border-zinc-100 pt-3">
+            <input type="hidden" name="providerKey" value="bhashini" />
             <SubmitButton className="adm-btn-secondary py-1 text-[11px]" pendingText="Clearing...">
               Remove Database Override
             </SubmitButton>

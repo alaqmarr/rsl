@@ -657,6 +657,31 @@ async function pushTallyXmlToCloud(params: {
   }
 }
 
+export function buildCloudflareTunnelSetupGuide(
+  tallyHost = "127.0.0.1",
+  tallyPort = 9000,
+  serverUrl = DEFAULT_CLOUD_URL
+): string {
+  return [
+    "======================================================================",
+    "  Cloudflare Zero-Trust Outbound Tunnel Guide (Enterprise LAN Tally)",
+    "======================================================================",
+    `  1. Standard Mode (Default — Recommended for 99% of Offices):`,
+    `     rsl-tally-connector makes 100% outbound HTTPS calls to ${serverUrl}`,
+    `     and reads Tally XML locally on http://${tallyHost}:${tallyPort} (0 open firewall ports).`,
+    "",
+    "  2. Optional Cloudflare Tunnel (`cloudflared` — 100% Free Forever):",
+    "     If Tally runs on a segregated Windows Server VLAN and your connector runs remotely:",
+    "       winget install --id Cloudflare.cloudflared -e",
+    `       cloudflared tunnel --url http://${tallyHost}:${tallyPort}`,
+    "     For permanent named Zero-Trust Access protected by Cloudflare Service Tokens:",
+    "       cloudflared tunnel login",
+    "       cloudflared tunnel create rsl-tally-bridge",
+    "       cloudflared service install <YOUR_ZERO_TRUST_TUNNEL_TOKEN>",
+    "======================================================================",
+  ].join("\n");
+}
+
 async function main() {
   const flags = parseAgentCliFlags(process.argv.slice(2));
   const pairCode = flags.pair || flags.code;
@@ -668,6 +693,11 @@ async function main() {
   const tallyHost = flags["tally-host"] || process.env.TALLY_HOST || "127.0.0.1";
   const tallyPort = Number(flags["tally-port"] || process.env.TALLY_PORT || "9000");
   const deviceName = flags.device || os.hostname();
+
+  if (flags["tunnel-guide"] === "true" || flags["cloudflare-tunnel"] === "true") {
+    console.log(buildCloudflareTunnelSetupGuide(tallyHost, tallyPort, serverArg));
+    return;
+  }
 
   if (flags.doctor === "true") {
     console.log(

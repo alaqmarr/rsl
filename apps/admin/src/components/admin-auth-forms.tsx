@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useActionState, useEffect, useState } from "react";
-import { IosSpinner, PasswordInput, sileo } from "@rsl/ui";
+import { IosSpinner, PasswordInput, sileo, TurnstileWidget } from "@rsl/ui";
 import {
   completeSetupFormStateAction,
   staffLoginFormStateAction,
@@ -13,7 +13,7 @@ const INITIAL_ADMIN_AUTH_STATE: AdminAuthFormState = {
   fields: {},
 };
 
-export function AdminLoginForm() {
+export function AdminLoginForm({ turnstileSiteKey }: { turnstileSiteKey?: string | null }) {
   const [state, formAction, isPending] = useActionState(
     staffLoginFormStateAction,
     INITIAL_ADMIN_AUTH_STATE
@@ -74,6 +74,7 @@ export function AdminLoginForm() {
           className="adm-input min-h-10"
         />
       </div>
+      <TurnstileWidget siteKey={turnstileSiteKey} />
       <button
         type="submit"
         disabled={isPending}

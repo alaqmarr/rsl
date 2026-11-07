@@ -130,6 +130,23 @@ const EnvSchema = z.object({
   R2_BUCKET_PLATFORM_BACKUP: z.string().optional().default(""),
   R2_PUBLIC_BASE_URL: z.string().optional().default(""),
 
+  CF_TURNSTILE_SITE_KEY: z.string().optional().default(""),
+  CF_TURNSTILE_SECRET_KEY: z.string().optional().default(""),
+  CF_AI_ACCOUNT_ID: z.string().optional().default(""),
+  CF_AI_API_TOKEN: z.string().optional().default(""),
+  CF_AI_TEXT_MODEL: z.string().default("@cf/meta/llama-3.1-8b-instruct"),
+  CF_AI_WHISPER_MODEL: z.string().default("@cf/openai/whisper-tiny-en"),
+  CF_EMAIL_INBOUND_DOMAIN: z.string().optional().default(""),
+  CF_EMAIL_WEBHOOK_SECRET: z.string().optional().default(""),
+
+  VAPID_PUBLIC_KEY: z.string().optional().default(""),
+  VAPID_PRIVATE_KEY: z.string().optional().default(""),
+  VAPID_SUBJECT: z.string().optional().default(""),
+
+  BHASHINI_USER_ID: z.string().optional().default(""),
+  BHASHINI_ULCA_API_KEY: z.string().optional().default(""),
+  BHASHINI_INFERENCE_API_KEY: z.string().optional().default(""),
+
   EMAIL_FROM: z.string().default("RSL Marketing <notifications@rapidshiftlabs.in>"),
   SMTP_HOST: z.string().default("smtp.gmail.com"),
   SMTP_PORT: z.coerce.number().int().default(465),

@@ -161,6 +161,24 @@ export async function GET(req: NextRequest) {
       return buildAppRedirect(appBaseUrl, returnTo, "notice", successMsg);
     }
 
+    if (parsedState.purpose === "google_sheets") {
+      return buildAppRedirect(
+        appBaseUrl,
+        returnTo,
+        "notice",
+        `Google Sheets CA Sync (${result.email}) connected! Click 'Sync CA Google Sheet' anytime to push live Sales, Purchases & Aging.`
+      );
+    }
+
+    if (parsedState.purpose === "google_search_console") {
+      return buildAppRedirect(
+        appBaseUrl,
+        returnTo,
+        "notice",
+        `${result.displayName} connected! Organic Google Search clicks & queries now appear in Campaigns.`
+      );
+    }
+
     if (parsedState.purpose === "google_ads") {
       const adsMsg = result.formattedCustomerId
         ? `Google Ads '${result.displayName}' connected via Google Sign-In! ${result.adsDiscoveryDetail || ""}`.trim()

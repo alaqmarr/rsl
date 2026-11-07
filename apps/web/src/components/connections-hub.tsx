@@ -375,6 +375,67 @@ const CHANNEL_BLUEPRINTS: ChannelBlueprint[] = [
       },
     ],
   },
+  {
+    kind: "google_sheets",
+    shortLabel: "Google Sheets CA Sync",
+    title: "Google Sheets Live CA Ledger & GST Workbook",
+    badgeText: "Free CA Sync",
+    summary:
+      "Connect Google Sheets in 1 click to auto-create and sync a 4-tab Tally Sales, Overdue Receivables, Stock Inventory, and Ad Spend workbook you can share live with your Chartered Accountant.",
+    webhookMode: "none",
+    webhookFields: [],
+    requiredScopes: [
+      "https://www.googleapis.com/auth/spreadsheets",
+      "https://www.googleapis.com/auth/drive.file",
+    ],
+    steps: [
+      {
+        title: "1. Click 'Connect Google Sheets' on the Left",
+        detail:
+          "Sign in with your Google account. RapidShift Labs uses the privacy-safe drive.file + spreadsheets scopes so it only accesses the CA Workbook it creates for your business.",
+      },
+      {
+        title: "2. Automatic 4-Tab CA Workbook Provisioning",
+        detail:
+          "Immediately after connecting, click 'Sync Live Google Sheet for CA' on Tally Prime & Bills to populate Sales & GST Register, Overdue Receivables, Stock & Inventory, and Ad Spend & ROAS.",
+        codeHint: "https://www.googleapis.com/auth/spreadsheets",
+      },
+      {
+        title: "3. Share Read-Only Link with Your CA / Auditor",
+        detail:
+          "Open the generated Google Sheet link and share Viewer access with your Chartered Accountant — zero manual Excel/CSV email attachments needed.",
+      },
+    ],
+  },
+  {
+    kind: "google_search_console",
+    shortLabel: "Search Console SEO",
+    title: "Google Search Console (Free Organic Keywords & Ad Discovery)",
+    badgeText: "Free SEO & Keywords",
+    summary:
+      "Connect Google Search Console ($0/month) to see the exact Google queries driving clicks & impressions to your website — and turn high-impression queries into Google Search Ads in 1 click.",
+    webhookMode: "none",
+    webhookFields: [],
+    requiredScopes: ["https://www.googleapis.com/auth/webmasters.readonly"],
+    steps: [
+      {
+        title: "1. Click 'Connect Search Console' on the Left",
+        detail:
+          "Sign in with the Google account that has verified ownership of your company website in Google Search Console (search.google.com/search-console).",
+      },
+      {
+        title: "2. Automatic Verified Property Discovery",
+        detail:
+          "RapidShift Labs automatically lists your verified domain/URL-prefix properties using read-only webmasters.readonly access.",
+        codeHint: "https://www.googleapis.com/auth/webmasters.readonly",
+      },
+      {
+        title: "3. Discover Winning Organic Keywords in Ads Studio",
+        detail:
+          "Open Ads & Social Posts to load top organic search queries, CTR, and average Google ranking — ideal for launching high-converting Search Ads.",
+      },
+    ],
+  },
 ];
 
 const CHANNEL_LABEL_BY_KIND: Record<ConnectionChannelKind, string> = {
@@ -385,6 +446,8 @@ const CHANNEL_LABEL_BY_KIND: Record<ConnectionChannelKind, string> = {
   google_ads: "Google Ads Studio",
   google_business: "Google Business Profile",
   google_drive: "Google Drive Backup",
+  google_sheets: "Google Sheets CA Sync",
+  google_search_console: "Google Search Console",
 };
 
 export function ConnectionsHub({
@@ -1210,14 +1273,22 @@ export function ConnectionsHub({
                         ? "Connect Your Google Drive Automatically in 2 Clicks"
                         : selectedKind === "google_ads"
                           ? "Connect Your Google Ads Account in 1 Click"
-                          : "Connect Google Business Profile with Google Sign-In"}
+                          : selectedKind === "google_sheets"
+                            ? "Connect Google Sheets Live CA Workbook in 1 Click"
+                            : selectedKind === "google_search_console"
+                              ? "Connect Google Search Console (Organic SEO Keywords) in 1 Click"
+                              : "Connect Google Business Profile with Google Sign-In"}
                     </h4>
                     <p className="mt-1 text-xs leading-relaxed text-slate-700">
                       {selectedKind === "google_drive"
                         ? `No Google Cloud Console, no Service Account JSONs, and no manual Folder IDs needed. Sign in on Google's official screen — RapidShift Labs automatically creates '${googleOAuth?.defaultDriveFolderName || "RapidShift Labs Backups"}' in your Drive using the privacy-safe drive.file scope.`
                         : selectedKind === "google_ads"
                           ? "Sign in with your Google Ads login to auto-discover your 10-digit Customer ID (xxx-xxx-xxxx) and create Search, Performance Max, and Call/Lead ads directly from RSL Console."
-                          : "Sign in with the Google account that manages your verified Google Business Profile listing. Storefront locations, business details, and customer reviews sync automatically."}
+                          : selectedKind === "google_sheets"
+                            ? "Automatically creates a formatted 4-tab Google Sheet (Sales & GST, Overdue Receivables, Stock Inventory, and Ad Spend) in your Google Drive so your CA always sees live numbers."
+                            : selectedKind === "google_search_console"
+                              ? "Pull your website's real Google Search queries, impressions, clicks, and average position using read-only access ($0/month) to power smarter Search Ads."
+                              : "Sign in with the Google account that manages your verified Google Business Profile listing. Storefront locations, business details, and customer reviews sync automatically."}
                     </p>
 
                     <div className="mt-3.5 flex flex-wrap items-center gap-3">
@@ -1227,7 +1298,11 @@ export function ConnectionsHub({
                             ? "google_drive"
                             : selectedKind === "google_ads"
                               ? "google_ads"
-                              : "google_business"
+                              : selectedKind === "google_sheets"
+                                ? "google_sheets"
+                                : selectedKind === "google_search_console"
+                                  ? "google_search_console"
+                                  : "google_business"
                         }
                         returnTo={`/connections?tab=${selectedKind}`}
                         label={
@@ -1235,14 +1310,21 @@ export function ConnectionsHub({
                             ? "Connect to Google Drive"
                             : selectedKind === "google_ads"
                               ? "Connect Google Ads"
-                              : "Connect Google Business Profile"
+                              : selectedKind === "google_sheets"
+                                ? "Connect Google Sheets"
+                                : selectedKind === "google_search_console"
+                                  ? "Connect Search Console"
+                                  : "Connect Google Business Profile"
                         }
                         configured={
                           selectedKind === "google_drive"
                             ? googleOAuth?.enableDriveOAuth ?? true
                             : selectedKind === "google_ads"
                               ? googleOAuth?.enableGoogleAdsOAuth ?? googleOAuth?.isReady ?? true
-                              : googleOAuth?.enableGbpOAuth ?? true
+                              : selectedKind === "google_sheets" ||
+                                  selectedKind === "google_search_console"
+                                ? googleOAuth?.isReady ?? true
+                                : googleOAuth?.enableGbpOAuth ?? true
                         }
                       />
                       <span className="text-[11px] text-emerald-900/80">
@@ -1576,6 +1658,51 @@ export function ConnectionsHub({
                       />
                     </div>
                   </>
+                )}
+
+                {selectedKind === "google_sheets" && (
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+                    <div className="min-w-0">
+                      <label className="rsl-label">CA Workbook Label *</label>
+                      <input
+                        name="displayName"
+                        required
+                        placeholder="e.g. CA Live Tally & GST Workbook"
+                        className="rsl-input"
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <label className="rsl-label">Existing Spreadsheet ID (Optional)</label>
+                      <input
+                        name="spreadsheetId"
+                        placeholder="Auto-created if left blank"
+                        className="rsl-input font-mono"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {selectedKind === "google_search_console" && (
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+                    <div className="min-w-0">
+                      <label className="rsl-label">Search Console Property Label *</label>
+                      <input
+                        name="displayName"
+                        required
+                        placeholder="e.g. Official Website SEO Console"
+                        className="rsl-input"
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <label className="rsl-label">Verified Site URL / sc-domain *</label>
+                      <input
+                        name="siteUrl"
+                        required
+                        placeholder="e.g. sc-domain:yourcompany.in or https://yourcompany.in/"
+                        className="rsl-input font-mono"
+                      />
+                    </div>
+                  </div>
                 )}
 
                 {/* Access Token + Sandbox Helper */}

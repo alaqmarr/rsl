@@ -30,6 +30,7 @@
     "test": "vitest run",
     "db:migrate:control": "pnpm --filter @rsl/tenancy db:migrate:control",
     "db:migrate:tenants": "pnpm --filter @rsl/tenancy db:migrate:tenants",
+    "db:seed-credentials": "tsx scripts/seed-platform-credentials.ts",
     "docs:build": "pnpm --filter @rsl/docs build:content",
     "docs:lint": "pnpm --filter @rsl/docs lint:content",
     "format": "prettier --write \"**/*.{ts,tsx,md,mdx,json}\""

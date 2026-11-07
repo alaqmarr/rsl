@@ -605,6 +605,33 @@ export const syncRuns = sqliteTable("sync_runs", {
   createdAt: integer("created_at").notNull(),
 });
 
+// Inbound Supplier Email Bill-to-Tally Drafts (Cloudflare Email Routing + Workers)
+export const supplierBillDrafts = sqliteTable(
+  "supplier_bill_drafts",
+  {
+    id: text("id").primaryKey(),
+    senderEmail: text("sender_email").notNull(),
+    senderName: text("sender_name"),
+    subject: text("subject").notNull(),
+    supplierName: text("supplier_name").notNull(),
+    supplierGstin: text("supplier_gstin"),
+    invoiceNumber: text("invoice_number").notNull(),
+    invoiceDateIso: text("invoice_date_iso").notNull(),
+    amountPaise: integer("amount_paise").notNull().default(0),
+    currency: text("currency").notNull().default("INR"),
+    hsnCode: text("hsn_code"),
+    gstRateBps: integer("gst_rate_bps").notNull().default(1800),
+    attachmentFileName: text("attachment_file_name"),
+    attachmentMimeType: text("attachment_mime_type"),
+    rawExtractSummary: text("raw_extract_summary"),
+    status: text("status").notNull().default("pending_review"), // pending_review | imported_to_tally | dismissed
+    linkedVoucherId: text("linked_voucher_id"),
+    receivedAt: integer("received_at").notNull(),
+    importedAt: integer("imported_at"),
+  },
+  (t) => [index("idx_supplier_drafts_status_ts").on(t.status, t.receivedAt)]
+);
+
 // Transactional Outbox & Tenant Settings
 export const outbox = sqliteTable(
   "outbox",

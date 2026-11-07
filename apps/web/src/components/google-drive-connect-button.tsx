@@ -33,7 +33,12 @@ export function ConnectToGoogleDriveButton({
 }: {
   returnTo?: string;
   label?: string;
-  purpose?: "google_drive" | "google_business" | "google_ads";
+  purpose?:
+    | "google_drive"
+    | "google_business"
+    | "google_ads"
+    | "google_sheets"
+    | "google_search_console";
   variant?: "primary" | "white";
   size?: "sm" | "md";
   configured?: boolean;

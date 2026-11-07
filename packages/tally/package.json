@@ -15,11 +15,16 @@
     "@rsl/core": "workspace:*",
     "@rsl/database": "workspace:*",
     "@rsl/logging": "workspace:*",
+    "@rsl/notifications": "workspace:*",
     "@rsl/queue": "workspace:*",
     "@rsl/rbac": "workspace:*",
     "@rsl/tenancy": "workspace:*",
     "@rsl/whatsapp": "workspace:*",
     "drizzle-orm": "0.45.4",
+    "qrcode": "^1.5.4",
     "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6"
   }
 }

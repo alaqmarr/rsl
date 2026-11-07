@@ -109,6 +109,8 @@ const CHANNEL_KIND_LABELS: Record<ConnectionChannelKind, string> = {
   google_ads: "Google Ads Studio",
   google_business: "Google Business Profile",
   google_drive: "Google Drive Backup",
+  google_sheets: "Google Sheets CA Sync",
+  google_search_console: "Google Search Console",
 };
 
 function maskMiddle(token: string): string {

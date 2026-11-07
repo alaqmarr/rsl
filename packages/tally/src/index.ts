@@ -22,6 +22,7 @@ import {
 } from "@rsl/core";
 import { controlSchema, tenantDataSchema, tenantLogsSchema } from "@rsl/database";
 import { appendActionLog, defineAction } from "@rsl/logging";
+import { sendWorkspaceWebPushNotification } from "@rsl/notifications";
 import {
   enqueueJob,
   isRedisConfigured,
@@ -59,6 +60,12 @@ import {
 
 export * from "./inventory";
 export * from "./ledgers";
+export * from "./free-tally-tools";
+import {
+  buildSignedPublicTallyBillPayUrl,
+  buildWorkspaceSupplierBillInboxAddress,
+  listSupplierBillDrafts,
+} from "./free-tally-tools";
 
 export const AGENT_HEARTBEAT_STALE_MS = 120_000;
 export const LATEST_TALLY_TDL_VERSION = "2.9";
@@ -1515,11 +1522,15 @@ export function getTallyWorkspaceSummary(workspaceId: string) {
   }
 
   const companyRouting = getTallyCompanyRoutingConfig(workspaceId);
+  const supplierBillDrafts = listSupplierBillDrafts(workspaceId);
+  const supplierBillInbox = buildWorkspaceSupplierBillInboxAddress(workspaceId);
 
   return {
     companies,
     companyRouting,
     vouchers: enrichedVouchers,
+    supplierBillDrafts,
+    supplierBillInbox,
     nextSuggestedBillNumber,
     latestVoucherUpdatedAt,
     rules,
@@ -2171,6 +2182,18 @@ export const recordTallyVoucher = defineAction({
         paidAmountPaise: savedVoucher.paidAmountPaise,
         paymentStatus: savedVoucher.paymentStatus,
       }).catch(() => 0);
+
+      if (savedVoucher.voucherType === "Receipt") {
+        void sendWorkspaceWebPushNotification({
+          workspaceId: ctx.workspaceId,
+          payload: {
+            title: `Payment Received: ${formatInr(savedVoucher.amountPaise)}`,
+            body: `Receipt #${savedVoucher.voucherNumber} recorded from ${savedVoucher.partyName}.`,
+            url: `/tally/vouchers/${savedVoucher.id}`,
+            tag: `tally-rcpt-${savedVoucher.id}`,
+          },
+        }).catch(() => undefined);
+      }
     }
 
     return { voucherId: savedVoucher?.id ?? voucherId, guid, queuedJobs };
@@ -2337,6 +2360,11 @@ async function executeQueuedTallyReminderJob(params: {
       })
     : null;
 
+  const signedPayUrl = buildSignedPublicTallyBillPayUrl({
+    workspaceId: params.workspaceId,
+    voucherId: voucher.id,
+  });
+
   const sendRes = await executeWhatsAppTemplateSend({
     workspaceId: params.workspaceId,
     templateIdOrName: params.templateName,
@@ -2349,10 +2377,13 @@ async function executeQueuedTallyReminderJob(params: {
       balanceFormatted: formatInr(balancePaise),
       dueDateFormatted: dueStr,
       voucherDateFormatted: formatHumanDate(voucher.voucherDate),
+      paymentLink: signedPayUrl,
+      payment_link: signedPayUrl,
       "1": voucher.partyName,
       "2": voucher.voucherNumber,
       "3": formatInr(balancePaise),
       "4": dueStr,
+      "5": signedPayUrl,
     },
     idempotencyKey: params.guardKey,
     actorId: params.actorId,
@@ -2764,6 +2795,10 @@ export const sendTallyBillOnWhatsApp = defineAction({
 
     const balancePaise = Math.max(0, voucher.amountPaise - voucher.paidAmountPaise);
     const dueStr = voucher.dueDate ? formatHumanDate(voucher.dueDate) : "due";
+    const signedPayUrl = buildSignedPublicTallyBillPayUrl({
+      workspaceId: ctx.workspaceId,
+      voucherId: voucher.id,
+    });
 
     const sendRes = await executeWhatsAppTemplateSend({
       workspaceId: ctx.workspaceId,
@@ -2777,10 +2812,13 @@ export const sendTallyBillOnWhatsApp = defineAction({
         balanceFormatted: formatInr(balancePaise),
         dueDateFormatted: dueStr,
         voucherDateFormatted: formatHumanDate(voucher.voucherDate),
+        paymentLink: signedPayUrl,
+        payment_link: signedPayUrl,
         "1": voucher.partyName,
         "2": voucher.voucherNumber,
         "3": input.sendKind === "invoice" ? formatInr(voucher.amountPaise) : formatInr(balancePaise),
         "4": dueStr,
+        "5": signedPayUrl,
       },
       idempotencyKey: guardKey,
       actorId: ctx.actorId,
@@ -3960,6 +3998,10 @@ async function enqueueMatchingAutomationsForVoucher(params: {
 
   let queued = 0;
   const balancePaise = Math.max(0, params.voucher.amountPaise - params.voucher.paidAmountPaise);
+  const signedPayUrl = buildSignedPublicTallyBillPayUrl({
+    workspaceId: params.workspaceId,
+    voucherId: params.voucher.id,
+  });
   const variables: Record<string, string> = {
     partyName: params.voucher.partyName,
     voucherNumber: params.voucher.voucherNumber,
@@ -3968,6 +4010,8 @@ async function enqueueMatchingAutomationsForVoucher(params: {
     dueDateFormatted: formatHumanDate(params.voucher.dueDate),
     voucherDateFormatted: formatHumanDate(params.voucher.voucherDate),
     companyName: params.companyName,
+    paymentLink: signedPayUrl,
+    payment_link: signedPayUrl,
     "1": params.voucher.partyName,
     "2": params.voucher.voucherNumber,
     "3": formatInr(params.voucher.amountPaise),
@@ -3975,6 +4019,7 @@ async function enqueueMatchingAutomationsForVoucher(params: {
       params.voucher.voucherType === "Sales"
         ? formatHumanDate(params.voucher.dueDate)
         : formatHumanDate(params.voucher.voucherDate),
+    "5": signedPayUrl,
   };
 
   for (const rule of activeRules) {
@@ -8367,6 +8412,18 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
       paidAmountPaise: entry.row.paidAmountPaise,
       paymentStatus: entry.row.paymentStatus,
     }).catch(() => 0);
+
+    if (entry.row.voucherType === "Receipt" && entry.row.paymentStatus !== "cancelled") {
+      void sendWorkspaceWebPushNotification({
+        workspaceId: params.workspaceId,
+        payload: {
+          title: `Tally Receipt #${entry.row.voucherNumber} (${formatInr(entry.row.amountPaise)})`,
+          body: `Payment synced from ${entry.row.partyName} in ${entry.companyName}.`,
+          url: `/tally/vouchers/${entry.row.id}`,
+          tag: `tally-rcpt-${entry.row.id}`,
+        },
+      }).catch(() => undefined);
+    }
   }
 
   if (totalMutated > 0) {

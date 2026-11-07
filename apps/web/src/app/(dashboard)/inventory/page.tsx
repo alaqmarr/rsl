@@ -31,6 +31,7 @@ import {
 } from "@rsl/ui";
 import { FeaturePlanGate } from "@/components/feature-plan-gate";
 import { FlashBanner } from "@/components/flash-banner";
+import { HsnSacLookupBar } from "@/components/hsn-sac-lookup-bar";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
 import { TallySuiteNav } from "@/components/tally-suite-nav";
 import {
@@ -251,6 +252,8 @@ export default async function InventoryStockPage({
       />
 
       <FlashBanner notice={sp.notice} error={sp.error} />
+
+      <HsnSacLookupBar />
 
       {/* 5 Executive KPI Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">

@@ -65,14 +65,22 @@ import {
   controlDb,
   platformLogsDb,
   recordPlatformCredentialVerification,
+  savePlatformBhashiniConfig,
+  savePlatformCloudflareAiConfig,
+  savePlatformCloudflareEmailConfig,
+  savePlatformCloudflareTurnstileConfig,
   savePlatformGoogleAdsConfig,
   savePlatformGoogleOAuthConfig,
   savePlatformManagedR2Config,
   savePlatformMetaAppConfig,
   savePlatformRazorpayConfig,
   savePlatformSmtpConfig,
+  savePlatformVapidConfig,
+  seedPlatformCredentialsBundle,
   tenantDataDb,
+  verifyCloudflareTurnstileToken,
   type PlatformCredentialProviderKey,
+  type PlatformCredentialsSeedInput,
 } from "@rsl/tenancy";
 import {
   extractTemplateVariables,
@@ -138,11 +146,23 @@ export async function staffLoginFormStateAction(
 ): Promise<AdminAuthFormState> {
   const email = String(formData.get("email") || "").trim();
   const password = String(formData.get("password") || "");
+  const turnstileToken = String(formData.get("cf-turnstile-response") || "").trim();
 
   if (countPlatformStaff() === 0) {
     return {
       error:
         "Platform is not initialized yet. Complete first-time Super Admin creation on the Setup portal first.",
+      fields: { email },
+    };
+  }
+
+  const tsCheck = await verifyCloudflareTurnstileToken({
+    token: turnstileToken,
+    surface: "login",
+  });
+  if (!tsCheck.allowed) {
+    return {
+      error: tsCheck.error || "Please complete the Cloudflare security check.",
       fields: { email },
     };
   }
@@ -2418,6 +2438,210 @@ export async function staffSaveRazorpayCredentialsAction(formData: FormData) {
   }
 }
 
+export async function staffSaveCloudflareTurnstileAction(formData: FormData) {
+  const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  try {
+    const saved = savePlatformCloudflareTurnstileConfig({
+      enabled: formData.get("enabled") === "on",
+      siteKey: String(formData.get("siteKey") || "").trim(),
+      secretKey: String(formData.get("secretKey") || "").trim() || undefined,
+      staffId: staff.id,
+    });
+    logStaffCredentialAction(
+      staff.id,
+      "platform.credentials.cloudflare_turnstile.saved",
+      `Updated Cloudflare Turnstile bot protection (Site Key ${saved.siteKey}) in control.db`
+    );
+    return flashAdminRedirect(
+      "/credentials",
+      "notice",
+      "Cloudflare Turnstile keys encrypted and activated in control.db!"
+    );
+  } catch (err) {
+    return flashAdminRedirect(
+      "/credentials",
+      "error",
+      err instanceof Error ? err.message : "Failed to save Cloudflare Turnstile keys."
+    );
+  }
+}
+
+export async function staffSaveCloudflareAiAction(formData: FormData) {
+  const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  try {
+    const saved = savePlatformCloudflareAiConfig({
+      enabled: formData.get("enabled") === "on",
+      accountId: String(formData.get("accountId") || "").trim(),
+      apiToken: String(formData.get("apiToken") || "").trim() || undefined,
+      textModel: String(formData.get("textModel") || "@cf/meta/llama-3.1-8b-instruct").trim(),
+      whisperModel: String(
+        formData.get("whisperModel") || "@cf/openai/whisper-large-v3-turbo"
+      ).trim(),
+      staffId: staff.id,
+    });
+    logStaffCredentialAction(
+      staff.id,
+      "platform.credentials.cloudflare_ai.saved",
+      `Updated Cloudflare Workers AI (${saved.textModel}) in control.db`
+    );
+    return flashAdminRedirect(
+      "/credentials",
+      "notice",
+      `Cloudflare Workers AI (${saved.textModel}) encrypted and active in control.db!`
+    );
+  } catch (err) {
+    return flashAdminRedirect(
+      "/credentials",
+      "error",
+      err instanceof Error ? err.message : "Failed to save Cloudflare Workers AI keys."
+    );
+  }
+}
+
+export async function staffSaveCloudflareEmailRoutingAction(formData: FormData) {
+  const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  try {
+    const saved = savePlatformCloudflareEmailConfig({
+      enabled: formData.get("enabled") === "on",
+      inboundDomain: String(formData.get("inboundDomain") || "").trim(),
+      webhookSecret: String(formData.get("webhookSecret") || "").trim() || undefined,
+      staffId: staff.id,
+    });
+    logStaffCredentialAction(
+      staff.id,
+      "platform.credentials.cloudflare_email.saved",
+      `Updated Cloudflare Email Routing inbound bill domain (${saved.inboundDomain}) in control.db`
+    );
+    return flashAdminRedirect(
+      "/credentials",
+      "notice",
+      `Cloudflare Email Routing (${saved.inboundDomain}) encrypted and active in control.db!`
+    );
+  } catch (err) {
+    return flashAdminRedirect(
+      "/credentials",
+      "error",
+      err instanceof Error ? err.message : "Failed to save Cloudflare Email Routing config."
+    );
+  }
+}
+
+export async function staffSaveWebPushVapidAction(formData: FormData) {
+  const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  try {
+    const autoGenerate = formData.get("autoGenerate") === "1";
+    const saved = savePlatformVapidConfig({
+      enabled: autoGenerate ? true : formData.get("enabled") === "on",
+      subject: String(formData.get("subject") || "mailto:info@thewebsensei.email").trim(),
+      publicKey: String(formData.get("publicKey") || "").trim() || undefined,
+      privateKeyD: String(formData.get("privateKey") || "").trim() || undefined,
+      autoGenerate,
+      staffId: staff.id,
+    });
+    logStaffCredentialAction(
+      staff.id,
+      "platform.credentials.web_push_vapid.saved",
+      `Updated W3C Web Push VAPID keys (${saved.subject}) in control.db`
+    );
+    return flashAdminRedirect(
+      "/credentials",
+      "notice",
+      autoGenerate
+        ? "Fresh ECDSA P-256 VAPID keys generated and encrypted in control.db!"
+        : "W3C Web Push VAPID keys encrypted and active in control.db!"
+    );
+  } catch (err) {
+    return flashAdminRedirect(
+      "/credentials",
+      "error",
+      err instanceof Error ? err.message : "Failed to save Web Push VAPID keys."
+    );
+  }
+}
+
+export async function staffSaveBhashiniCredentialsAction(formData: FormData) {
+  const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  try {
+    const saved = savePlatformBhashiniConfig({
+      enabled: formData.get("enabled") === "on",
+      userId: String(formData.get("userId") || "").trim(),
+      ulcaApiKey: String(formData.get("ulcaApiKey") || "").trim() || undefined,
+      inferenceApiKey: String(formData.get("inferenceApiKey") || "").trim() || undefined,
+      staffId: staff.id,
+    });
+    logStaffCredentialAction(
+      staff.id,
+      "platform.credentials.bhashini.saved",
+      `Updated MeitY Digital India Bhashini translation credentials (${saved.userId}) in control.db`
+    );
+    return flashAdminRedirect(
+      "/credentials",
+      "notice",
+      "MeitY Bhashini translation API keys encrypted and active in control.db!"
+    );
+  } catch (err) {
+    return flashAdminRedirect(
+      "/credentials",
+      "error",
+      err instanceof Error ? err.message : "Failed to save Bhashini credentials."
+    );
+  }
+}
+
+export async function staffBulkSeedPlatformCredentialsJsonAction(formData: FormData) {
+  const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  try {
+    let rawJson = String(formData.get("credentialsJson") || "").trim();
+    const uploaded = formData.get("credentialsJsonFile");
+    if (!rawJson && uploaded instanceof File && uploaded.size > 0) {
+      rawJson = (await uploaded.text()).trim();
+    }
+    if (!rawJson) {
+      return flashAdminRedirect(
+        "/credentials",
+        "error",
+        "Paste your credentials JSON object or upload a .json file first."
+      );
+    }
+
+    const parsed = JSON.parse(rawJson) as PlatformCredentialsSeedInput;
+    const result = seedPlatformCredentialsBundle({
+      bundle: parsed,
+      staffId: staff.id,
+    });
+
+    logStaffCredentialAction(
+      staff.id,
+      "platform.credentials.bulk_seeded",
+      `Bulk-seeded ${result.seeded.length} provider(s) into control.db: ${result.seeded.join(", ") || "none"}`
+    );
+
+    if (result.seeded.length === 0 && result.skipped.length > 0) {
+      return flashAdminRedirect(
+        "/credentials",
+        "error",
+        `No non-placeholder credentials found in JSON (skipped: ${result.skipped.join(", ")}). Fill in at least one provider's keys first.`
+      );
+    }
+
+    return flashAdminRedirect(
+      "/credentials",
+      "notice",
+      `Seeded ${result.seeded.length} provider(s) (${result.seeded.join(", ") || "0 new"})${
+        result.skipped.length > 0
+          ? ` • Skipped empty: ${result.skipped.join(", ")}`
+          : " directly into encrypted control.db!"
+      }`
+    );
+  } catch (err) {
+    return flashAdminRedirect(
+      "/credentials",
+      "error",
+      err instanceof Error ? `Invalid JSON or seed error: ${err.message}` : "Failed to parse JSON."
+    );
+  }
+}
+
 export async function staffClearPlatformCredentialAction(formData: FormData) {
   const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
   const providerKey = String(formData.get("providerKey") || "").trim() as PlatformCredentialProviderKey;
@@ -2428,6 +2652,11 @@ export async function staffClearPlatformCredentialAction(formData: FormData) {
     "cloudflare_r2",
     "meta_app",
     "razorpay",
+    "cloudflare_turnstile",
+    "cloudflare_ai",
+    "cloudflare_email_routing",
+    "web_push_vapid",
+    "bhashini",
   ];
   if (!allowedKeys.includes(providerKey)) {
     return flashAdminRedirect("/credentials", "error", "Unknown credential provider key.");

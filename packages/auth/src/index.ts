@@ -1269,10 +1269,18 @@ export function updateWorkspaceBusinessSettings(params: {
   defaultTallyCompany?: string;
   stateCode?: string;
   gstin?: string;
+  upiVpa?: string;
+  upiPayeeName?: string;
+  bankName?: string;
+  bankBranch?: string;
+  bankAccountNumber?: string;
+  bankIfsc?: string;
 }): {
   name: string;
   stateCode: string;
   gstin: string | null;
+  upiVpa: string | null;
+  bankIfsc: string | null;
 } {
   const cleanName = params.name.trim();
   if (cleanName.length < 2) {
@@ -1294,6 +1302,49 @@ export function updateWorkspaceBusinessSettings(params: {
     throw new RslError("RSL-VAL-1001", "PIN code must be a valid 6-digit Indian postal code.");
   }
 
+  const cleanUpiVpa = params.upiVpa?.trim().toLowerCase() || null;
+  if (cleanUpiVpa && !/^[a-z0-9._-]{2,64}@[a-z0-9.-]{2,64}$/i.test(cleanUpiVpa)) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Enter a valid NPCI UPI ID / VPA (for example: yourbusiness@hdfcbank or 9876543210@okicici)."
+    );
+  }
+
+  const cleanBankIfsc = params.bankIfsc?.trim().toUpperCase() || null;
+  if (cleanBankIfsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(cleanBankIfsc)) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Bank IFSC must be 11 characters (4 bank letters + '0' + 6 branch characters, e.g. HDFC0000001)."
+    );
+  }
+
+  const existingWs = controlDb()
+    .select()
+    .from(controlSchema.workspaces)
+    .where(eq(controlSchema.workspaces.id, params.workspaceId))
+    .get();
+
+  const nextUpiVpa =
+    params.upiVpa !== undefined ? cleanUpiVpa : (existingWs?.upiVpa ?? null);
+  const nextUpiPayeeName =
+    params.upiPayeeName !== undefined
+      ? params.upiPayeeName.trim() || null
+      : (existingWs?.upiPayeeName ?? null);
+  const nextBankName =
+    params.bankName !== undefined
+      ? params.bankName.trim() || null
+      : (existingWs?.bankName ?? null);
+  const nextBankBranch =
+    params.bankBranch !== undefined
+      ? params.bankBranch.trim() || null
+      : (existingWs?.bankBranch ?? null);
+  const nextBankAccountNumber =
+    params.bankAccountNumber !== undefined
+      ? params.bankAccountNumber.trim() || null
+      : (existingWs?.bankAccountNumber ?? null);
+  const nextBankIfsc =
+    params.bankIfsc !== undefined ? cleanBankIfsc : (existingWs?.bankIfsc ?? null);
+
   controlDb()
     .update(controlSchema.workspaces)
     .set({
@@ -1308,6 +1359,12 @@ export function updateWorkspaceBusinessSettings(params: {
       defaultTallyCompany: params.defaultTallyCompany?.trim() || null,
       stateCode: cleanStateCode,
       gstin: cleanGstin,
+      upiVpa: nextUpiVpa,
+      upiPayeeName: nextUpiPayeeName,
+      bankName: nextBankName,
+      bankBranch: nextBankBranch,
+      bankAccountNumber: nextBankAccountNumber,
+      bankIfsc: nextBankIfsc,
       updatedAt: Date.now(),
     })
     .where(eq(controlSchema.workspaces.id, params.workspaceId))
@@ -1319,6 +1376,8 @@ export function updateWorkspaceBusinessSettings(params: {
     name: cleanName,
     stateCode: cleanStateCode,
     gstin: cleanGstin,
+    upiVpa: nextUpiVpa,
+    bankIfsc: nextBankIfsc,
   };
 }
 
@@ -1792,3 +1851,5 @@ export function staffUpdatePlatformMember(params: {
 
   return { email: target.email };
 }
+
+export * from "./passkeys";

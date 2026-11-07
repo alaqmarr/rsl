@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CheckCircle2 } from "lucide-react";
 import { INDIA_GST_STATES } from "@rsl/billing";
+import { getPlatformCloudflareTurnstileConfig } from "@rsl/tenancy";
 import { BrandLogo } from "@rsl/ui";
 import { WebRegisterForm } from "@/components/auth-forms";
 import { FlashBanner } from "@/components/flash-banner";
@@ -57,7 +58,14 @@ export default async function RegisterPage({
             <FlashBanner notice={sp.notice} error={sp.error} />
           </div>
 
-          <WebRegisterForm indianStates={INDIAN_STATES} />
+          <WebRegisterForm
+            indianStates={INDIAN_STATES}
+            turnstileSiteKey={
+              getPlatformCloudflareTurnstileConfig().isReady
+                ? getPlatformCloudflareTurnstileConfig().siteKey
+                : null
+            }
+          />
         </div>
 
         <div className="mt-6 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-zinc-500">

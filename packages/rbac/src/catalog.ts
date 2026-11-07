@@ -463,6 +463,7 @@ export const WEB_ROUTE_ACCESS_RULES: Array<{
   { prefix: "/cookies", anyOf: [], label: "Cookie & Session Policy" },
   { prefix: "/data-deletion", anyOf: [], label: "User Data Deletion & Grievance" },
   { prefix: "/dpa", anyOf: [], label: "Data Processing & Security Addendum" },
+  { prefix: "/pay", anyOf: [], label: "Public Bill Payment Portal" },
 ];
 
 export function canPermissionsAccessWebRoute(

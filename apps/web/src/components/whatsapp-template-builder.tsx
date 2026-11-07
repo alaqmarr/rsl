@@ -1,8 +1,14 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { Languages, ShieldAlert, Sparkles } from "lucide-react";
+import { IosSpinner, sileo } from "@rsl/ui";
 import { TALLY_TEMPLATE_VARIABLE_FIELDS } from "@rsl/whatsapp/client-constants";
 import { SubmitButton } from "@/components/ios-feedback";
+import {
+  lintWhatsAppTemplateJsonAction,
+  translateWhatsAppTemplateJsonAction,
+} from "@/lib/actions";
 
 export function WhatsAppTemplateBuilder({
   action,
@@ -30,7 +36,67 @@ export function WhatsAppTemplateBuilder({
     "2": "voucherNumber",
     "3": "amountFormatted",
     "4": "dueDateFormatted",
+    "5": "paymentLink",
   });
+  const [targetRegionalLang, setTargetRegionalLang] = useState("hi");
+  const [translating, setTranslating] = useState(false);
+  const [lintBusy, setLintBusy] = useState(false);
+  const [lintResult, setLintResult] = useState<{
+    score: number;
+    riskLevel: "low" | "medium" | "high";
+    recommendedCategory: "utility" | "marketing" | "authentication";
+    warnings: string[];
+    aiAdvice: string | null;
+  } | null>(null);
+
+  async function handleRunMetaLint() {
+    setLintBusy(true);
+    try {
+      const fd = new FormData();
+      fd.set("name", name);
+      fd.set("category", category);
+      fd.set("headerText", headerType === "TEXT" ? headerText : "");
+      fd.set("bodyText", bodyText);
+      const res = await lintWhatsAppTemplateJsonAction(fd);
+      if (res.ok && res.score !== undefined && res.riskLevel) {
+        setLintResult({
+          score: res.score,
+          riskLevel: res.riskLevel,
+          recommendedCategory: res.recommendedCategory || category,
+          warnings: res.warnings || [],
+          aiAdvice: res.aiAdvice || null,
+        });
+      } else {
+        sileo.error({ title: "Risk Check Failed", description: res.message || "Try again." });
+      }
+    } finally {
+      setLintBusy(false);
+    }
+  }
+
+  async function handleTranslateBody() {
+    setTranslating(true);
+    try {
+      const fd = new FormData();
+      fd.set("text", bodyText);
+      fd.set("targetLanguage", targetRegionalLang);
+      const res = await translateWhatsAppTemplateJsonAction(fd);
+      if (res.ok && res.translatedText) {
+        setBodyText(res.translatedText);
+        if (["hi", "gu", "mr", "ta", "te", "kn", "bn", "ml", "pa"].includes(targetRegionalLang)) {
+          setLanguage(targetRegionalLang);
+        }
+        sileo.success({
+          title: "Translated Preserving {{Variables}}",
+          description: `Translated via ${res.provider || "Bhashini / AI"} — all {{1}} placeholders kept intact.`,
+        });
+      } else {
+        sileo.error({ title: "Translation Failed", description: res.message || "Try again." });
+      }
+    } finally {
+      setTranslating(false);
+    }
+  }
 
   const detectedVars = useMemo(() => {
     const nums = new Set<number>();
@@ -111,6 +177,14 @@ export function WhatsAppTemplateBuilder({
               <option value="en_IN">English (India)</option>
               <option value="en_US">English (Global)</option>
               <option value="hi">Hindi (हिन्दी)</option>
+              <option value="gu">Gujarati (ગુજરાતી)</option>
+              <option value="mr">Marathi (मराठी)</option>
+              <option value="ta">Tamil (தமிழ்)</option>
+              <option value="te">Telugu (తెలుగు)</option>
+              <option value="kn">Kannada (ಕನ್ನಡ)</option>
+              <option value="bn">Bengali (বাংলা)</option>
+              <option value="ml">Malayalam (മലയാളം)</option>
+              <option value="pa">Punjabi (ਪੰਜਾਬੀ)</option>
             </select>
           </div>
         </div>
@@ -322,6 +396,94 @@ export function WhatsAppTemplateBuilder({
             />
           </div>
         )}
+
+        {/* Free AI Tools Strip: Meta Approval Risk Linter + Bhashini Regional Indian Translator */}
+        <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/50 p-3.5 space-y-2.5 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={lintBusy}
+                onClick={handleRunMetaLint}
+                className="rsl-btn-secondary inline-flex items-center gap-1.5 bg-white py-1.5 text-xs font-semibold"
+              >
+                {lintBusy ? <IosSpinner size="xs" /> : <ShieldAlert className="h-3.5 w-3.5 text-emerald-700" />}
+                <span>Check Meta Approval Risk</span>
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <select
+                value={targetRegionalLang}
+                onChange={(e) => setTargetRegionalLang(e.target.value)}
+                className="rsl-input py-1 text-xs"
+              >
+                <option value="hi">Hindi (हिन्दी)</option>
+                <option value="gu">Gujarati (ગુજરાતી)</option>
+                <option value="mr">Marathi (मराठी)</option>
+                <option value="ta">Tamil (தமிழ்)</option>
+                <option value="te">Telugu (తెలుగు)</option>
+                <option value="kn">Kannada (ಕನ್ನಡ)</option>
+                <option value="bn">Bengali (বাংলা)</option>
+                <option value="ml">Malayalam (മലയാളം)</option>
+                <option value="pa">Punjabi (ਪੰਜਾਬੀ)</option>
+              </select>
+              <button
+                type="button"
+                disabled={translating}
+                onClick={handleTranslateBody}
+                className="rsl-btn-secondary inline-flex items-center gap-1.5 bg-white py-1.5 text-xs font-semibold"
+              >
+                {translating ? <IosSpinner size="xs" /> : <Languages className="h-3.5 w-3.5 text-indigo-700" />}
+                <span>Translate Body (Bhashini / AI)</span>
+              </button>
+            </div>
+          </div>
+
+          {lintResult && (
+            <div
+              className={`rounded-lg border p-2.5 text-[11.5px] ${
+                lintResult.riskLevel === "low"
+                  ? "border-emerald-200 bg-white text-emerald-950"
+                  : lintResult.riskLevel === "medium"
+                    ? "border-amber-200 bg-amber-50 text-amber-950"
+                    : "border-rose-200 bg-rose-50 text-rose-950"
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 font-semibold">
+                <span>
+                  Meta Approval Score: {lintResult.score}/100 ({lintResult.riskLevel.toUpperCase()} RISK)
+                </span>
+                {lintResult.recommendedCategory !== category && (
+                  <button
+                    type="button"
+                    onClick={() => setCategory(lintResult.recommendedCategory)}
+                    className="rounded bg-amber-200/70 px-2 py-0.5 text-[11px] font-bold text-amber-950"
+                  >
+                    Switch to {lintResult.recommendedCategory.toUpperCase()}
+                  </button>
+                )}
+              </div>
+              {lintResult.warnings.length > 0 ? (
+                <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                  {lintResult.warnings.map((w, idx) => (
+                    <li key={idx}>{w}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-0.5 text-emerald-800">
+                  ✓ Clean variable placement and category match — ready for fast Meta approval!
+                </p>
+              )}
+              {lintResult.aiAdvice && (
+                <p className="mt-1 flex items-start gap-1 text-[11px] text-slate-700">
+                  <Sparkles className="mt-0.5 h-3 w-3 shrink-0 text-emerald-600" />
+                  <span>{lintResult.aiAdvice}</span>
+                </p>
+              )}
+            </div>
+          )}
+        </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
           <span className="text-[12.5px] text-zinc-500">

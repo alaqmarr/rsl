@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { eq } from "drizzle-orm";
 import { decryptEnvelope, encryptEnvelope, getEnv, RslError } from "@rsl/core";
 import { controlSchema } from "@rsl/database";
@@ -9,7 +10,12 @@ export type PlatformCredentialProviderKey =
   | "smtp_email"
   | "cloudflare_r2"
   | "meta_app"
-  | "razorpay";
+  | "razorpay"
+  | "cloudflare_turnstile"
+  | "cloudflare_ai"
+  | "cloudflare_email_routing"
+  | "web_push_vapid"
+  | "bhashini";
 
 export type CredentialSource = "database" | "env" | "unconfigured";
 
@@ -1109,6 +1115,1113 @@ export function savePlatformRazorpayConfig(params: {
   return getPlatformRazorpayConfig();
 }
 
+/* ============================================================================
+ * 6. Cloudflare Turnstile (100% Free Unlimited Bot & Credential-Stuffing Shield)
+ * ============================================================================ */
+
+export interface PlatformTurnstileConfig {
+  enabled: boolean;
+  siteKey: string;
+  secretKey: string;
+  enforceOnLogin: boolean;
+  enforceOnRegister: boolean;
+  enforceOnPublicForms: boolean;
+  source: CredentialSource;
+  isReady: boolean;
+  maskedSecretKey: string;
+  updatedAt: number | null;
+}
+
+export interface PublicTurnstileConfig {
+  isReady: boolean;
+  siteKey: string;
+  enforceOnLogin: boolean;
+  enforceOnRegister: boolean;
+  enforceOnPublicForms: boolean;
+}
+
+export function getPlatformTurnstileConfig(): PlatformTurnstileConfig {
+  const env = getEnv();
+  const row = readRow("cloudflare_turnstile");
+
+  if (row) {
+    const pub = parseJsonObject<{
+      siteKey: string;
+      enforceOnLogin: boolean;
+      enforceOnRegister: boolean;
+      enforceOnPublicForms: boolean;
+    }>(row.publicConfigJson);
+    const sec = decryptSecretObject<{ secretKey: string }>(row.encryptedSecrets);
+    const siteKey = (pub.siteKey || "").trim();
+    const secretKey = (sec.secretKey || "").trim();
+    const isReady = row.enabled && Boolean(siteKey && secretKey);
+
+    return {
+      enabled: row.enabled,
+      siteKey,
+      secretKey,
+      enforceOnLogin: pub.enforceOnLogin !== false,
+      enforceOnRegister: pub.enforceOnRegister !== false,
+      enforceOnPublicForms: pub.enforceOnPublicForms !== false,
+      source: siteKey || secretKey ? "database" : "unconfigured",
+      isReady,
+      maskedSecretKey: maskCredentialSecret(secretKey),
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  const hasEnv = Boolean(env.CF_TURNSTILE_SITE_KEY && env.CF_TURNSTILE_SECRET_KEY);
+  return {
+    enabled: true,
+    siteKey: env.CF_TURNSTILE_SITE_KEY,
+    secretKey: env.CF_TURNSTILE_SECRET_KEY,
+    enforceOnLogin: true,
+    enforceOnRegister: true,
+    enforceOnPublicForms: true,
+    source: hasEnv ? "env" : "unconfigured",
+    isReady: hasEnv,
+    maskedSecretKey: maskCredentialSecret(env.CF_TURNSTILE_SECRET_KEY),
+    updatedAt: null,
+  };
+}
+
+export function getPublicTurnstileConfig(): PublicTurnstileConfig {
+  const cfg = getPlatformTurnstileConfig();
+  return {
+    isReady: cfg.isReady,
+    siteKey: cfg.isReady ? cfg.siteKey : "",
+    enforceOnLogin: cfg.isReady && cfg.enforceOnLogin,
+    enforceOnRegister: cfg.isReady && cfg.enforceOnRegister,
+    enforceOnPublicForms: cfg.isReady && cfg.enforceOnPublicForms,
+  };
+}
+
+export const getPlatformCloudflareTurnstileConfig = getPlatformTurnstileConfig;
+export const savePlatformCloudflareTurnstileConfig = savePlatformTurnstileConfig;
+
+export function savePlatformTurnstileConfig(params: {
+  enabled?: boolean;
+  siteKey: string;
+  secretKey?: string;
+  enforceOnLogin?: boolean;
+  enforceOnRegister?: boolean;
+  enforceOnPublicForms?: boolean;
+  staffId: string;
+}): PlatformTurnstileConfig {
+  const current = getPlatformTurnstileConfig();
+  const siteKey = params.siteKey.trim();
+  const secretKey =
+    params.secretKey && params.secretKey.trim().length > 0
+      ? params.secretKey.trim()
+      : current.secretKey;
+
+  if (!siteKey || !secretKey) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Enter both Cloudflare Turnstile Site Key and Secret Key (from Cloudflare Dashboard → Turnstile → Add Widget)."
+    );
+  }
+
+  const publicConfig = {
+    siteKey,
+    enforceOnLogin: params.enforceOnLogin ?? current.enforceOnLogin,
+    enforceOnRegister: params.enforceOnRegister ?? current.enforceOnRegister,
+    enforceOnPublicForms: params.enforceOnPublicForms ?? current.enforceOnPublicForms,
+  };
+  const encryptedSecrets = encryptEnvelope(JSON.stringify({ secretKey }));
+  const maskedHints = { secretKey: maskCredentialSecret(secretKey) };
+  const now = Date.now();
+  const enabled = params.enabled ?? true;
+
+  controlDb()
+    .insert(controlSchema.platformCredentials)
+    .values({
+      providerKey: "cloudflare_turnstile",
+      enabled,
+      publicConfigJson: JSON.stringify(publicConfig),
+      encryptedSecrets,
+      maskedHintsJson: JSON.stringify(maskedHints),
+      updatedByStaffId: params.staffId,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: controlSchema.platformCredentials.providerKey,
+      set: {
+        enabled,
+        publicConfigJson: JSON.stringify(publicConfig),
+        encryptedSecrets,
+        maskedHintsJson: JSON.stringify(maskedHints),
+        updatedByStaffId: params.staffId,
+        updatedAt: now,
+      },
+    })
+    .run();
+
+  return getPlatformTurnstileConfig();
+}
+
+/* ============================================================================
+ * 7. Cloudflare Workers AI (10,000 Free Neurons/Day — Smart Replies, Ad Copy, Whisper)
+ * ============================================================================ */
+
+export interface PlatformCloudflareAiConfig {
+  enabled: boolean;
+  accountId: string;
+  apiToken: string;
+  textModel: string;
+  whisperModel: string;
+  source: CredentialSource;
+  isReady: boolean;
+  maskedApiToken: string;
+  updatedAt: number | null;
+}
+
+export function getPlatformCloudflareAiConfig(): PlatformCloudflareAiConfig {
+  const env = getEnv();
+  const r2FallbackAccountId = getPlatformManagedR2Config().accountId;
+  const row = readRow("cloudflare_ai");
+
+  if (row) {
+    const pub = parseJsonObject<{
+      accountId: string;
+      textModel: string;
+      whisperModel: string;
+    }>(row.publicConfigJson);
+    const sec = decryptSecretObject<{ apiToken: string }>(row.encryptedSecrets);
+    const accountId = (pub.accountId || r2FallbackAccountId || "").trim();
+    const apiToken = (sec.apiToken || "").trim();
+    const isReady = row.enabled && Boolean(accountId && apiToken);
+
+    return {
+      enabled: row.enabled,
+      accountId,
+      apiToken,
+      textModel: (pub.textModel || "@cf/meta/llama-3.1-8b-instruct").trim(),
+      whisperModel: (pub.whisperModel || "@cf/openai/whisper-tiny-en").trim(),
+      source: accountId || apiToken ? "database" : "unconfigured",
+      isReady,
+      maskedApiToken: maskCredentialSecret(apiToken),
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  const envAccountId = (env.CF_AI_ACCOUNT_ID || env.R2_ACCOUNT_ID || r2FallbackAccountId || "").trim();
+  const envToken = env.CF_AI_API_TOKEN.trim();
+  const hasEnv = Boolean(envAccountId && envToken);
+
+  return {
+    enabled: true,
+    accountId: envAccountId,
+    apiToken: envToken,
+    textModel: env.CF_AI_TEXT_MODEL || "@cf/meta/llama-3.1-8b-instruct",
+    whisperModel: env.CF_AI_WHISPER_MODEL || "@cf/openai/whisper-tiny-en",
+    source: hasEnv ? "env" : "unconfigured",
+    isReady: hasEnv,
+    maskedApiToken: maskCredentialSecret(envToken),
+    updatedAt: null,
+  };
+}
+
+export function savePlatformCloudflareAiConfig(params: {
+  enabled?: boolean;
+  accountId?: string;
+  apiToken?: string;
+  textModel?: string;
+  whisperModel?: string;
+  staffId: string;
+}): PlatformCloudflareAiConfig {
+  const current = getPlatformCloudflareAiConfig();
+  const r2AccountId = getPlatformManagedR2Config().accountId;
+  const accountId = (params.accountId || current.accountId || r2AccountId || "").trim();
+  const apiToken =
+    params.apiToken && params.apiToken.trim().length > 0
+      ? params.apiToken.trim()
+      : current.apiToken;
+
+  if (!accountId || !apiToken) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Enter your Cloudflare Account ID and Workers AI API Token (My Profile → API Tokens → Create Token → Workers AI Read/Run)."
+    );
+  }
+
+  const publicConfig = {
+    accountId,
+    textModel: (params.textModel || current.textModel || "@cf/meta/llama-3.1-8b-instruct").trim(),
+    whisperModel: (params.whisperModel || current.whisperModel || "@cf/openai/whisper-tiny-en").trim(),
+  };
+  const encryptedSecrets = encryptEnvelope(JSON.stringify({ apiToken }));
+  const maskedHints = { apiToken: maskCredentialSecret(apiToken) };
+  const now = Date.now();
+  const enabled = params.enabled ?? true;
+
+  controlDb()
+    .insert(controlSchema.platformCredentials)
+    .values({
+      providerKey: "cloudflare_ai",
+      enabled,
+      publicConfigJson: JSON.stringify(publicConfig),
+      encryptedSecrets,
+      maskedHintsJson: JSON.stringify(maskedHints),
+      updatedByStaffId: params.staffId,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: controlSchema.platformCredentials.providerKey,
+      set: {
+        enabled,
+        publicConfigJson: JSON.stringify(publicConfig),
+        encryptedSecrets,
+        maskedHintsJson: JSON.stringify(maskedHints),
+        updatedByStaffId: params.staffId,
+        updatedAt: now,
+      },
+    })
+    .run();
+
+  return getPlatformCloudflareAiConfig();
+}
+
+/* ============================================================================
+ * 8. Cloudflare Email Routing + Workers (Inbound Vendor Bill-to-Tally Inbox)
+ * ============================================================================ */
+
+export interface PlatformCloudflareEmailConfig {
+  enabled: boolean;
+  inboundDomain: string;
+  webhookSecret: string;
+  source: CredentialSource;
+  isReady: boolean;
+  maskedWebhookSecret: string;
+  updatedAt: number | null;
+}
+
+export function getPlatformCloudflareEmailConfig(): PlatformCloudflareEmailConfig {
+  const env = getEnv();
+  const row = readRow("cloudflare_email_routing");
+
+  if (row) {
+    const pub = parseJsonObject<{ inboundDomain: string }>(row.publicConfigJson);
+    const sec = decryptSecretObject<{ webhookSecret: string }>(row.encryptedSecrets);
+    const inboundDomain = (pub.inboundDomain || env.PRIMARY_DOMAIN || "rapidshiftlabs.in").trim();
+    const webhookSecret = (sec.webhookSecret || "").trim();
+
+    return {
+      enabled: row.enabled,
+      inboundDomain,
+      webhookSecret,
+      source: webhookSecret ? "database" : "unconfigured",
+      isReady: row.enabled && Boolean(inboundDomain && webhookSecret),
+      maskedWebhookSecret: maskCredentialSecret(webhookSecret),
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  const hasEnv = Boolean(env.CF_EMAIL_WEBHOOK_SECRET);
+  return {
+    enabled: true,
+    inboundDomain: (env.CF_EMAIL_INBOUND_DOMAIN || env.PRIMARY_DOMAIN || "rapidshiftlabs.in").trim(),
+    webhookSecret: env.CF_EMAIL_WEBHOOK_SECRET.trim(),
+    source: hasEnv ? "env" : "unconfigured",
+    isReady: hasEnv,
+    maskedWebhookSecret: maskCredentialSecret(env.CF_EMAIL_WEBHOOK_SECRET),
+    updatedAt: null,
+  };
+}
+
+export function savePlatformCloudflareEmailConfig(params: {
+  enabled?: boolean;
+  inboundDomain?: string;
+  webhookSecret?: string;
+  autoGenerateSecret?: boolean;
+  staffId: string;
+}): PlatformCloudflareEmailConfig {
+  const current = getPlatformCloudflareEmailConfig();
+  const env = getEnv();
+  const inboundDomain = (
+    params.inboundDomain ||
+    current.inboundDomain ||
+    env.PRIMARY_DOMAIN ||
+    "rapidshiftlabs.in"
+  ).trim();
+  const webhookSecret = params.autoGenerateSecret
+    ? `rsl_cf_eml_${crypto.randomBytes(20).toString("hex")}`
+    : params.webhookSecret && params.webhookSecret.trim().length > 0
+      ? params.webhookSecret.trim()
+      : current.webhookSecret;
+
+  if (!webhookSecret) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Provide a Cloudflare Email Worker Webhook Secret or click Auto-Generate Secret."
+    );
+  }
+
+  const publicConfig = { inboundDomain };
+  const encryptedSecrets = encryptEnvelope(JSON.stringify({ webhookSecret }));
+  const maskedHints = { webhookSecret: maskCredentialSecret(webhookSecret) };
+  const now = Date.now();
+  const enabled = params.enabled ?? true;
+
+  controlDb()
+    .insert(controlSchema.platformCredentials)
+    .values({
+      providerKey: "cloudflare_email_routing",
+      enabled,
+      publicConfigJson: JSON.stringify(publicConfig),
+      encryptedSecrets,
+      maskedHintsJson: JSON.stringify(maskedHints),
+      updatedByStaffId: params.staffId,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: controlSchema.platformCredentials.providerKey,
+      set: {
+        enabled,
+        publicConfigJson: JSON.stringify(publicConfig),
+        encryptedSecrets,
+        maskedHintsJson: JSON.stringify(maskedHints),
+        updatedByStaffId: params.staffId,
+        updatedAt: now,
+      },
+    })
+    .run();
+
+  return getPlatformCloudflareEmailConfig();
+}
+
+export function buildCloudflareEmailWorkerSnippet(appOrigin: string): string {
+  const cleanOrigin = appOrigin.replace(/\/+$/, "");
+  return `// Cloudflare Email Worker (100% Free — Deploy in Cloudflare Dashboard → Email → Email Routing → Email Workers)
+// Route catch-all or bills+*@yourdomain to this Worker, and set Worker secret RSL_EMAIL_WEBHOOK_SECRET.
+export default {
+  async email(message, env, ctx) {
+    const rawEmail = await new Response(message.raw).text();
+    const subject = message.headers.get("subject") || "Vendor Tax Invoice";
+    await fetch("${cleanOrigin}/api/webhooks/cloudflare-email", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-RSL-Email-Secret": env.RSL_EMAIL_WEBHOOK_SECRET
+      },
+      body: JSON.stringify({
+        to: message.to,
+        from: message.from,
+        subject,
+        rawText: rawEmail.slice(0, 65000)
+      })
+    });
+  }
+};`;
+}
+
+/* ============================================================================
+ * 9. W3C Web Push VAPID Keys (Auto-Generatable Free Browser & Mobile Push)
+ * ============================================================================ */
+
+export interface PlatformVapidConfig {
+  enabled: boolean;
+  subject: string;
+  publicKey: string;
+  privateKeyJwkJson: string;
+  privateKeyD: string;
+  source: CredentialSource;
+  isReady: boolean;
+  maskedPrivateKey: string;
+  updatedAt: number | null;
+}
+
+export function generateFreshVapidKeyPair(): {
+  publicKey: string;
+  privateKeyD: string;
+  privateKeyJwkJson: string;
+} {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+  });
+  const pubJwk = publicKey.export({ format: "jwk" }) as { x: string; y: string };
+  const privJwk = privateKey.export({ format: "jwk" }) as {
+    kty: string;
+    crv: string;
+    x: string;
+    y: string;
+    d: string;
+  };
+  const xBuf = Buffer.from(pubJwk.x, "base64url");
+  const yBuf = Buffer.from(pubJwk.y, "base64url");
+  const uncompressed = Buffer.concat([Buffer.from([0x04]), xBuf, yBuf]);
+  return {
+    publicKey: uncompressed.toString("base64url"),
+    privateKeyD: privJwk.d,
+    privateKeyJwkJson: JSON.stringify(privJwk),
+  };
+}
+
+export function getPlatformVapidConfig(): PlatformVapidConfig {
+  const env = getEnv();
+  const row = readRow("web_push_vapid");
+  const defaultSubject = `mailto:notifications@${env.PRIMARY_DOMAIN || "rapidshiftlabs.in"}`;
+
+  if (row) {
+    const pub = parseJsonObject<{ subject: string; publicKey: string }>(row.publicConfigJson);
+    const sec = decryptSecretObject<{ privateKeyD: string; privateKeyJwkJson: string }>(
+      row.encryptedSecrets
+    );
+    const publicKey = (pub.publicKey || "").trim();
+    const privateKeyD = (sec.privateKeyD || "").trim();
+    const privateKeyJwkJson = (sec.privateKeyJwkJson || "").trim();
+    const isReady = row.enabled && Boolean(publicKey && privateKeyD);
+
+    return {
+      enabled: row.enabled,
+      subject: (pub.subject || defaultSubject).trim(),
+      publicKey,
+      privateKeyD,
+      privateKeyJwkJson,
+      source: publicKey ? "database" : "unconfigured",
+      isReady,
+      maskedPrivateKey: maskCredentialSecret(privateKeyD),
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  const hasEnv = Boolean(env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY);
+  let reconstructedJwk = "";
+  if (hasEnv) {
+    try {
+      const rawPub = Buffer.from(env.VAPID_PUBLIC_KEY.trim(), "base64url");
+      if (rawPub.length === 65 && rawPub[0] === 0x04) {
+        reconstructedJwk = JSON.stringify({
+          kty: "EC",
+          crv: "P-256",
+          x: rawPub.subarray(1, 33).toString("base64url"),
+          y: rawPub.subarray(33, 65).toString("base64url"),
+          d: env.VAPID_PRIVATE_KEY.trim(),
+        });
+      }
+    } catch {
+      // ignore malformed env key
+    }
+  }
+
+  return {
+    enabled: true,
+    subject: (env.VAPID_SUBJECT || defaultSubject).trim(),
+    publicKey: env.VAPID_PUBLIC_KEY.trim(),
+    privateKeyD: env.VAPID_PRIVATE_KEY.trim(),
+    privateKeyJwkJson: reconstructedJwk,
+    source: hasEnv ? "env" : "unconfigured",
+    isReady: hasEnv && Boolean(reconstructedJwk),
+    maskedPrivateKey: maskCredentialSecret(env.VAPID_PRIVATE_KEY),
+    updatedAt: null,
+  };
+}
+
+export function savePlatformVapidConfig(params: {
+  enabled?: boolean;
+  subject?: string;
+  publicKey?: string;
+  privateKeyD?: string;
+  autoGenerate?: boolean;
+  staffId: string;
+}): PlatformVapidConfig {
+  const current = getPlatformVapidConfig();
+  const env = getEnv();
+  const subject = (
+    params.subject ||
+    current.subject ||
+    `mailto:notifications@${env.PRIMARY_DOMAIN || "rapidshiftlabs.in"}`
+  ).trim();
+
+  let publicKey = (params.publicKey || current.publicKey || "").trim();
+  let privateKeyD = (params.privateKeyD || current.privateKeyD || "").trim();
+  let privateKeyJwkJson = current.privateKeyJwkJson;
+
+  if (params.autoGenerate || (!publicKey && !privateKeyD)) {
+    const fresh = generateFreshVapidKeyPair();
+    publicKey = fresh.publicKey;
+    privateKeyD = fresh.privateKeyD;
+    privateKeyJwkJson = fresh.privateKeyJwkJson;
+  } else if (publicKey && privateKeyD) {
+    const rawPub = Buffer.from(publicKey, "base64url");
+    if (rawPub.length !== 65 || rawPub[0] !== 0x04) {
+      throw new RslError(
+        "RSL-VAL-1001",
+        "VAPID Public Key must be a 65-byte uncompressed P-256 point in base64url (or click Auto-Generate Free VAPID Keys)."
+      );
+    }
+    privateKeyJwkJson = JSON.stringify({
+      kty: "EC",
+      crv: "P-256",
+      x: rawPub.subarray(1, 33).toString("base64url"),
+      y: rawPub.subarray(33, 65).toString("base64url"),
+      d: privateKeyD,
+    });
+  }
+
+  const publicConfig = { subject, publicKey };
+  const encryptedSecrets = encryptEnvelope(JSON.stringify({ privateKeyD, privateKeyJwkJson }));
+  const maskedHints = { privateKeyD: maskCredentialSecret(privateKeyD) };
+  const now = Date.now();
+  const enabled = params.enabled ?? true;
+
+  controlDb()
+    .insert(controlSchema.platformCredentials)
+    .values({
+      providerKey: "web_push_vapid",
+      enabled,
+      publicConfigJson: JSON.stringify(publicConfig),
+      encryptedSecrets,
+      maskedHintsJson: JSON.stringify(maskedHints),
+      updatedByStaffId: params.staffId,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: controlSchema.platformCredentials.providerKey,
+      set: {
+        enabled,
+        publicConfigJson: JSON.stringify(publicConfig),
+        encryptedSecrets,
+        maskedHintsJson: JSON.stringify(maskedHints),
+        updatedByStaffId: params.staffId,
+        updatedAt: now,
+      },
+    })
+    .run();
+
+  return getPlatformVapidConfig();
+}
+
+export function ensurePlatformVapidConfig(): PlatformVapidConfig {
+  const existing = getPlatformVapidConfig();
+  if (existing.isReady) return existing;
+  return savePlatformVapidConfig({
+    autoGenerate: true,
+    staffId: "system_auto_vapid",
+  });
+}
+
+/* ============================================================================
+ * 10. MeitY Digital India BHASHINI (22 Scheduled Indian Languages API)
+ * ============================================================================ */
+
+export interface PlatformBhashiniConfig {
+  enabled: boolean;
+  userId: string;
+  ulcaApiKey: string;
+  inferenceApiKey: string;
+  source: CredentialSource;
+  isReady: boolean;
+  maskedUlcaApiKey: string;
+  maskedInferenceApiKey: string;
+  updatedAt: number | null;
+}
+
+export function getPlatformBhashiniConfig(): PlatformBhashiniConfig {
+  const env = getEnv();
+  const row = readRow("bhashini");
+
+  if (row) {
+    const pub = parseJsonObject<{ userId: string }>(row.publicConfigJson);
+    const sec = decryptSecretObject<{ ulcaApiKey: string; inferenceApiKey: string }>(
+      row.encryptedSecrets
+    );
+    const userId = (pub.userId || "").trim();
+    const ulcaApiKey = (sec.ulcaApiKey || "").trim();
+    const inferenceApiKey = (sec.inferenceApiKey || "").trim();
+
+    return {
+      enabled: row.enabled,
+      userId,
+      ulcaApiKey,
+      inferenceApiKey,
+      source: userId || inferenceApiKey ? "database" : "unconfigured",
+      isReady: row.enabled && Boolean(inferenceApiKey || (userId && ulcaApiKey)),
+      maskedUlcaApiKey: maskCredentialSecret(ulcaApiKey),
+      maskedInferenceApiKey: maskCredentialSecret(inferenceApiKey),
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  const hasEnv = Boolean(
+    env.BHASHINI_INFERENCE_API_KEY || (env.BHASHINI_USER_ID && env.BHASHINI_ULCA_API_KEY)
+  );
+  return {
+    enabled: true,
+    userId: env.BHASHINI_USER_ID.trim(),
+    ulcaApiKey: env.BHASHINI_ULCA_API_KEY.trim(),
+    inferenceApiKey: env.BHASHINI_INFERENCE_API_KEY.trim(),
+    source: hasEnv ? "env" : "unconfigured",
+    isReady: hasEnv,
+    maskedUlcaApiKey: maskCredentialSecret(env.BHASHINI_ULCA_API_KEY),
+    maskedInferenceApiKey: maskCredentialSecret(env.BHASHINI_INFERENCE_API_KEY),
+    updatedAt: null,
+  };
+}
+
+export function savePlatformBhashiniConfig(params: {
+  enabled?: boolean;
+  userId?: string;
+  ulcaApiKey?: string;
+  inferenceApiKey?: string;
+  staffId: string;
+}): PlatformBhashiniConfig {
+  const current = getPlatformBhashiniConfig();
+  const userId = (params.userId ?? current.userId).trim();
+  const ulcaApiKey =
+    params.ulcaApiKey && params.ulcaApiKey.trim().length > 0
+      ? params.ulcaApiKey.trim()
+      : current.ulcaApiKey;
+  const inferenceApiKey =
+    params.inferenceApiKey && params.inferenceApiKey.trim().length > 0
+      ? params.inferenceApiKey.trim()
+      : current.inferenceApiKey;
+
+  if (!inferenceApiKey && !(userId && ulcaApiKey)) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Enter Bhashini Inference API Key (or ULCA User ID + ULCA API Key from bhashini.gov.in)."
+    );
+  }
+
+  const publicConfig = { userId };
+  const encryptedSecrets = encryptEnvelope(JSON.stringify({ ulcaApiKey, inferenceApiKey }));
+  const maskedHints = {
+    ulcaApiKey: maskCredentialSecret(ulcaApiKey),
+    inferenceApiKey: maskCredentialSecret(inferenceApiKey),
+  };
+  const now = Date.now();
+  const enabled = params.enabled ?? true;
+
+  controlDb()
+    .insert(controlSchema.platformCredentials)
+    .values({
+      providerKey: "bhashini",
+      enabled,
+      publicConfigJson: JSON.stringify(publicConfig),
+      encryptedSecrets,
+      maskedHintsJson: JSON.stringify(maskedHints),
+      updatedByStaffId: params.staffId,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: controlSchema.platformCredentials.providerKey,
+      set: {
+        enabled,
+        publicConfigJson: JSON.stringify(publicConfig),
+        encryptedSecrets,
+        maskedHintsJson: JSON.stringify(maskedHints),
+        updatedByStaffId: params.staffId,
+        updatedAt: now,
+      },
+    })
+    .run();
+
+  return getPlatformBhashiniConfig();
+}
+
+/* ============================================================================
+ * 11. Bulk JSON / CLI Database Seeder (`seedPlatformCredentialsBundle`)
+ * ============================================================================ */
+
+export type PlatformCredentialsSeedInput = PlatformCredentialsSeedBundle;
+
+export interface PlatformCredentialsSeedBundle {
+  google_oauth?: {
+    enabled?: boolean;
+    clientId?: string;
+    clientSecret?: string;
+    projectId?: string;
+    consentAppName?: string;
+    publishingStatus?: "production" | "testing";
+  };
+  google_ads?: {
+    enabled?: boolean;
+    developerToken?: string;
+    loginCustomerId?: string;
+    managedCustomerId?: string;
+    managedRefreshToken?: string;
+  };
+  smtp_email?: {
+    enabled?: boolean;
+    host?: string;
+    port?: number;
+    secure?: boolean;
+    from?: string;
+    user?: string;
+    password?: string;
+  };
+  cloudflare_r2?: {
+    enabled?: boolean;
+    accountId?: string;
+    accessKeyId?: string;
+    secretAccessKey?: string;
+    bucketPrivate?: string;
+    bucketPublic?: string;
+    publicBaseUrl?: string;
+  };
+  meta_app?: {
+    enabled?: boolean;
+    appId?: string;
+    appSecret?: string;
+    webhookVerifyToken?: string;
+    verifyToken?: string;
+    configId?: string;
+    managedAdAccountId?: string;
+    managedPageId?: string;
+    managedSystemToken?: string;
+  };
+  razorpay?: {
+    enabled?: boolean;
+    keyId?: string;
+    keySecret?: string;
+    webhookSecret?: string;
+  };
+  cloudflare_turnstile?: {
+    enabled?: boolean;
+    siteKey?: string;
+    secretKey?: string;
+    enforceOnLogin?: boolean;
+    enforceOnRegister?: boolean;
+    enforceOnPublicForms?: boolean;
+  };
+  cloudflare_ai?: {
+    enabled?: boolean;
+    accountId?: string;
+    apiToken?: string;
+    textModel?: string;
+    whisperModel?: string;
+  };
+  cloudflare_email_routing?: {
+    enabled?: boolean;
+    inboundDomain?: string;
+    webhookSecret?: string;
+    autoGenerateSecret?: boolean;
+  };
+  web_push_vapid?: {
+    enabled?: boolean;
+    subject?: string;
+    publicKey?: string;
+    privateKeyD?: string;
+    autoGenerate?: boolean;
+  };
+  bhashini?: {
+    enabled?: boolean;
+    userId?: string;
+    ulcaApiKey?: string;
+    inferenceApiKey?: string;
+  };
+}
+
+export function buildPlatformCredentialsSeedTemplate(): PlatformCredentialsSeedBundle {
+  return {
+    google_oauth: {
+      enabled: true,
+      clientId: "YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com",
+      clientSecret: "GOCSPX-YOUR_GOOGLE_CLIENT_SECRET",
+      projectId: "rapidshift-labs",
+      consentAppName: "RapidShift Labs",
+      publishingStatus: "production",
+    },
+    google_ads: {
+      enabled: false,
+      developerToken: "",
+      loginCustomerId: "",
+      managedCustomerId: "",
+      managedRefreshToken: "",
+    },
+    smtp_email: {
+      enabled: true,
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
+      from: "RapidShift Labs <info@thewebsensei.email>",
+      user: "info@thewebsensei.email",
+      password: "YOUR_16_CHAR_GOOGLE_APP_PASSWORD",
+    },
+    cloudflare_r2: {
+      enabled: false,
+      accountId: "",
+      accessKeyId: "",
+      secretAccessKey: "",
+      bucketPrivate: "rsl-private-vault",
+      bucketPublic: "rsl-public-media",
+      publicBaseUrl: "",
+    },
+    meta_app: {
+      enabled: true,
+      appId: "YOUR_META_APP_ID",
+      appSecret: "YOUR_META_APP_SECRET",
+      verifyToken: "rsl_meta_verify_token",
+      configId: "",
+      managedAdAccountId: "",
+      managedPageId: "",
+      managedSystemToken: "",
+    },
+    razorpay: {
+      enabled: false,
+      keyId: "",
+      keySecret: "",
+      webhookSecret: "",
+    },
+    cloudflare_turnstile: {
+      enabled: false,
+      siteKey: "YOUR_CF_TURNSTILE_SITE_KEY",
+      secretKey: "YOUR_CF_TURNSTILE_SECRET_KEY",
+      enforceOnLogin: true,
+      enforceOnRegister: true,
+      enforceOnPublicForms: true,
+    },
+    cloudflare_ai: {
+      enabled: false,
+      accountId: "YOUR_CLOUDFLARE_ACCOUNT_ID",
+      apiToken: "YOUR_CF_WORKERS_AI_API_TOKEN",
+      textModel: "@cf/meta/llama-3.1-8b-instruct",
+      whisperModel: "@cf/openai/whisper-tiny-en",
+    },
+    cloudflare_email_routing: {
+      enabled: true,
+      inboundDomain: "rapidshiftlabs.in",
+      autoGenerateSecret: true,
+    },
+    web_push_vapid: {
+      enabled: true,
+      subject: "mailto:info@thewebsensei.email",
+      autoGenerate: true,
+    },
+    bhashini: {
+      enabled: false,
+      userId: "",
+      ulcaApiKey: "",
+      inferenceApiKey: "",
+    },
+  };
+}
+
+function isPlaceholderValue(val: string | undefined): boolean {
+  if (!val) return true;
+  const trimmed = val.trim();
+  if (!trimmed) return true;
+  return (
+    trimmed.startsWith("YOUR_") ||
+    trimmed.startsWith("GOCSPX-YOUR_") ||
+    trimmed === "YOUR_16_CHAR_GOOGLE_APP_PASSWORD"
+  );
+}
+
+export function seedPlatformCredentialsBundle(
+  bundleOrOpts:
+    | PlatformCredentialsSeedBundle
+    | { bundle: PlatformCredentialsSeedBundle; staffId?: string },
+  maybeStaffId = "db_seed_cli"
+): { seeded: PlatformCredentialProviderKey[]; skipped: string[] } {
+  const isWrapped =
+    typeof bundleOrOpts === "object" &&
+    bundleOrOpts !== null &&
+    "bundle" in bundleOrOpts &&
+    Boolean((bundleOrOpts as { bundle?: unknown }).bundle);
+  const bundle: PlatformCredentialsSeedBundle = isWrapped
+    ? (bundleOrOpts as { bundle: PlatformCredentialsSeedBundle }).bundle
+    : (bundleOrOpts as PlatformCredentialsSeedBundle);
+  const staffId = isWrapped
+    ? (bundleOrOpts as { staffId?: string }).staffId || maybeStaffId
+    : maybeStaffId;
+
+  const seeded: PlatformCredentialProviderKey[] = [];
+  const skipped: string[] = [];
+
+  if (
+    bundle.google_oauth &&
+    !isPlaceholderValue(bundle.google_oauth.clientId) &&
+    !isPlaceholderValue(bundle.google_oauth.clientSecret)
+  ) {
+    savePlatformGoogleOAuthConfig({ ...bundle.google_oauth, staffId });
+    seeded.push("google_oauth");
+  } else if (bundle.google_oauth) {
+    skipped.push("google_oauth (empty/placeholder)");
+  }
+
+  if (bundle.google_ads && !isPlaceholderValue(bundle.google_ads.developerToken)) {
+    savePlatformGoogleAdsConfig({ ...bundle.google_ads, staffId });
+    seeded.push("google_ads");
+  } else if (bundle.google_ads) {
+    skipped.push("google_ads (empty)");
+  }
+
+  if (
+    bundle.smtp_email &&
+    !isPlaceholderValue(bundle.smtp_email.user) &&
+    !isPlaceholderValue(bundle.smtp_email.password)
+  ) {
+    savePlatformSmtpConfig({
+      enabled: bundle.smtp_email.enabled,
+      host: bundle.smtp_email.host || "smtp.gmail.com",
+      port: bundle.smtp_email.port ?? 465,
+      secure: bundle.smtp_email.secure ?? true,
+      from: bundle.smtp_email.from || `RapidShift Labs <${bundle.smtp_email.user}>`,
+      user: bundle.smtp_email.user!,
+      password: bundle.smtp_email.password,
+      staffId,
+    });
+    seeded.push("smtp_email");
+  } else if (bundle.smtp_email) {
+    skipped.push("smtp_email (empty/placeholder)");
+  }
+
+  if (
+    bundle.cloudflare_r2 &&
+    !isPlaceholderValue(bundle.cloudflare_r2.accountId) &&
+    !isPlaceholderValue(bundle.cloudflare_r2.accessKeyId) &&
+    !isPlaceholderValue(bundle.cloudflare_r2.secretAccessKey) &&
+    bundle.cloudflare_r2.bucketPrivate
+  ) {
+    savePlatformManagedR2Config({
+      enabled: bundle.cloudflare_r2.enabled,
+      accountId: bundle.cloudflare_r2.accountId!,
+      accessKeyId: bundle.cloudflare_r2.accessKeyId!,
+      secretAccessKey: bundle.cloudflare_r2.secretAccessKey,
+      bucketPrivate: bundle.cloudflare_r2.bucketPrivate,
+      bucketPublic: bundle.cloudflare_r2.bucketPublic,
+      publicBaseUrl: bundle.cloudflare_r2.publicBaseUrl,
+      staffId,
+    });
+    seeded.push("cloudflare_r2");
+  } else if (bundle.cloudflare_r2) {
+    skipped.push("cloudflare_r2 (empty)");
+  }
+
+  if (
+    bundle.meta_app &&
+    !isPlaceholderValue(bundle.meta_app.appId) &&
+    !isPlaceholderValue(bundle.meta_app.appSecret)
+  ) {
+    savePlatformMetaAppConfig({
+      enabled: bundle.meta_app.enabled,
+      appId: bundle.meta_app.appId!,
+      appSecret: bundle.meta_app.appSecret,
+      webhookVerifyToken: bundle.meta_app.webhookVerifyToken || bundle.meta_app.verifyToken,
+      configId: bundle.meta_app.configId,
+      managedAdAccountId: bundle.meta_app.managedAdAccountId,
+      managedPageId: bundle.meta_app.managedPageId,
+      managedSystemToken: bundle.meta_app.managedSystemToken,
+      staffId,
+    });
+    seeded.push("meta_app");
+  } else if (bundle.meta_app) {
+    skipped.push("meta_app (empty/placeholder)");
+  }
+
+  if (
+    bundle.razorpay &&
+    !isPlaceholderValue(bundle.razorpay.keyId) &&
+    !isPlaceholderValue(bundle.razorpay.keySecret)
+  ) {
+    savePlatformRazorpayConfig({
+      enabled: bundle.razorpay.enabled,
+      keyId: bundle.razorpay.keyId!,
+      keySecret: bundle.razorpay.keySecret,
+      webhookSecret: bundle.razorpay.webhookSecret,
+      staffId,
+    });
+    seeded.push("razorpay");
+  } else if (bundle.razorpay) {
+    skipped.push("razorpay (empty)");
+  }
+
+  if (
+    bundle.cloudflare_turnstile &&
+    !isPlaceholderValue(bundle.cloudflare_turnstile.siteKey) &&
+    !isPlaceholderValue(bundle.cloudflare_turnstile.secretKey)
+  ) {
+    savePlatformTurnstileConfig({
+      enabled: bundle.cloudflare_turnstile.enabled,
+      siteKey: bundle.cloudflare_turnstile.siteKey!,
+      secretKey: bundle.cloudflare_turnstile.secretKey,
+      enforceOnLogin: bundle.cloudflare_turnstile.enforceOnLogin,
+      enforceOnRegister: bundle.cloudflare_turnstile.enforceOnRegister,
+      enforceOnPublicForms: bundle.cloudflare_turnstile.enforceOnPublicForms,
+      staffId,
+    });
+    seeded.push("cloudflare_turnstile");
+  } else if (bundle.cloudflare_turnstile) {
+    skipped.push("cloudflare_turnstile (empty/placeholder)");
+  }
+
+  if (
+    bundle.cloudflare_ai &&
+    !isPlaceholderValue(bundle.cloudflare_ai.accountId) &&
+    !isPlaceholderValue(bundle.cloudflare_ai.apiToken)
+  ) {
+    savePlatformCloudflareAiConfig({
+      enabled: bundle.cloudflare_ai.enabled,
+      accountId: bundle.cloudflare_ai.accountId,
+      apiToken: bundle.cloudflare_ai.apiToken,
+      textModel: bundle.cloudflare_ai.textModel,
+      whisperModel: bundle.cloudflare_ai.whisperModel,
+      staffId,
+    });
+    seeded.push("cloudflare_ai");
+  } else if (bundle.cloudflare_ai) {
+    skipped.push("cloudflare_ai (empty/placeholder)");
+  }
+
+  if (
+    bundle.cloudflare_email_routing &&
+    (bundle.cloudflare_email_routing.autoGenerateSecret ||
+      !isPlaceholderValue(bundle.cloudflare_email_routing.webhookSecret))
+  ) {
+    savePlatformCloudflareEmailConfig({
+      enabled: bundle.cloudflare_email_routing.enabled,
+      inboundDomain: bundle.cloudflare_email_routing.inboundDomain,
+      webhookSecret: bundle.cloudflare_email_routing.webhookSecret,
+      autoGenerateSecret: bundle.cloudflare_email_routing.autoGenerateSecret,
+      staffId,
+    });
+    seeded.push("cloudflare_email_routing");
+  } else if (bundle.cloudflare_email_routing) {
+    skipped.push("cloudflare_email_routing (empty)");
+  }
+
+  if (
+    bundle.web_push_vapid &&
+    (bundle.web_push_vapid.autoGenerate ||
+      (!isPlaceholderValue(bundle.web_push_vapid.publicKey) &&
+        !isPlaceholderValue(bundle.web_push_vapid.privateKeyD)))
+  ) {
+    savePlatformVapidConfig({
+      enabled: bundle.web_push_vapid.enabled,
+      subject: bundle.web_push_vapid.subject,
+      publicKey: bundle.web_push_vapid.publicKey,
+      privateKeyD: bundle.web_push_vapid.privateKeyD,
+      autoGenerate: bundle.web_push_vapid.autoGenerate,
+      staffId,
+    });
+    seeded.push("web_push_vapid");
+  } else if (bundle.web_push_vapid) {
+    skipped.push("web_push_vapid (empty)");
+  }
+
+  if (
+    bundle.bhashini &&
+    (!isPlaceholderValue(bundle.bhashini.inferenceApiKey) ||
+      (!isPlaceholderValue(bundle.bhashini.userId) &&
+        !isPlaceholderValue(bundle.bhashini.ulcaApiKey)))
+  ) {
+    savePlatformBhashiniConfig({
+      enabled: bundle.bhashini.enabled,
+      userId: bundle.bhashini.userId,
+      ulcaApiKey: bundle.bhashini.ulcaApiKey,
+      inferenceApiKey: bundle.bhashini.inferenceApiKey,
+      staffId,
+    });
+    seeded.push("bhashini");
+  } else if (bundle.bhashini) {
+    skipped.push("bhashini (empty)");
+  }
+
+  return { seeded, skipped };
+}
+
 export function clearPlatformCredentialOverride(providerKey: PlatformCredentialProviderKey): void {
   controlDb()
     .delete(controlSchema.platformCredentials)
@@ -1142,6 +2255,11 @@ export function getSafePlatformCredentialsAdminSnapshot() {
   const r2 = getPlatformManagedR2Config();
   const meta = getPlatformMetaAppConfig();
   const razorpay = getPlatformRazorpayConfig();
+  const turnstile = getPlatformTurnstileConfig();
+  const cloudflareAi = getPlatformCloudflareAiConfig();
+  const cloudflareEmail = getPlatformCloudflareEmailConfig();
+  const vapid = getPlatformVapidConfig();
+  const bhashini = getPlatformBhashiniConfig();
 
   return {
     google: {
@@ -1226,6 +2344,53 @@ export function getSafePlatformCredentialsAdminSnapshot() {
       maskedKeySecret: razorpay.maskedKeySecret,
       maskedWebhookSecret: razorpay.maskedWebhookSecret,
       updatedAt: razorpay.updatedAt,
+    },
+    turnstile: {
+      enabled: turnstile.enabled,
+      siteKey: turnstile.siteKey,
+      enforceOnLogin: turnstile.enforceOnLogin,
+      enforceOnRegister: turnstile.enforceOnRegister,
+      enforceOnPublicForms: turnstile.enforceOnPublicForms,
+      source: turnstile.source,
+      isReady: turnstile.isReady,
+      maskedSecretKey: turnstile.maskedSecretKey,
+      updatedAt: turnstile.updatedAt,
+    },
+    cloudflareAi: {
+      enabled: cloudflareAi.enabled,
+      accountId: cloudflareAi.accountId,
+      textModel: cloudflareAi.textModel,
+      whisperModel: cloudflareAi.whisperModel,
+      source: cloudflareAi.source,
+      isReady: cloudflareAi.isReady,
+      maskedApiToken: cloudflareAi.maskedApiToken,
+      updatedAt: cloudflareAi.updatedAt,
+    },
+    cloudflareEmail: {
+      enabled: cloudflareEmail.enabled,
+      inboundDomain: cloudflareEmail.inboundDomain,
+      source: cloudflareEmail.source,
+      isReady: cloudflareEmail.isReady,
+      maskedWebhookSecret: cloudflareEmail.maskedWebhookSecret,
+      updatedAt: cloudflareEmail.updatedAt,
+    },
+    vapid: {
+      enabled: vapid.enabled,
+      subject: vapid.subject,
+      publicKey: vapid.publicKey,
+      source: vapid.source,
+      isReady: vapid.isReady,
+      maskedPrivateKey: vapid.maskedPrivateKey,
+      updatedAt: vapid.updatedAt,
+    },
+    bhashini: {
+      enabled: bhashini.enabled,
+      userId: bhashini.userId,
+      source: bhashini.source,
+      isReady: bhashini.isReady,
+      maskedUlcaApiKey: bhashini.maskedUlcaApiKey,
+      maskedInferenceApiKey: bhashini.maskedInferenceApiKey,
+      updatedAt: bhashini.updatedAt,
     },
   };
 }

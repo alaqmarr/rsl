@@ -81,6 +81,7 @@ import {
   recordGoogleReview,
   replyToGoogleReview,
   syncGoogleReviews,
+  syncWorkspaceCaGoogleSheet,
 } from "@rsl/google";
 import {
   addConversationInternalNote,
@@ -126,9 +127,11 @@ import {
   deleteTallyAutomationRule,
   deleteTallyReminderRule,
   deleteTallyStockItem,
+  dismissSupplierBillDraft,
   fetchAndSyncLocalTallyPort9000,
   generateTallyPairingCode,
   getOrCreateTallyWebhookEndpoint,
+  importSupplierBillDraftToTally,
   ingestTallyBillEventAndEnqueueAutomation,
   markTallyBillPaidViaReceipt,
   recordTallyVoucher,
@@ -143,7 +146,13 @@ import {
   upsertTallyStockItem,
   upsertWorkspacePartyLedger,
 } from "@rsl/tally";
-import { controlDb } from "@rsl/tenancy";
+import {
+  controlDb,
+  generateSmartAdCopy,
+  lintWhatsAppTemplateForMeta,
+  translateIndianBusinessText,
+  verifyCloudflareTurnstileToken,
+} from "@rsl/tenancy";
 import {
   addWhatsAppUnsubscribedNumber,
   createWhatsAppTemplate,
@@ -242,6 +251,14 @@ export async function registerFormStateAction(
     return { error: "Password must be at least 8 characters long.", fields };
   }
 
+  const tsReg = await verifyCloudflareTurnstileToken({
+    token: String(formData.get("cf-turnstile-response") || "").trim(),
+    surface: "register",
+  });
+  if (!tsReg.allowed) {
+    return { error: tsReg.error || "Please complete the security check.", fields };
+  }
+
   let reg: { rawSessionToken: string; userId: string; workspaceId: string };
   try {
     reg = registerUserWithWorkspace({
@@ -295,6 +312,14 @@ export async function loginFormStateAction(
   const email = String(formData.get("email") || "").trim();
   const password = String(formData.get("password") || "");
   const fields = { email };
+
+  const tsLogin = await verifyCloudflareTurnstileToken({
+    token: String(formData.get("cf-turnstile-response") || "").trim(),
+    surface: "login",
+  });
+  if (!tsLogin.allowed) {
+    return { error: tsLogin.error || "Please complete the security check.", fields };
+  }
 
   let res: { rawSessionToken: string };
   try {
@@ -392,6 +417,13 @@ export async function logoutAction() {
 
 export async function forgotPasswordAction(formData: FormData) {
   const email = String(formData.get("email") || "").trim();
+  const tsFp = await verifyCloudflareTurnstileToken({
+    token: String(formData.get("cf-turnstile-response") || "").trim(),
+    surface: "public_form",
+  });
+  if (!tsFp.allowed) {
+    return goWithError("/forgot-password", tsFp.error || "Please complete the security check.");
+  }
   try {
     await requestPasswordResetEmail({ email });
   } catch (err) {
@@ -2524,6 +2556,18 @@ export async function updateBusinessProfileAction(formData: FormData) {
       defaultTallyCompany: String(formData.get("defaultTallyCompany") || ""),
       stateCode: String(formData.get("stateCode") || "27"),
       gstin: String(formData.get("gstin") || ""),
+      upiVpa: formData.has("upiVpa") ? String(formData.get("upiVpa") || "") : undefined,
+      upiPayeeName: formData.has("upiPayeeName")
+        ? String(formData.get("upiPayeeName") || "")
+        : undefined,
+      bankName: formData.has("bankName") ? String(formData.get("bankName") || "") : undefined,
+      bankBranch: formData.has("bankBranch")
+        ? String(formData.get("bankBranch") || "")
+        : undefined,
+      bankAccountNumber: formData.has("bankAccountNumber")
+        ? String(formData.get("bankAccountNumber") || "")
+        : undefined,
+      bankIfsc: formData.has("bankIfsc") ? String(formData.get("bankIfsc") || "") : undefined,
     });
 
     appendActionLog({
@@ -3020,6 +3064,18 @@ export async function saveBusinessSettingsJsonAction(formData: FormData): Promis
       defaultTallyCompany: String(formData.get("defaultTallyCompany") || ""),
       stateCode: String(formData.get("stateCode") || "27"),
       gstin: String(formData.get("gstin") || ""),
+      upiVpa: formData.has("upiVpa") ? String(formData.get("upiVpa") || "") : undefined,
+      upiPayeeName: formData.has("upiPayeeName")
+        ? String(formData.get("upiPayeeName") || "")
+        : undefined,
+      bankName: formData.has("bankName") ? String(formData.get("bankName") || "") : undefined,
+      bankBranch: formData.has("bankBranch")
+        ? String(formData.get("bankBranch") || "")
+        : undefined,
+      bankAccountNumber: formData.has("bankAccountNumber")
+        ? String(formData.get("bankAccountNumber") || "")
+        : undefined,
+      bankIfsc: formData.has("bankIfsc") ? String(formData.get("bankIfsc") || "") : undefined,
     });
 
     appendActionLog({
@@ -3113,7 +3169,14 @@ export async function switchWorkspaceJsonAction(formData: FormData): Promise<{
 const CHANNEL_DEFAULTS: Record<
   ConnectionChannelKind,
   {
-    provider: "whatsapp" | "meta" | "google" | "gdrive" | "google_ads";
+    provider:
+      | "whatsapp"
+      | "meta"
+      | "google"
+      | "gdrive"
+      | "google_ads"
+      | "google_sheets"
+      | "google_search_console";
     assetType?:
       | "fb_page"
       | "ig_account"
@@ -3175,6 +3238,19 @@ const CHANNEL_DEFAULTS: Record<
     provider: "gdrive",
     assetType: undefined,
     scopes: ["https://www.googleapis.com/auth/drive.file"],
+  },
+  google_sheets: {
+    provider: "google_sheets",
+    assetType: undefined,
+    scopes: [
+      "https://www.googleapis.com/auth/spreadsheets",
+      "https://www.googleapis.com/auth/drive.file",
+    ],
+  },
+  google_search_console: {
+    provider: "google_search_console",
+    assetType: undefined,
+    scopes: ["https://www.googleapis.com/auth/webmasters.readonly"],
   },
 };
 
@@ -4197,5 +4273,177 @@ export async function provisionWorkspaceSslJsonAction(): Promise<{
     return { ok: false, message: friendlyMessage(err) };
   }
 }
+
+export async function syncCaGoogleSheetJsonAction(): Promise<{
+  ok: boolean;
+  message: string;
+  spreadsheetUrl?: string;
+  rowsWritten?: number;
+}> {
+  try {
+    const session = await requireWebSession();
+    authorize(session.ctx, "tally:sync.manage");
+    const out = await syncWorkspaceCaGoogleSheet(session.ctx, {});
+    if (!out.ok) {
+      throw out.error;
+    }
+    const rowsWritten =
+      out.data.salesRows +
+      out.data.purchaseRows +
+      out.data.partyRows +
+      out.data.gstInvoiceRows;
+    revalidatePath("/tally");
+    revalidatePath("/connections");
+    return {
+      ok: true,
+      spreadsheetUrl: out.data.spreadsheetUrl,
+      rowsWritten,
+      message: `Synced ${rowsWritten} Tally & GST row(s) across 4 tabs to your live CA Google Sheet!`,
+    };
+  } catch (err) {
+    return { ok: false, message: friendlyMessage(err) };
+  }
+}
+
+export async function importSupplierBillDraftJsonAction(formData: FormData): Promise<{
+  ok: boolean;
+  message: string;
+  voucherId?: string;
+}> {
+  try {
+    const session = await requireWebSession();
+    const draftId = String(formData.get("draftId") || "").trim();
+    const companyName = String(formData.get("companyName") || "").trim() || undefined;
+    const rawOverride = String(formData.get("overrideAmountRupees") || "").trim();
+    const overrideAmountRupees = rawOverride ? Number(rawOverride) : undefined;
+
+    const res = await importSupplierBillDraftToTally(session.ctx, {
+      draftId,
+      companyName,
+      overrideAmountRupees,
+    });
+    if (!res.ok) {
+      throw res.error;
+    }
+    revalidatePath("/tally");
+    return {
+      ok: true,
+      voucherId: res.data.voucherId,
+      message: `Imported vendor bill #${res.data.billNumber} (${res.data.supplierName}) as a Tally Purchase voucher!`,
+    };
+  } catch (err) {
+    return { ok: false, message: friendlyMessage(err) };
+  }
+}
+
+export async function dismissSupplierBillDraftJsonAction(formData: FormData): Promise<{
+  ok: boolean;
+  message: string;
+}> {
+  try {
+    const session = await requireWebSession();
+    const draftId = String(formData.get("draftId") || "").trim();
+    const res = await dismissSupplierBillDraft(session.ctx, { draftId });
+    if (!res.ok) {
+      throw res.error;
+    }
+    revalidatePath("/tally");
+    return { ok: true, message: "Dismissed vendor bill draft." };
+  } catch (err) {
+    return { ok: false, message: friendlyMessage(err) };
+  }
+}
+
+export async function lintWhatsAppTemplateJsonAction(formData: FormData): Promise<{
+  ok: boolean;
+  score?: number;
+  riskLevel?: "low" | "medium" | "high";
+  recommendedCategory?: "utility" | "marketing" | "authentication";
+  warnings?: string[];
+  aiAdvice?: string | null;
+  message?: string;
+}> {
+  try {
+    await requireWebSession();
+    const res = await lintWhatsAppTemplateForMeta({
+      category: String(formData.get("category") || "utility") as
+        | "utility"
+        | "marketing"
+        | "authentication",
+      headerText: String(formData.get("headerText") || ""),
+      bodyText: String(formData.get("bodyText") || ""),
+    });
+    const score = res.riskLevel === "low" ? 96 : res.riskLevel === "medium" ? 72 : 35;
+    return {
+      ok: true,
+      score,
+      riskLevel: res.riskLevel,
+      recommendedCategory: res.recommendedCategory,
+      warnings: res.findings.map((f) => f.message),
+      aiAdvice: res.aiSuggestedRewrite,
+    };
+  } catch (err) {
+    return { ok: false, message: friendlyMessage(err) };
+  }
+}
+
+export async function translateWhatsAppTemplateJsonAction(formData: FormData): Promise<{
+  ok: boolean;
+  translatedText?: string;
+  provider?: string;
+  message?: string;
+}> {
+  try {
+    await requireWebSession();
+    const text = String(formData.get("text") || "");
+    const targetLanguage = String(formData.get("targetLanguage") || "hi");
+    const res = await translateIndianBusinessText({
+      text,
+      sourceLanguage: "en",
+      targetLanguage,
+    });
+    return {
+      ok: res.ok,
+      translatedText: res.translatedText,
+      provider: res.provider,
+    };
+  } catch (err) {
+    return { ok: false, message: friendlyMessage(err) };
+  }
+}
+
+export async function generateSmartAdCopyJsonAction(formData: FormData): Promise<{
+  ok: boolean;
+  headline?: string;
+  primaryText?: string;
+  description?: string;
+  provider?: string;
+  message?: string;
+}> {
+  try {
+    const session = await requireWebSession();
+    const productOrOffer = String(formData.get("productOrOffer") || "").trim();
+    const platform = String(formData.get("platform") || "meta") === "google" ? "google" : "meta";
+    const targetCity = String(formData.get("targetCity") || session.workspace.city || "").trim();
+    if (!productOrOffer) {
+      return { ok: false, message: "Enter your product, service, or offer first." };
+    }
+    const res = await generateSmartAdCopy({
+      businessName: session.workspace.name,
+      offerSummary: targetCity ? `${productOrOffer} (${targetCity})` : productOrOffer,
+      channel: platform === "google" ? "google_ads" : "meta_ads",
+    });
+    return {
+      ok: true,
+      headline: res.headline,
+      primaryText: res.primaryText,
+      description: `${session.workspace.name}${targetCity ? ` • ${targetCity}` : ""} • Verified GST Billing`,
+      provider: res.provider,
+    };
+  } catch (err) {
+    return { ok: false, message: friendlyMessage(err) };
+  }
+}
+
 
 

@@ -32,6 +32,12 @@ export function formatInr(paise: number, options?: { compact?: boolean; showDeci
   return isNegative && absPaise > 0 ? `-${formattedPositive}` : formattedPositive;
 }
 
+export const formatInrFromPaise = formatInr;
+
+export function paiseToRupees(paise: number): number {
+  return Number((paise / 100).toFixed(2));
+}
+
 export function rupeesToPaise(rupees: number | string): number {
   const num = typeof rupees === "string" ? Number(rupees.replace(/[^0-9.-]/g, "")) : rupees;
   if (!Number.isFinite(num)) {

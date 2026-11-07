@@ -55,10 +55,20 @@ export async function GET(req: NextRequest) {
       ? "google_business"
       : rawPurpose === "google_ads"
         ? "google_ads"
-        : "google_drive";
-  const returnTo = sanitizeReturnTo(
-    sp.get("returnTo") || (purpose === "google_drive" ? "/backups" : "/connections")
-  );
+        : rawPurpose === "google_sheets"
+          ? "google_sheets"
+          : rawPurpose === "google_search_console"
+            ? "google_search_console"
+            : "google_drive";
+  const defaultReturnTo =
+    purpose === "google_drive"
+      ? "/backups"
+      : purpose === "google_sheets"
+        ? "/tally"
+        : purpose === "google_search_console"
+          ? "/campaigns"
+          : "/connections";
+  const returnTo = sanitizeReturnTo(sp.get("returnTo") || defaultReturnTo);
 
   const canManage =
     canRolePerform(session.roleSlug, "connections:manage", session.workspace.id) ||

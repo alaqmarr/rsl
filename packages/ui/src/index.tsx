@@ -7,6 +7,7 @@ export {
   triggerSileoToast,
   type FlashToastPayload,
 } from "./sileo-toast";
+export { TurnstileWidget } from "./turnstile-widget";
 
 import {
   CopyCodeBlock,

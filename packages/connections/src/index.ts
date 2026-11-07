@@ -24,7 +24,9 @@ export type ConnectionChannelKind =
   | "meta_ads_pixel"
   | "google_ads"
   | "google_business"
-  | "google_drive";
+  | "google_drive"
+  | "google_sheets"
+  | "google_search_console";
 
 export type GoogleAdsDiscoveryStatus =
   | "verified_customers"
@@ -115,6 +117,11 @@ export interface ConnectionMetadata {
   folderId?: string;
   folderName?: string;
   folderWebViewLink?: string;
+  caSpreadsheetId?: string;
+  caSpreadsheetUrl?: string;
+  lastCaSheetSyncedAt?: number;
+  searchConsoleSiteUrl?: string;
+  availableSearchConsoleSites?: string[];
   driveEmail?: string;
   googleUserName?: string;
   oauthConnected?: boolean;
@@ -228,6 +235,8 @@ function inferChannelKind(
   if (meta.channelKind) return meta.channelKind;
   if (provider === "whatsapp" || assetTypes.includes("waba_phone")) return "whatsapp_cloud";
   if (provider === "gdrive") return "google_drive";
+  if (provider === "google_sheets") return "google_sheets";
+  if (provider === "google_search_console") return "google_search_console";
   if (provider === "google_ads" || assetTypes.includes("google_ad_customer")) return "google_ads";
   if (provider === "google" || assetTypes.includes("gbp_location")) return "google_business";
   if (assetTypes.includes("ig_account")) return "instagram_business";
@@ -400,6 +409,8 @@ const connectionMetadataInputSchema = z
         "google_ads",
         "google_business",
         "google_drive",
+        "google_sheets",
+        "google_search_console",
       ])
       .optional(),
     wabaId: z.string().optional(),
@@ -430,6 +441,9 @@ const connectionMetadataInputSchema = z
     placeId: z.string().optional(),
     folderId: z.string().optional(),
     driveEmail: z.string().optional(),
+    caSpreadsheetId: z.string().optional(),
+    caSpreadsheetUrl: z.string().optional(),
+    searchConsoleSiteUrl: z.string().optional(),
   })
   .optional();
 
@@ -437,7 +451,15 @@ export const linkExternalConnection = defineAction({
   key: "connections.linked",
   permission: "connections:manage",
   input: z.object({
-    provider: z.enum(["meta", "whatsapp", "google", "gdrive", "google_ads"]),
+    provider: z.enum([
+      "meta",
+      "whatsapp",
+      "google",
+      "gdrive",
+      "google_ads",
+      "google_sheets",
+      "google_search_console",
+    ]),
     displayName: z.string().trim().min(2, "Enter a descriptive account label").max(120),
     externalAccountId: z.string().trim().min(2, "Enter the external Account / Phone / Page ID").max(120),
     accessToken: z.string().trim().min(6, "Paste a valid access token (at least 6 characters)"),
@@ -901,7 +923,12 @@ export const verifyExternalConnectionHealth = defineAction({
  * Automatic 1-Click Google OAuth 2.0 Consent Screen Flow (`drive.file` & GBP)
  * ============================================================================ */
 
-export type GoogleOAuthPurpose = "google_drive" | "google_business" | "google_ads";
+export type GoogleOAuthPurpose =
+  | "google_drive"
+  | "google_business"
+  | "google_ads"
+  | "google_sheets"
+  | "google_search_console";
 
 export function generateGoogleOAuthPkcePair(): {
   codeVerifier: string;
@@ -918,7 +945,9 @@ export function generateGoogleOAuthPkcePair(): {
 export function isGoogleOAuthPurposeConfigured(purpose: GoogleOAuthPurpose = "google_drive"): boolean {
   const cfg = getPlatformGoogleOAuthConfig();
   if (!cfg.isReady) return false;
-  if (purpose === "google_drive") return cfg.enableDriveOAuth;
+  if (purpose === "google_drive" || purpose === "google_sheets" || purpose === "google_search_console") {
+    return cfg.enableDriveOAuth;
+  }
   if (purpose === "google_ads") return cfg.enableGoogleAdsOAuth;
   return cfg.enableGbpOAuth;
 }
@@ -954,19 +983,34 @@ export function buildGoogleOAuthAuthorizeUrl(params: {
           "profile",
           "https://www.googleapis.com/auth/drive.file",
         ]
-      : params.purpose === "google_ads"
+      : params.purpose === "google_sheets"
         ? [
             "openid",
             "email",
             "profile",
-            "https://www.googleapis.com/auth/adwords",
+            "https://www.googleapis.com/auth/drive.file",
+            "https://www.googleapis.com/auth/spreadsheets",
           ]
-        : [
-            "openid",
-            "email",
-            "profile",
-            "https://www.googleapis.com/auth/business.manage",
-          ];
+        : params.purpose === "google_search_console"
+          ? [
+              "openid",
+              "email",
+              "profile",
+              "https://www.googleapis.com/auth/webmasters.readonly",
+            ]
+          : params.purpose === "google_ads"
+            ? [
+                "openid",
+                "email",
+                "profile",
+                "https://www.googleapis.com/auth/adwords",
+              ]
+            : [
+                "openid",
+                "email",
+                "profile",
+                "https://www.googleapis.com/auth/business.manage",
+              ];
 
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.searchParams.set("client_id", cfg.clientId);
@@ -1415,6 +1459,145 @@ export async function completeGoogleOAuthConnection(params: {
       email,
       displayName,
       folderName: folder.folderName,
+    };
+  }
+
+  if (params.purpose === "google_sheets" || params.purpose === "google_search_console") {
+    const providerKey = params.purpose;
+    const existingTool = db
+      .select()
+      .from(controlSchema.connections)
+      .where(
+        and(
+          eq(controlSchema.connections.workspaceId, params.workspaceId),
+          eq(controlSchema.connections.provider, providerKey)
+        )
+      )
+      .get();
+
+    const existingMeta = parseMetadataSafe(existingTool?.metadataJson);
+    let preservedRefresh = refreshToken;
+    if (!preservedRefresh && existingTool) {
+      try {
+        preservedRefresh = (
+          JSON.parse(decryptEnvelope(existingTool.encryptedTokens)) as StoredTokenPayload
+        ).refreshToken;
+      } catch {
+        preservedRefresh = undefined;
+      }
+    }
+
+    const encryptedTokens = encryptEnvelope(
+      JSON.stringify({
+        accessToken,
+        refreshToken: preservedRefresh,
+        issuedAt: now,
+      } satisfies StoredTokenPayload)
+    );
+
+    let searchConsoleSiteUrl = existingMeta.searchConsoleSiteUrl;
+    let availableSearchConsoleSites = existingMeta.availableSearchConsoleSites;
+    if (params.purpose === "google_search_console") {
+      try {
+        const sitesResp = await fetch("https://www.googleapis.com/webmasters/v3/sites", {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          signal: AbortSignal.timeout(7000),
+        });
+        if (sitesResp.ok) {
+          const sitesJson = (await sitesResp.json()) as {
+            siteEntry?: Array<{ siteUrl?: string; permissionLevel?: string }>;
+          };
+          const sites = (sitesJson.siteEntry ?? [])
+            .map((s) => (s.siteUrl || "").trim())
+            .filter(Boolean);
+          availableSearchConsoleSites = sites;
+          if (!searchConsoleSiteUrl && sites.length > 0) {
+            searchConsoleSiteUrl = sites[0];
+          }
+        }
+      } catch {
+        // non-fatal
+      }
+    }
+
+    const displayName =
+      params.purpose === "google_sheets"
+        ? `Google Sheets CA Sync (${email})`
+        : searchConsoleSiteUrl
+          ? `Google Search Console (${searchConsoleSiteUrl})`
+          : `Google Search Console (${email})`;
+
+    const meta: ConnectionMetadata = {
+      ...existingMeta,
+      channelKind: params.purpose,
+      driveEmail: email,
+      googleUserName,
+      googleSub: googleSub || existingMeta.googleSub || undefined,
+      searchConsoleSiteUrl,
+      availableSearchConsoleSites,
+      oauthConnected: true,
+      maskedTokenHint: maskSecretToken(accessToken),
+      tokenMode: "live",
+      lastLiveCheckMessage:
+        params.purpose === "google_sheets"
+          ? `Connected Google Sheets CA Export (${email})`
+          : `Connected Google Search Console (${searchConsoleSiteUrl || email})`,
+      lastLiveCheckedAccountName: email,
+    };
+
+    const connectionId = existingTool?.id ?? newId();
+    if (existingTool) {
+      db.update(controlSchema.connections)
+        .set({
+          displayName,
+          externalAccountId: searchConsoleSiteUrl || email,
+          encryptedTokens,
+          scopesGrantedJson: JSON.stringify(scopesGranted),
+          metadataJson: JSON.stringify(meta),
+          status: "healthy",
+          lastHealthCheckAt: now,
+          expiresAt,
+          updatedAt: now,
+        })
+        .where(eq(controlSchema.connections.id, existingTool.id))
+        .run();
+    } else {
+      db.insert(controlSchema.connections)
+        .values({
+          id: connectionId,
+          workspaceId: params.workspaceId,
+          provider: providerKey,
+          displayName,
+          externalAccountId: searchConsoleSiteUrl || email,
+          encryptedTokens,
+          scopesGrantedJson: JSON.stringify(scopesGranted),
+          metadataJson: JSON.stringify(meta),
+          status: "healthy",
+          lastHealthCheckAt: now,
+          expiresAt,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+    }
+
+    appendActionLog({
+      workspaceId: params.workspaceId,
+      actorType: "user",
+      actorId: params.actorId,
+      source: "web",
+      action: "connections.linked",
+      outcome: "success",
+      requestId: newId(),
+      correlationId: newId(),
+      durationMs: 12,
+      summary: `Connected ${displayName} via OAuth Consent Screen`,
+    });
+
+    return {
+      connectionId,
+      email,
+      displayName,
     };
   }
 

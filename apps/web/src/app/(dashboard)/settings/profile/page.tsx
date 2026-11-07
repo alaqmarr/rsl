@@ -1,4 +1,5 @@
-import { listUserActiveSessions } from "@rsl/auth";
+import { listUserActiveSessions, listUserPasskeys } from "@rsl/auth";
+import { listUserWebPushSubscriptions } from "@rsl/notifications";
 import { SYSTEM_ROLES } from "@rsl/rbac";
 import { PageHeader } from "@rsl/ui";
 import { FlashBanner } from "@/components/flash-banner";
@@ -14,6 +15,8 @@ export default async function ClientProfilePage({
   const session = await requireWebSession();
   const sp = await searchParams;
   const activeSessions = listUserActiveSessions(session.user.id, session.sessionId);
+  const passkeys = listUserPasskeys(session.user.id);
+  const pushSubscriptions = listUserWebPushSubscriptions(session.user.id, session.workspace.id);
   const currentRoleLabel =
     SYSTEM_ROLES.find((r) => r.slug === session.roleSlug)?.name ?? session.roleSlug;
 
@@ -49,6 +52,8 @@ export default async function ClientProfilePage({
           billingStatus: w.billingStatus,
         }))}
         sessions={activeSessions}
+        passkeys={passkeys}
+        pushSubscriptions={pushSubscriptions}
       />
     </div>
   );

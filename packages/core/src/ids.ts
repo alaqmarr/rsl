@@ -66,6 +66,9 @@ export type EntityTypePrefix =
   | "sup"   // Unsubscribed / Suppression
   | "bkp"   // Backup / Restore Run
   | "eml"   // Outbound Email Record
+  | "pk"    // WebAuthn User Passkey
+  | "psh"   // Web Push Subscription
+  | "sid"   // Supplier Inbound Email Bill Draft
   | "req"   // Request / Correlation ID
   | "anc";  // Log Hash Anchor
 

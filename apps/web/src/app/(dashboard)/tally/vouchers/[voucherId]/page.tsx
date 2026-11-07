@@ -17,7 +17,12 @@ import {
 import { getWorkspacePlansByKeys, hasActiveEntitlement } from "@rsl/billing";
 import { formatInr } from "@rsl/core";
 import { canRoleAccessWebRoute, canRolePerform, formatRoleLabel } from "@rsl/rbac";
-import { getTallyWorkspaceSummary, getWorkspaceVoucherDetail } from "@rsl/tally";
+import {
+  buildSignedPublicTallyBillPayUrl,
+  getTallyWorkspaceSummary,
+  getWorkspaceVoucherDetail,
+} from "@rsl/tally";
+import { CopyTextButton } from "@/components/client-utils";
 import {
   AccessRestrictedState,
   MetricCard,
@@ -117,6 +122,13 @@ export default async function TallyVoucherDetailPage({
   const todayIso = new Date().toISOString().slice(0, 10);
   const selfPath = `/tally/vouchers/${encodeURIComponent(voucher.id)}`;
   const effectivePhone = voucher.partyPhoneE164 || party?.phoneE164 || null;
+  const publicPayUrl =
+    !isCancelled && voucher.voucherType === "Sales"
+      ? buildSignedPublicTallyBillPayUrl({
+          workspaceId: session.workspace.id,
+          voucherId: voucher.id,
+        })
+      : null;
 
   return (
     <div className="w-full space-y-6">
@@ -224,6 +236,24 @@ export default async function TallyVoucherDetailPage({
             >
               Preview Summary PDF
             </a>
+            {publicPayUrl && (
+              <>
+                <a
+                  href={publicPayUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rsl-btn-secondary"
+                >
+                  <IndianRupee className="mr-1 inline h-3.5 w-3.5 text-emerald-700" />
+                  Open UPI QR Portal (0% Fee)
+                </a>
+                <CopyTextButton
+                  text={publicPayUrl}
+                  label="Copy UPI Payment Link"
+                  copiedLabel="Link Copied"
+                />
+              </>
+            )}
             {!isCancelled &&
               voucher.voucherType === "Sales" &&
               canSendTallyWhatsApp &&

@@ -763,6 +763,47 @@ export const CONTROL_MIGRATIONS: SqlMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_ad_spend_ledger_campaign ON ad_spend_ledger(workspace_id, campaign_id);
     `,
   },
+  {
+    version: 10,
+    name: "0010_free_tools_upi_passkeys_and_push",
+    sql: `
+      ALTER TABLE workspaces ADD COLUMN upi_vpa TEXT;
+      ALTER TABLE workspaces ADD COLUMN upi_payee_name TEXT;
+      ALTER TABLE workspaces ADD COLUMN bank_name TEXT;
+      ALTER TABLE workspaces ADD COLUMN bank_branch TEXT;
+      ALTER TABLE workspaces ADD COLUMN bank_account_number TEXT;
+      ALTER TABLE workspaces ADD COLUMN bank_ifsc TEXT;
+
+      CREATE TABLE IF NOT EXISTS user_passkeys (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        credential_id TEXT NOT NULL UNIQUE,
+        public_key_spki TEXT NOT NULL,
+        algorithm INTEGER NOT NULL DEFAULT -7,
+        sign_count INTEGER NOT NULL DEFAULT 0,
+        transports_json TEXT NOT NULL DEFAULT '[]',
+        device_label TEXT NOT NULL DEFAULT 'Passkey',
+        last_used_at INTEGER,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_passkeys_user ON user_passkeys(user_id);
+
+      CREATE TABLE IF NOT EXISTS web_push_subscriptions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        endpoint TEXT NOT NULL UNIQUE,
+        p256dh_key TEXT NOT NULL,
+        auth_key TEXT NOT NULL,
+        user_agent TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        last_delivered_at INTEGER,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_web_push_ws_active ON web_push_subscriptions(workspace_id, active);
+      CREATE INDEX IF NOT EXISTS idx_web_push_user ON web_push_subscriptions(user_id);
+    `,
+  },
 ];
 
 export const INGRESS_MIGRATIONS: SqlMigration[] = [
@@ -1422,6 +1463,34 @@ export const TENANT_DATA_MIGRATIONS: SqlMigration[] = [
       ALTER TABLE pixel_events ADD COLUMN capi_response_detail TEXT;
     `,
   },
+  {
+    version: 7,
+    name: "0007_supplier_email_bill_drafts",
+    sql: `
+      CREATE TABLE IF NOT EXISTS supplier_bill_drafts (
+        id TEXT PRIMARY KEY,
+        sender_email TEXT NOT NULL,
+        sender_name TEXT,
+        subject TEXT NOT NULL,
+        supplier_name TEXT NOT NULL,
+        supplier_gstin TEXT,
+        invoice_number TEXT NOT NULL,
+        invoice_date_iso TEXT NOT NULL,
+        amount_paise INTEGER NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT 'INR',
+        hsn_code TEXT,
+        gst_rate_bps INTEGER NOT NULL DEFAULT 1800,
+        attachment_file_name TEXT,
+        attachment_mime_type TEXT,
+        raw_extract_summary TEXT,
+        status TEXT NOT NULL DEFAULT 'pending_review',
+        linked_voucher_id TEXT,
+        received_at INTEGER NOT NULL,
+        imported_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_supplier_drafts_status_ts ON supplier_bill_drafts(status, received_at);
+    `,
+  },
 ];
 
 export const TENANT_LOGS_MIGRATIONS: SqlMigration[] = [
@@ -1590,6 +1659,7 @@ export const EXPECTED_TENANT_DATA_TABLES = new Set([
   "tally_voucher_items",
   "tally_voucher_pdfs",
   "tally_bill_settlements",
+  "supplier_bill_drafts",
   "sync_runs",
   "outbox",
   "settings",

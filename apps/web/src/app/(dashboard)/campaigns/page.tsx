@@ -11,9 +11,11 @@ import {
   listWorkspaceConnections,
 } from "@rsl/connections";
 import { formatInr, resolveEndpointsFromHeaders } from "@rsl/core";
+import { fetchWorkspaceGoogleSearchConsoleInsights } from "@rsl/google";
 import { getMetaWorkspaceSummary } from "@rsl/meta";
 import { canRoleAccessWebRoute, canRolePerform, formatRoleLabel } from "@rsl/rbac";
 import { AccessRestrictedState, MetricCard, PageHeader, SectionCard, StatusPill } from "@rsl/ui";
+import { CampaignsFreeAiBar } from "@/components/campaigns-free-ai-bar";
 import { FeaturePlanGate, InlineAddonPlanBanner } from "@/components/feature-plan-gate";
 import { FlashBanner } from "@/components/flash-banner";
 import { SubmitButton } from "@/components/ios-feedback";
@@ -115,6 +117,14 @@ export default async function CampaignsAndPostsPage({
   const meta = getMetaWorkspaceSummary(session.workspace.id);
   const vault = getAdSpendVaultSummary(session.workspace.id);
   const { connections } = listWorkspaceConnections(session.workspace.id);
+  const gscInsights = await fetchWorkspaceGoogleSearchConsoleInsights(session.workspace.id).catch(
+    () => ({
+      connected: false,
+      siteUrl: null,
+      queries: [],
+      totals: { clicks: 0, impressions: 0, ctrPct: 0, avgPosition: 0 },
+    })
+  );
   const ep = resolveEndpointsFromHeaders(await headers());
 
   const metaAdsConn = connections.find((c) => c.channelKind === "meta_ads_pixel");
@@ -162,6 +172,32 @@ export default async function CampaignsAndPostsPage({
       />
 
       <FlashBanner notice={sp.notice} error={sp.error} />
+
+      <CampaignsFreeAiBar
+        gscConnected={gscInsights.connected}
+        gscSiteUrl={gscInsights.siteUrl}
+        gscTotals={
+          "totals" in gscInsights
+            ? gscInsights.totals
+            : {
+                clicks: gscInsights.totalClicks28d,
+                impressions: gscInsights.totalImpressions28d,
+                ctrPct: gscInsights.avgCtrPercent,
+                avgPosition: gscInsights.avgPosition,
+              }
+        }
+        gscQueries={
+          "queries" in gscInsights
+            ? gscInsights.queries
+            : gscInsights.topQueries.map((q) => ({
+                query: q.query,
+                clicks: q.clicks,
+                impressions: q.impressions,
+                ctrPct: q.ctrPercent,
+                avgPosition: q.position,
+              }))
+        }
+      />
 
       {/* Live Metrics & Vault Summary */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">

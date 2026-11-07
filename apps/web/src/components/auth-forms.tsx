@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useActionState, useEffect, useState } from "react";
-import { IosSpinner, PasswordInput, sileo } from "@rsl/ui";
+import { Fingerprint } from "lucide-react";
+import { IosSpinner, PasswordInput, sileo, TurnstileWidget } from "@rsl/ui";
 import { ActionLink } from "@/components/ios-feedback";
 import {
   loginFormStateAction,
@@ -14,10 +15,118 @@ const INITIAL_AUTH_STATE: WebAuthFormState = {
   fields: {},
 };
 
-export function WebLoginForm() {
+function base64UrlToUint8Array(base64Url: string): Uint8Array<ArrayBuffer> {
+  const padding = "=".repeat((4 - (base64Url.length % 4)) % 4);
+  const base64 = (base64Url + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const buffer = new ArrayBuffer(rawData.length);
+  const outputArray = new Uint8Array(buffer);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+function arrayBufferToBase64Url(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]!);
+  }
+  return window.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export function WebLoginForm({ turnstileSiteKey }: { turnstileSiteKey?: string | null }) {
   const [state, formAction, isPending] = useActionState(loginFormStateAction, INITIAL_AUTH_STATE);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
+
+  async function handlePasskeySignIn() {
+    if (typeof window === "undefined" || !window.PublicKeyCredential) {
+      sileo.error({
+        title: "Passkeys not supported",
+        description: "Your current browser does not support WebAuthn Passkeys.",
+      });
+      return;
+    }
+    setPasskeyLoading(true);
+    try {
+      const optRes = await fetch("/api/auth/passkey/login/options", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim() || undefined }),
+      });
+      const optData = (await optRes.json()) as {
+        ok: boolean;
+        error?: string;
+        options?: {
+          challengeId: string;
+          challenge: string;
+          rpId: string;
+          timeout: number;
+          userVerification: UserVerificationRequirement;
+          allowCredentials?: Array<{ id: string; type: "public-key"; transports?: string[] }>;
+        };
+      };
+      if (!optData.ok || !optData.options) {
+        throw new Error(optData.error || "Could not start Passkey sign-in.");
+      }
+
+      const publicKey: PublicKeyCredentialRequestOptions = {
+        challenge: base64UrlToUint8Array(optData.options.challenge),
+        rpId: optData.options.rpId,
+        timeout: optData.options.timeout,
+        userVerification: optData.options.userVerification,
+        ...(optData.options.allowCredentials && optData.options.allowCredentials.length > 0
+          ? {
+              allowCredentials: optData.options.allowCredentials.map((c) => ({
+                id: base64UrlToUint8Array(c.id),
+                type: "public-key" as const,
+              })),
+            }
+          : {}),
+      };
+
+      const cred = (await navigator.credentials.get({
+        publicKey,
+      })) as PublicKeyCredential | null;
+      if (!cred) {
+        throw new Error("Passkey verification was cancelled.");
+      }
+      const assertion = cred.response as AuthenticatorAssertionResponse;
+
+      const verifyRes = await fetch("/api/auth/passkey/login/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          challengeId: optData.options.challengeId,
+          credentialId: arrayBufferToBase64Url(cred.rawId),
+          clientDataJSONBase64Url: arrayBufferToBase64Url(assertion.clientDataJSON),
+          authenticatorDataBase64Url: arrayBufferToBase64Url(assertion.authenticatorData),
+          signatureBase64Url: arrayBufferToBase64Url(assertion.signature),
+        }),
+      });
+      const verifyJson = (await verifyRes.json()) as {
+        ok: boolean;
+        error?: string;
+        redirectTo?: string;
+      };
+      if (!verifyJson.ok) {
+        throw new Error(verifyJson.error || "Passkey verification failed.");
+      }
+
+      sileo.success({ title: "Signed in with Passkey!" });
+      window.location.href = verifyJson.redirectTo || "/";
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Passkey sign-in failed.";
+      if (!/abort|notallowed/i.test(msg)) {
+        sileo.error({ title: "Passkey sign-in failed", description: msg, duration: 4800 });
+      }
+    } finally {
+      setPasskeyLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (state.error) {
@@ -85,9 +194,11 @@ export function WebLoginForm() {
         />
       </div>
 
+      <TurnstileWidget siteKey={turnstileSiteKey} />
+
       <button
         type="submit"
-        disabled={isPending}
+        disabled={isPending || passkeyLoading}
         className="rsl-btn-primary min-h-11 w-full py-2.5 text-sm"
       >
         {isPending ? (
@@ -99,14 +210,44 @@ export function WebLoginForm() {
           "Sign In"
         )}
       </button>
+
+      <div className="relative py-1">
+        <div className="absolute inset-0 flex items-center">
+          <div className="w-full border-t border-zinc-200" />
+        </div>
+        <div className="relative flex justify-center text-[11px]">
+          <span className="bg-white px-2.5 font-medium text-zinc-400">or 1-tap biometric</span>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={handlePasskeySignIn}
+        disabled={isPending || passkeyLoading}
+        className="rsl-btn-secondary inline-flex min-h-10 w-full items-center justify-center gap-2 py-2 text-xs font-semibold"
+      >
+        {passkeyLoading ? (
+          <>
+            <IosSpinner size="xs" />
+            <span>Waiting for Fingerprint / Face ID...</span>
+          </>
+        ) : (
+          <>
+            <Fingerprint className="h-4 w-4 text-emerald-700" />
+            <span>Sign in with Passkey (Fingerprint / Face)</span>
+          </>
+        )}
+      </button>
     </form>
   );
 }
 
 export function WebRegisterForm({
   indianStates,
+  turnstileSiteKey,
 }: {
   indianStates: Array<{ code: string; label: string }>;
+  turnstileSiteKey?: string | null;
 }) {
   const [state, formAction, isPending] = useActionState(
     registerFormStateAction,
@@ -321,6 +462,8 @@ export function WebRegisterForm({
         </a>
         .
       </p>
+
+      <TurnstileWidget siteKey={turnstileSiteKey} />
 
       <button
         type="submit"

@@ -3,6 +3,7 @@
 import React, { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { BellRing, Fingerprint, Trash2 } from "lucide-react";
 import { IosSpinner, SectionCard, sileo, StatusPill } from "@rsl/ui";
 import {
   changePasswordJsonAction,
@@ -44,6 +45,43 @@ export interface ProfileSettingsClientProps {
     billingStatus: string;
   }>;
   sessions: ProfileSessionItem[];
+  passkeys?: Array<{
+    id: string;
+    credentialId: string;
+    deviceLabel: string;
+    algorithm: number;
+    signCount: number;
+    lastUsedAt: number | null;
+    createdAt: number;
+  }>;
+  pushSubscriptions?: Array<{
+    id: string;
+    endpoint: string;
+    deviceLabel: string;
+    createdAt: number;
+    lastDeliveredAt: number | null;
+  }>;
+}
+
+function base64UrlToUint8Array(base64Url: string): Uint8Array<ArrayBuffer> {
+  const padding = "=".repeat((4 - (base64Url.length % 4)) % 4);
+  const base64 = (base64Url + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const buffer = new ArrayBuffer(rawData.length);
+  const outputArray = new Uint8Array(buffer);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+function arrayBufferToBase64Url(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]!);
+  }
+  return window.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 export function ProfileSettingsClient({
@@ -52,6 +90,8 @@ export function ProfileSettingsClient({
   activeWorkspaceId,
   workspaces,
   sessions,
+  passkeys = [],
+  pushSubscriptions = [],
 }: ProfileSettingsClientProps) {
   const router = useRouter();
   const [isSavingProfile, startProfileTransition] = useTransition();
@@ -63,6 +103,215 @@ export function ProfileSettingsClient({
   const [, startSessionTransition] = useTransition();
   const [switchingWsId, setSwitchingWsId] = useState<string | null>(null);
   const [, startSwitchWsTransition] = useTransition();
+  const [passkeyLabel, setPasskeyLabel] = useState("");
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+
+  async function handleEnrollPasskey() {
+    if (typeof window === "undefined" || !window.PublicKeyCredential) {
+      sileo.error({
+        title: "Passkeys Unavailable",
+        description: "This browser does not support W3C WebAuthn Passkeys.",
+      });
+      return;
+    }
+    setPasskeyBusy(true);
+    try {
+      const optRes = await fetch("/api/auth/passkey/register/options", { method: "POST" });
+      const optJson = (await optRes.json()) as {
+        ok: boolean;
+        error?: string;
+        options?: {
+          challenge: string;
+          rp: { id: string; name: string };
+          user: { id: string; name: string; displayName: string };
+          pubKeyCredParams: Array<{ type: "public-key"; alg: number }>;
+          timeout: number;
+          attestation: AttestationConveyancePreference;
+          excludeCredentials: Array<{ id: string; type: "public-key" }>;
+          authenticatorSelection: AuthenticatorSelectionCriteria;
+        };
+      };
+      if (!optJson.ok || !optJson.options) {
+        throw new Error(optJson.error || "Could not start Passkey enrollment.");
+      }
+      const o = optJson.options;
+      const cred = (await navigator.credentials.create({
+        publicKey: {
+          challenge: base64UrlToUint8Array(o.challenge),
+          rp: o.rp,
+          user: {
+            id: base64UrlToUint8Array(o.user.id),
+            name: o.user.name,
+            displayName: o.user.displayName,
+          },
+          pubKeyCredParams: o.pubKeyCredParams,
+          timeout: o.timeout,
+          attestation: o.attestation,
+          excludeCredentials: o.excludeCredentials.map((c) => ({
+            id: base64UrlToUint8Array(c.id),
+            type: "public-key" as const,
+          })),
+          authenticatorSelection: o.authenticatorSelection,
+        },
+      })) as PublicKeyCredential | null;
+
+      if (!cred) throw new Error("Passkey enrollment was cancelled.");
+      const att = cred.response as AuthenticatorAttestationResponse & {
+        getPublicKey?: () => ArrayBuffer | null;
+        getPublicKeyAlgorithm?: () => number;
+        getTransports?: () => string[];
+      };
+      const spkiBuf = att.getPublicKey ? att.getPublicKey() : null;
+      if (!spkiBuf) {
+        throw new Error(
+          "Your browser did not return a WebAuthn SPKI public key. Please use Chrome, Edge, or Safari."
+        );
+      }
+
+      const authDataBuf = att.getAuthenticatorData
+        ? att.getAuthenticatorData()
+        : (att as unknown as { authenticatorData?: ArrayBuffer }).authenticatorData;
+      if (!authDataBuf) {
+        throw new Error("Your browser did not return WebAuthn authenticatorData.");
+      }
+
+      const verifyRes = await fetch("/api/auth/passkey/register/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          credentialId: arrayBufferToBase64Url(cred.rawId),
+          clientDataJSONBase64Url: arrayBufferToBase64Url(att.clientDataJSON),
+          authenticatorDataBase64Url: arrayBufferToBase64Url(authDataBuf),
+          publicKeySpkiBase64Url: arrayBufferToBase64Url(spkiBuf),
+          algorithm: att.getPublicKeyAlgorithm ? att.getPublicKeyAlgorithm() : -7,
+          transports: att.getTransports ? att.getTransports() : [],
+          deviceLabel: passkeyLabel.trim() || navigator.platform || "Device Passkey",
+        }),
+      });
+      const verifyJson = (await verifyRes.json()) as { ok: boolean; error?: string };
+      if (!verifyJson.ok) {
+        throw new Error(verifyJson.error || "Passkey verification failed.");
+      }
+
+      setPasskeyLabel("");
+      sileo.success({
+        title: "Passkey Registered!",
+        description: "You can now sign in with 1-tap Fingerprint / Face ID / Windows Hello.",
+      });
+      router.refresh();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Could not register Passkey.";
+      if (!/abort|notallowed/i.test(msg)) {
+        sileo.error({ title: "Passkey Setup Failed", description: msg, duration: 5000 });
+      }
+    } finally {
+      setPasskeyBusy(false);
+    }
+  }
+
+  async function handleRemovePasskey(passkeyId: string) {
+    setPasskeyBusy(true);
+    try {
+      const res = await fetch("/api/auth/passkey/register/verify", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passkeyId }),
+      });
+      if (res.ok) {
+        sileo.success({ title: "Passkey Removed" });
+        router.refresh();
+      }
+    } finally {
+      setPasskeyBusy(false);
+    }
+  }
+
+  async function handleEnableWebPush() {
+    if (typeof window === "undefined" || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+      sileo.error({
+        title: "Push Not Supported",
+        description: "Your current browser does not support W3C Web Push notifications.",
+      });
+      return;
+    }
+    setPushBusy(true);
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") {
+        throw new Error("Please allow browser notifications when prompted.");
+      }
+      const keyRes = await fetch("/api/push/vapid-public-key");
+      const keyJson = (await keyRes.json()) as { ok: boolean; publicKey?: string; error?: string };
+      if (!keyJson.ok || !keyJson.publicKey) {
+        throw new Error(keyJson.error || "Could not load VAPID public key.");
+      }
+
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: base64UrlToUint8Array(keyJson.publicKey),
+      });
+      const subJson = sub.toJSON();
+      const saveRes = await fetch("/api/push/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          endpoint: subJson.endpoint,
+          keys: subJson.keys,
+          deviceLabel: navigator.platform || "This Browser",
+        }),
+      });
+      const saveOut = (await saveRes.json()) as { ok: boolean; error?: string };
+      if (!saveOut.ok) throw new Error(saveOut.error || "Could not save push subscription.");
+
+      sileo.success({
+        title: "Instant Push Alerts Enabled!",
+        description: "You will receive live desktop/mobile alerts for WhatsApp chats, Tally payments & Google reviews.",
+      });
+      router.refresh();
+    } catch (err) {
+      sileo.error({
+        title: "Could Not Enable Push",
+        description: err instanceof Error ? err.message : "Push registration failed.",
+        duration: 5000,
+      });
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
+  async function handleTestWebPush() {
+    setPushBusy(true);
+    try {
+      const res = await fetch("/api/push/subscribe", { method: "PATCH" });
+      const out = (await res.json()) as { ok: boolean; delivered?: number };
+      if (out.ok) {
+        sileo.success({
+          title: "Test Push Dispatched",
+          description: `Sent encrypted push notification to ${out.delivered ?? 1} subscribed browser(s).`,
+        });
+      }
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
+  async function handleRemovePushSub(subscriptionId: string) {
+    setPushBusy(true);
+    try {
+      await fetch("/api/push/subscribe", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subscriptionId }),
+      });
+      sileo.success({ title: "Push Device Unsubscribed" });
+      router.refresh();
+    } finally {
+      setPushBusy(false);
+    }
+  }
 
   function handleProfileSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -485,6 +734,145 @@ export function ProfileSettingsClient({
             </div>
           </SectionCard>
         </div>
+      </div>
+
+      {/* Biometric Passkeys & Instant Browser/Mobile Web Push */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <SectionCard
+          title={`Biometric Passkeys (${passkeys.length})`}
+          subtitle="Sign in with 1-tap Fingerprint, Face ID, or Windows Hello — phishing-resistant W3C WebAuthn"
+          action={
+            <StatusPill
+              label={passkeys.length > 0 ? `${passkeys.length} Enrolled` : "Recommended"}
+              tone={passkeys.length > 0 ? "emerald" : "sky"}
+            />
+          }
+        >
+          <div className="space-y-3 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                value={passkeyLabel}
+                onChange={(e) => setPasskeyLabel(e.target.value)}
+                placeholder="Device name (e.g. Office Laptop / iPhone)"
+                className="rsl-input flex-1 text-xs"
+              />
+              <button
+                type="button"
+                disabled={passkeyBusy}
+                onClick={handleEnrollPasskey}
+                className="rsl-btn-primary inline-flex items-center gap-1.5 py-2 text-xs"
+              >
+                {passkeyBusy ? (
+                  <IosSpinner size="xs" className="text-white" />
+                ) : (
+                  <Fingerprint className="h-3.5 w-3.5" />
+                )}
+                <span>Register Passkey</span>
+              </button>
+            </div>
+
+            {passkeys.length > 0 ? (
+              <div className="divide-y divide-zinc-200/80 rounded-xl border border-zinc-200/80 bg-zinc-50/50 px-3">
+                {passkeys.map((pk) => (
+                  <div key={pk.id} className="flex items-center justify-between gap-2 py-2.5">
+                    <div>
+                      <div className="font-semibold text-slate-900">{pk.deviceLabel}</div>
+                      <div className="text-[11px] text-zinc-500">
+                        Added {new Date(pk.createdAt).toLocaleDateString("en-IN")}
+                        {pk.lastUsedAt
+                          ? ` • Last used ${new Date(pk.lastUsedAt).toLocaleDateString("en-IN")}`
+                          : ""}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={passkeyBusy}
+                      onClick={() => handleRemovePasskey(pk.id)}
+                      className="rsl-btn-danger-soft inline-flex items-center gap-1 py-1 text-[11px]"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      <span>Remove</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[11.5px] text-zinc-500">
+                No passkeys registered yet. Click <strong>Register Passkey</strong> above to unlock
+                instant passwordless sign-in on this device.
+              </p>
+            )}
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          title={`Instant Browser & Mobile Push Alerts (${pushSubscriptions.length})`}
+          subtitle="Real-time alerts when customers reply on WhatsApp, Tally receipts arrive, or 1-2 star Google reviews post"
+          action={
+            <StatusPill
+              label={pushSubscriptions.length > 0 ? "Push Active" : "Off on This Device"}
+              tone={pushSubscriptions.length > 0 ? "emerald" : "stone"}
+            />
+          }
+        >
+          <div className="space-y-3 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={pushBusy}
+                onClick={handleEnableWebPush}
+                className="rsl-btn-primary inline-flex items-center gap-1.5 py-2 text-xs"
+              >
+                {pushBusy ? (
+                  <IosSpinner size="xs" className="text-white" />
+                ) : (
+                  <BellRing className="h-3.5 w-3.5" />
+                )}
+                <span>Enable Push on This Browser</span>
+              </button>
+              {pushSubscriptions.length > 0 && (
+                <button
+                  type="button"
+                  disabled={pushBusy}
+                  onClick={handleTestWebPush}
+                  className="rsl-btn-secondary py-2 text-xs"
+                >
+                  Send Test Push Alert
+                </button>
+              )}
+            </div>
+
+            {pushSubscriptions.length > 0 ? (
+              <div className="divide-y divide-zinc-200/80 rounded-xl border border-zinc-200/80 bg-zinc-50/50 px-3">
+                {pushSubscriptions.map((sub) => (
+                  <div key={sub.id} className="flex items-center justify-between gap-2 py-2.5">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-slate-900">{sub.deviceLabel}</div>
+                      <div className="truncate font-mono text-[11px] text-zinc-500">
+                        Subscribed {new Date(sub.createdAt).toLocaleDateString("en-IN")}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={pushBusy}
+                      onClick={() => handleRemovePushSub(sub.id)}
+                      className="rsl-btn-danger-soft inline-flex items-center gap-1 py-1 text-[11px]"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      <span>Mute</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[11.5px] text-zinc-500">
+                Works free on Chrome, Edge, Firefox &amp; Android home-screen PWAs — even when the
+                RSL tab is minimized.
+              </p>
+            )}
+          </div>
+        </SectionCard>
       </div>
 
       {/* Active Browser & Device Sessions */}

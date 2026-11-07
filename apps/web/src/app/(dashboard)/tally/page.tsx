@@ -44,6 +44,7 @@ import { FeaturePlanGate, InlineAddonPlanBanner } from "@/components/feature-pla
 import { FlashBanner } from "@/components/flash-banner";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
 import { TallyConnectStudio } from "@/components/tally-connect-studio";
+import { TallyFreePowerToolsBar } from "@/components/tally-free-power-tools";
 import { TallyLiveSyncBar } from "@/components/tally-live-sync-bar";
 import { TallySuiteNav } from "@/components/tally-suite-nav";
 import {
@@ -280,6 +281,14 @@ export default async function TallySyncPage({
         stockItemsCount={tally.totals.stockItemsCount}
         companies={tally.companies}
         selectedCompanyId={selectedCompanyId}
+      />
+
+      <TallyFreePowerToolsBar
+        canManageTally={canManageTally}
+        supplierInboxEmail={tally.supplierBillInbox.emailAddress}
+        supplierInboxReady={tally.supplierBillInbox.configured}
+        drafts={tally.supplierBillDrafts}
+        defaultCompanyName={tally.companies[0]?.name}
       />
 
       <PageHeader

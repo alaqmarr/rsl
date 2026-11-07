@@ -15,6 +15,7 @@ import {
 } from "./templates";
 
 export * from "./templates";
+export * from "./web-push";
 
 export interface CustomSmtpConfig {
   host: string;
