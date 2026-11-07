@@ -66,7 +66,7 @@ const EnvSchema = z.object({
   TALLY_WILDCARD_ZONE: z.string().default("tally"),
   API_WILDCARD_ZONE: z.string().default("api"),
   SSL_CERT_DIR: z.string().default(".rsl-data/ssl"),
-  SSL_ACME_EMAIL: z.string().default("ssl-ops@rapidshiftlabs.in"),
+  SSL_ACME_EMAIL: z.string().default("app@rapidshiftlabs.in"),
   SSL_PROVISION_MODE: z
     .enum(["auto", "certbot_webroot", "certbot_nginx", "certbot_dns", "caddy_api", "managed_wildcard"])
     .default("auto"),
@@ -141,13 +141,13 @@ const EnvSchema = z.object({
 
   VAPID_PUBLIC_KEY: z.string().optional().default(""),
   VAPID_PRIVATE_KEY: z.string().optional().default(""),
-  VAPID_SUBJECT: z.string().optional().default(""),
+  VAPID_SUBJECT: z.string().optional().default("mailto:app@rapidshiftlabs.in"),
 
   BHASHINI_USER_ID: z.string().optional().default(""),
   BHASHINI_ULCA_API_KEY: z.string().optional().default(""),
   BHASHINI_INFERENCE_API_KEY: z.string().optional().default(""),
 
-  EMAIL_FROM: z.string().default("RSL Marketing <notifications@rapidshiftlabs.in>"),
+  EMAIL_FROM: z.string().default("RapidShift Labs <app@rapidshiftlabs.in>"),
   SMTP_HOST: z.string().default("smtp.gmail.com"),
   SMTP_PORT: z.coerce.number().int().default(465),
   SMTP_SECURE: z

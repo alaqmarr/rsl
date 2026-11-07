@@ -10,6 +10,7 @@ import {
   BillingAndWalletAlertTemplate,
   EmailVerificationTemplate,
   PasswordResetTemplate,
+  SmtpDiagnosticTemplate,
   StorageAndBackupReportTemplate,
   TeamInvitationTemplate,
 } from "./templates";
@@ -154,9 +155,10 @@ export async function sendEmailVerificationCode(params: {
     workspaceId: params.workspaceId,
     to: params.email,
     templateKey: "email_verification",
-    subject: `${code} is your RSL Marketing verification code`,
+    subject: `${code} is your RapidShift Labs verification code`,
     reactElement: React.createElement(EmailVerificationTemplate, {
       recipientName: params.recipientName,
+      recipientEmail: params.email,
       verificationCode: code,
       verifyUrl,
       expiresMinutes: 30,
@@ -259,9 +261,10 @@ export async function requestPasswordResetEmail(params: {
     workspaceId: user.activeWorkspaceId,
     to: normalized,
     templateKey: "password_reset",
-    subject: "Reset your RSL Marketing password",
+    subject: "Password reset instructions for RapidShift Labs",
     reactElement: React.createElement(PasswordResetTemplate, {
       recipientName: user.name,
+      recipientEmail: normalized,
       resetUrl,
       requestedFromIp: params.requestedFromIp,
     }),
@@ -338,11 +341,12 @@ export async function sendTeamInviteNotification(params: {
     workspaceId: params.workspaceId,
     to: params.recipientEmail,
     templateKey: "team_invite",
-    subject: `${params.inviterName} invited you to ${params.businessName} on RSL Marketing`,
+    subject: `Invitation to join ${params.businessName} on RapidShift Labs`,
     reactElement: React.createElement(TeamInvitationTemplate, {
       inviterName: params.inviterName,
       businessName: params.businessName,
       roleLabel: params.roleLabel,
+      recipientEmail: params.recipientEmail,
       acceptUrl,
     }),
   });
@@ -361,7 +365,7 @@ export async function sendBillingNotification(params: {
     workspaceId: params.workspaceId,
     to: params.recipientEmail,
     templateKey: "billing_alert",
-    subject: `${params.headline} — ${params.businessName}`,
+    subject: `${params.headline} (${params.businessName})`,
     reactElement: React.createElement(BillingAndWalletAlertTemplate, {
       businessName: params.businessName,
       headline: params.headline,
@@ -385,7 +389,7 @@ export async function sendStorageAndBackupNotification(params: {
     workspaceId: params.workspaceId,
     to: params.recipientEmail,
     templateKey: "backup_report",
-    subject: `${params.operationTitle} — ${params.businessName}`,
+    subject: `${params.operationTitle} (${params.businessName})`,
     reactElement: React.createElement(StorageAndBackupReportTemplate, {
       businessName: params.businessName,
       operationTitle: params.operationTitle,
@@ -427,16 +431,18 @@ export async function sendPlatformSmtpTestEmail(recipientEmail: string): Promise
       "Save your SMTP Username and App Password first before sending a live test email."
     );
   }
+  const cleanRecipient = recipientEmail.trim();
   return dispatchHtmlEmail({
-    to: recipientEmail.trim(),
+    to: cleanRecipient,
     templateKey: "smtp_test",
-    subject: "RapidShift Labs — Live Database SMTP Verification",
-    reactElement: React.createElement(StorageAndBackupReportTemplate, {
-      businessName: "RapidShift Labs Staff Portal",
-      operationTitle: "Outbound SMTP Transport Verified",
-      summaryLine: `Delivered successfully via ${smtp.host}:${smtp.port} (${smtp.source} credentials).`,
-      checksumOrDetails: `Sender: ${smtp.from} • Verified at ${new Date().toISOString()}`,
-      backupsUrl: `${getEnv().ADMIN_URL}/credentials`,
+    subject: `RapidShift Labs SMTP verification (${smtp.host}:${smtp.port})`,
+    reactElement: React.createElement(SmtpDiagnosticTemplate, {
+      recipientEmail: cleanRecipient,
+      smtpHost: smtp.host,
+      smtpPort: smtp.port,
+      fromHeader: smtp.from || smtp.user,
+      credentialSource: smtp.source,
+      adminCredentialsUrl: `${getEnv().ADMIN_URL}/credentials`,
     }),
   });
 }

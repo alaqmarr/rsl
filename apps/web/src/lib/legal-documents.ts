@@ -77,8 +77,14 @@ export function getLegalEntityContext(): LegalEntityContext {
     gstin,
     stateCode: prefix,
     stateName,
-    billingEmail: billing.billingEmail || `billing@${primaryDomain}`,
-    privacyEmail: `privacy@${primaryDomain}`,
+    billingEmail:
+      billing.billingEmail &&
+      billing.billingEmail !== "billing@rapidshiftlabs.in" &&
+      billing.billingEmail !== "info@thewebsensei.email" &&
+      billing.billingEmail !== "support@rapidshiftlabs.com"
+        ? billing.billingEmail
+        : `app@${primaryDomain}`,
+    privacyEmail: `app@${primaryDomain}`,
     supportPhone: billing.supportPhone || "+91 98200 00000",
     primaryDomain,
     appUrl: env.APP_URL || `https://app.${primaryDomain}`,

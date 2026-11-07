@@ -15,7 +15,7 @@
 set -euo pipefail
 
 PRIMARY_DOMAIN="${PRIMARY_DOMAIN:-rapidshiftlabs.in}"
-ACME_EMAIL="${SSL_ACME_EMAIL:-ssl-ops@${PRIMARY_DOMAIN}}"
+ACME_EMAIL="${SSL_ACME_EMAIL:-app@${PRIMARY_DOMAIN}}"
 ACME_WEBROOT="/var/www/rsl-acme"
 SSL_LINK_DIR="/etc/ssl/rsl"
 CLIENT_SNI_DIR="/etc/nginx/rsl-clients-ssl"

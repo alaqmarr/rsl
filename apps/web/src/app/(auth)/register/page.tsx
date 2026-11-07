@@ -11,7 +11,7 @@ import { getOptionalWebSession } from "@/lib/session";
 
 const INDIAN_STATES = Object.entries(INDIA_GST_STATES)
   .sort(([a], [b]) => a.localeCompare(b))
-  .map(([code, name]) => ({ code, label: `${code} — ${name}` }));
+  .map(([code, name]) => ({ code, label: `${code} - ${name}` }));
 
 export default async function RegisterPage({
   searchParams,
@@ -26,46 +26,60 @@ export default async function RegisterPage({
   const sp = await searchParams;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#F8F9FB] px-4 py-10">
+    <div
+      className="flex min-h-screen items-center justify-center bg-[#F1F5F9] px-4 py-10"
+      style={{
+        backgroundImage:
+          "radial-gradient(50% 420px at 20% 0%, rgba(67, 56, 202, 0.08) 0%, transparent 70%), radial-gradient(50% 420px at 80% 0%, rgba(4, 120, 87, 0.08) 0%, transparent 70%)",
+      }}
+    >
       <div className="w-full max-w-lg">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <Link href="/">
-            <BrandLogo variant="long" size="sm" subtitle="RSL Marketing & Tally Suite" />
+            <BrandLogo variant="long" size="sm" subtitle="Accounting, Messaging & Growth Suite" />
           </Link>
           <ActionLink
             href="/login"
             spinnerSize="xs"
-            className="text-xs font-semibold text-emerald-700 hover:underline"
+            className="text-xs font-semibold text-indigo-700 hover:underline"
           >
-            Already have an account? Sign in
+            Already have a workspace? Sign in
           </ActionLink>
         </div>
 
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-7 shadow-[0_8px_30px_rgba(15,23,42,0.05)]">
-          <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800">
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-            <span>Includes 7-Day All-Tools Free Trial • No Credit Card Required</span>
+        <div className="overflow-hidden rounded-2xl border border-slate-200/95 bg-white shadow-[0_22px_50px_-16px_rgba(15,23,42,0.14)]">
+          <div className="grid h-1.5 w-full grid-cols-12">
+            <div className="col-span-6 bg-[#0B1220]" />
+            <div className="col-span-3 bg-[#4338CA]" />
+            <div className="col-span-3 bg-[#047857]" />
           </div>
 
-          <h1 className="mt-2.5 text-xl font-bold tracking-tight text-slate-900">
-            Create your Business Account
-          </h1>
-          <p className="mt-1 text-xs text-zinc-600">
-            Explore all 15 Tally Prime, WhatsApp, Inbox, and Cloud Backup tools free for 7 days.
-          </p>
+          <div className="p-7 sm:p-8">
+            <div className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-900">
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+              <span>7-Day Full-Suite Trial • Zero Card Required</span>
+            </div>
 
-          <div className="mt-4">
-            <FlashBanner notice={sp.notice} error={sp.error} />
+            <h1 className="mt-3 text-xl font-bold tracking-tight text-slate-950">
+              Create your Business Workspace
+            </h1>
+            <p className="mt-1 text-xs text-slate-600">
+              Provision your isolated database file and unlock Tally Prime sync, WhatsApp Cloud API, Inbox, and Google Drive backups for 7 days.
+            </p>
+
+            <div className="mt-4">
+              <FlashBanner notice={sp.notice} error={sp.error} />
+            </div>
+
+            <WebRegisterForm
+              indianStates={INDIAN_STATES}
+              turnstileSiteKey={
+                getPlatformCloudflareTurnstileConfig().isReady
+                  ? getPlatformCloudflareTurnstileConfig().siteKey
+                  : null
+              }
+            />
           </div>
-
-          <WebRegisterForm
-            indianStates={INDIAN_STATES}
-            turnstileSiteKey={
-              getPlatformCloudflareTurnstileConfig().isReady
-                ? getPlatformCloudflareTurnstileConfig().siteKey
-                : null
-            }
-          />
         </div>
 
         <div className="mt-6 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-zinc-500">

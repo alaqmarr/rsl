@@ -15,13 +15,17 @@
 
 @layer base {
   :root {
-    --canvas: #f8f9fb;
+    --canvas: #f1f5f9;
     --surface: #ffffff;
     --ink: #0f172a;
-    --ink-muted: #52525b;
-    --border: #e4e4e7;
+    --ink-muted: #475569;
+    --border: #cbd5e1;
     --accent: #059669;
     --accent-hover: #047857;
+    --indigo: #4338ca;
+    --violet: #6d28d9;
+    --sky: #0284c7;
+    --teal: #0f766e;
     --amber: #d97706;
     --ruby: #dc2626;
   }
@@ -127,8 +131,8 @@ textarea.rsl-input {
 
 .rsl-input:focus {
   outline: none;
-  border-color: #059669;
-  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.14);
+  border-color: #4338ca;
+  box-shadow: 0 0 0 3px rgba(67, 56, 202, 0.14);
 }
 
 .rsl-btn-primary {
@@ -139,20 +143,47 @@ textarea.rsl-input {
   min-height: 2.25rem;
   border-radius: 0.625rem;
   border: 1px solid #047857;
-  background: linear-gradient(180deg, #10b981 0%, #059669 100%);
+  background: linear-gradient(180deg, #10b981 0%, #059669 55%, #047857 100%);
   padding: 0.4375rem 0.925rem;
   font-size: 0.8125rem;
   line-height: 1.25rem;
   font-weight: 600;
   color: #ffffff;
-  box-shadow: 0 1px 2px rgba(5, 150, 105, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.18);
-  transition: all 140ms ease;
+  box-shadow: 0 2px 6px rgba(4, 120, 87, 0.26), 0 1px 2px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  transition: all 150ms ease;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .rsl-btn-primary:hover {
   background: linear-gradient(180deg, #059669 0%, #047857 100%);
+  box-shadow: 0 6px 14px -3px rgba(4, 120, 87, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  transform: translateY(-0.5px);
+}
+
+.rsl-btn-indigo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.425rem;
+  min-height: 2.25rem;
+  border-radius: 0.625rem;
+  border: 1px solid #3730a3;
+  background: linear-gradient(180deg, #4f46e5 0%, #4338ca 100%);
+  padding: 0.4375rem 0.925rem;
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+  font-weight: 600;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(67, 56, 202, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  transition: all 150ms ease;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.rsl-btn-indigo:hover {
+  background: linear-gradient(180deg, #4338ca 0%, #3730a3 100%);
+  transform: translateY(-0.5px);
 }
 
 .rsl-btn-dark {
@@ -162,21 +193,21 @@ textarea.rsl-input {
   gap: 0.425rem;
   min-height: 2.25rem;
   border-radius: 0.625rem;
-  border: 1px solid #0f172a;
-  background-color: #0f172a;
+  border: 1px solid #0b1220;
+  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
   padding: 0.4375rem 0.925rem;
   font-size: 0.8125rem;
   line-height: 1.25rem;
   font-weight: 600;
   color: #ffffff;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.14);
-  transition: background-color 140ms ease;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  transition: all 150ms ease;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .rsl-btn-dark:hover {
-  background-color: #1e293b;
+  background: linear-gradient(180deg, #334155 0%, #1e293b 100%);
 }
 
 .rsl-btn-secondary {
@@ -186,22 +217,22 @@ textarea.rsl-input {
   gap: 0.425rem;
   min-height: 2.25rem;
   border-radius: 0.625rem;
-  border: 1px solid #e4e4e7;
-  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   padding: 0.4375rem 0.875rem;
   font-size: 0.8125rem;
   line-height: 1.25rem;
   font-weight: 600;
   color: #0f172a;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  transition: background-color 140ms ease, border-color 140ms ease;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: all 140ms ease;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .rsl-btn-secondary:hover {
-  background-color: #f4f4f5;
-  border-color: #d4d4d8;
+  background: #f1f5f9;
+  border-color: #94a3b8;
 }
 
 .rsl-btn-danger {

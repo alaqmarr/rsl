@@ -29,64 +29,78 @@ export default async function AdminLoginPage({
   const turnstile = getPlatformCloudflareTurnstileConfig();
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-[#F8F9FB] p-6">
-      <div className="w-full max-w-[420px] rounded-2xl border border-zinc-200/90 bg-white p-8 shadow-[0_8px_30px_rgba(15,23,42,0.06)]">
-        <div className="flex items-start justify-between gap-3">
-          <BrandLogo variant="long" size="sm" subtitle="Client Billing, Plans & Support" />
-
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-800">
-            <ShieldCheck className="h-3 w-3 text-emerald-600" />
-            <span>Staff Only</span>
-          </span>
+    <div
+      className="flex min-h-screen flex-col items-center justify-center bg-[#EEF2F7] p-6"
+      style={{
+        backgroundImage:
+          "radial-gradient(50% 420px at 20% 0%, rgba(67, 56, 202, 0.10) 0%, transparent 72%), radial-gradient(50% 420px at 80% 0%, rgba(15, 23, 42, 0.08) 0%, transparent 72%)",
+      }}
+    >
+      <div className="w-full max-w-[430px] overflow-hidden rounded-2xl border border-slate-200/95 bg-white shadow-[0_24px_55px_-16px_rgba(15,23,42,0.16)]">
+        <div className="grid h-1.5 w-full grid-cols-12">
+          <div className="col-span-5 bg-[#0B1220]" />
+          <div className="col-span-4 bg-[#4338CA]" />
+          <div className="col-span-3 bg-[#D97706]" />
         </div>
 
-        {isUninitialized ? (
-          <div className="mt-6 space-y-4">
-            <h1 className="text-xl font-bold tracking-tight text-slate-900">
-              Complete Initial Platform Setup
-            </h1>
-            <p className="text-xs leading-relaxed text-zinc-500">
-              No Super Admin account exists in this server database yet. Open the dedicated{" "}
-              <span className="font-semibold text-slate-800">
-                setup.{endpoints.primaryDomain}
-              </span>{" "}
-              wizard with your server&apos;s one-time Setup Key to provision the primary Super Admin.
-            </p>
-            <FlashBanner notice={sp.notice} error={sp.error} />
-            <a
-              href={setupHref}
-              className="adm-btn-primary block w-full py-2.5 text-center text-sm"
-            >
-              Open Platform Setup Wizard →
-            </a>
-            {!endpoints.isLocalDev && (
-              <a
-                href="/setup"
-                className="block text-center text-[11px] font-medium text-zinc-500 underline hover:text-slate-800"
-              >
-                DNS for setup.{endpoints.primaryDomain} still propagating? Open /setup here instead
-              </a>
-            )}
+        <div className="p-8">
+          <div className="flex items-start justify-between gap-3">
+            <BrandLogo variant="long" size="sm" subtitle="Staff Operations & Billing" />
+
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-[10px] font-bold text-indigo-900 uppercase">
+              <ShieldCheck className="h-3 w-3 text-indigo-600" />
+              <span>Staff Only</span>
+            </span>
           </div>
-        ) : (
-          <>
-            <h1 className="mt-6 text-xl font-bold tracking-tight text-slate-900">
-              Sign in to Staff Portal
-            </h1>
-            <p className="mt-1 text-xs leading-relaxed text-zinc-500">
-              Verify client UPI/NEFT payments, unlock feature plans, issue GST invoices, and assist clients.
-            </p>
 
-            <FlashBanner notice={sp.notice} error={sp.error} />
+          {isUninitialized ? (
+            <div className="mt-6 space-y-4">
+              <h1 className="text-xl font-bold tracking-tight text-slate-950">
+                Complete Initial Platform Setup
+              </h1>
+              <p className="text-xs leading-relaxed text-slate-600">
+                No Super Admin account exists in this server database yet. Open the dedicated{" "}
+                <span className="font-semibold text-slate-900">
+                  setup.{endpoints.primaryDomain}
+                </span>{" "}
+                wizard with your server&apos;s one-time Setup Key to provision the primary Super Admin.
+              </p>
+              <FlashBanner notice={sp.notice} error={sp.error} />
+              <a
+                href={setupHref}
+                className="adm-btn-primary block w-full py-2.5 text-center text-sm"
+              >
+                Open Platform Setup Wizard →
+              </a>
+              {!endpoints.isLocalDev && (
+                <a
+                  href="/setup"
+                  className="block text-center text-[11px] font-medium text-slate-500 underline hover:text-slate-900"
+                >
+                  DNS for setup.{endpoints.primaryDomain} still propagating? Open /setup here instead
+                </a>
+              )}
+            </div>
+          ) : (
+            <>
+              <h1 className="mt-6 text-xl font-bold tracking-tight text-slate-950">
+                Sign in to Staff Control Plane
+              </h1>
+              <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                Verify client UPI/NEFT payments, unlock feature plans, issue GST invoices, and manage credentials.
+              </p>
 
-            <AdminLoginForm turnstileSiteKey={turnstile.isReady ? turnstile.siteKey : null} />
-          </>
-        )}
+              <FlashBanner notice={sp.notice} error={sp.error} />
+
+              <AdminLoginForm turnstileSiteKey={turnstile.isReady ? turnstile.siteKey : null} />
+            </>
+          )}
+        </div>
       </div>
 
-      <div className="mt-5 flex w-full max-w-[420px] items-center justify-between px-1 text-[11px] text-zinc-400">
+      <div className="mt-5 flex w-full max-w-[430px] items-center justify-between px-1 text-[11px] text-slate-500">
         <BrandLogo variant="mark" size="xs" subtitle="RapidShift Labs" />
-        <span>Internal Operations Console</span>
+        <span className="font-mono">app@rapidshiftlabs.in</span>
       </div>
     </div>
   );

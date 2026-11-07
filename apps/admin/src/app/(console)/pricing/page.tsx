@@ -243,7 +243,7 @@ export default async function AdminServicePricingPage({
                   type="email"
                   required
                   defaultValue={billingSettings.billingEmail}
-                  placeholder="billing@rapidshiftlabs.in"
+                  placeholder="app@rapidshiftlabs.in"
                   className="adm-input"
                 />
               </div>

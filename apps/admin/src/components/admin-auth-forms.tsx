@@ -54,7 +54,7 @@ export function AdminLoginForm({ turnstileSiteKey }: { turnstileSiteKey?: string
           autoComplete="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          placeholder="staff@rapidshiftlabs.in"
+          placeholder="app@rapidshiftlabs.in"
           className="adm-input min-h-10"
         />
       </div>

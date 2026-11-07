@@ -228,7 +228,7 @@ export default async function BusinessOverviewPage({
           label="Pending Customer Bills"
           value={formatInr(analytics.kpis.pendingReceivablesPaise)}
           sublabel={`${analytics.kpis.unpaidBillsCount} open bills (${analytics.kpis.overdueBillsCount} overdue)`}
-          accent={analytics.kpis.overdueBillsCount > 0 ? "amber" : "default"}
+          accent={analytics.kpis.overdueBillsCount > 0 ? "amber" : "violet"}
           icon={<Clock className="h-4 w-4" />}
         />
         <MetricCard
@@ -240,7 +240,7 @@ export default async function BusinessOverviewPage({
               ? `₹${analytics.kpis.returnPerRupeeSpent.toFixed(2)} earned per ₹1 spent`
               : "No ad or broadcast spend in last 30 days"
           }
-          accent="sky"
+          accent="indigo"
           icon={<TrendingUp className="h-4 w-4" />}
         />
         <MetricCard
@@ -251,6 +251,7 @@ export default async function BusinessOverviewPage({
               ? `Avg reply ${analytics.kpis.avgReplyMinutes} min (${analytics.kpis.openConversationsCount} open)`
               : `${analytics.kpis.openConversationsCount} open threads • ${analytics.kpis.contactsTotalCount} contacts`
           }
+          accent="sky"
           icon={<MessageSquare className="h-4 w-4" />}
         />
       </div>
@@ -259,6 +260,7 @@ export default async function BusinessOverviewPage({
         <SectionCard
           title={`Quick Setup Checklist (${completedSteps} of ${analytics.setupChecklist.length} completed)`}
           subtitle="Finish these quick steps to automate Tally Prime bill delivery, customer replies, and daily backups."
+          accent="indigo"
         >
           <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
             {visibleChecklist.map((step, idx) => (
@@ -306,12 +308,13 @@ export default async function BusinessOverviewPage({
         <SectionCard
           title="Payments Collected vs. Bills Raised (Last 30 Days)"
           subtitle="Daily rupee cashflow across your Tally Prime sales bills and receipts"
+          accent="emerald"
           action={
             canViewAnalyticsRoute ? (
               <ActionLink
                 href="/analytics"
                 spinnerSize="xs"
-                className="text-xs font-semibold text-emerald-700 hover:underline"
+                className="text-xs font-semibold text-indigo-700 hover:underline"
               >
                 <span>Full Analytics →</span>
               </ActionLink>
@@ -326,6 +329,8 @@ export default async function BusinessOverviewPage({
             }))}
             primaryLabel="Payments Collected (₹)"
             secondaryLabel="Bills Raised (₹)"
+            primaryColor="#059669"
+            secondaryColor="#4F46E5"
             formatValue={(v) => `₹${v.toLocaleString("en-IN")}`}
             emptyHint="No Tally bills or receipts recorded in the last 30 days."
           />
@@ -334,6 +339,7 @@ export default async function BusinessOverviewPage({
         <SectionCard
           title="Unpaid Bills Aging"
           subtitle="How long unpaid customer sales bills have been waiting"
+          accent="violet"
         >
           <ReceivablesAgingStack
             buckets={analytics.receivablesAging}
@@ -347,6 +353,7 @@ export default async function BusinessOverviewPage({
           <SectionCard
             title="Overdue Bills Ready for WhatsApp Reminder"
             subtitle="Send a polite payment reminder directly to the customer's WhatsApp"
+            accent="amber"
             action={
               <ActionLink
                 href="/tally"

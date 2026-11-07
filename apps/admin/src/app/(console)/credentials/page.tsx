@@ -732,8 +732,8 @@ export default async function AdminPlatformCredentialsPage({
                 <input
                   name="from"
                   required
-                  defaultValue={snap.smtp.from || "RapidShift Labs <noreply@rapidshiftlabs.in>"}
-                  placeholder="RapidShift Labs <noreply@rapidshiftlabs.in>"
+                  defaultValue={snap.smtp.from || "RapidShift Labs <app@rapidshiftlabs.in>"}
+                  placeholder="RapidShift Labs <app@rapidshiftlabs.in>"
                   className="adm-input"
                 />
               </div>
@@ -747,8 +747,8 @@ export default async function AdminPlatformCredentialsPage({
                 <input
                   name="user"
                   required
-                  defaultValue={snap.smtp.user}
-                  placeholder="alerts@rapidshiftlabs.in"
+                  defaultValue={snap.smtp.user || "app@rapidshiftlabs.in"}
+                  placeholder="app@rapidshiftlabs.in"
                   className="adm-input font-mono text-xs"
                 />
               </div>
@@ -820,7 +820,7 @@ export default async function AdminPlatformCredentialsPage({
                   type="email"
                   required
                   defaultValue={staff.email}
-                  placeholder="founder@rapidshiftlabs.in"
+                  placeholder="app@rapidshiftlabs.in"
                   className="adm-input bg-white"
                 />
               </div>
@@ -1540,7 +1540,7 @@ export default async function AdminPlatformCredentialsPage({
                 name="subject"
                 required
                 defaultValue={snap.vapid.subject}
-                placeholder="mailto:info@thewebsensei.email"
+                placeholder="mailto:app@rapidshiftlabs.in"
                 className="adm-input font-mono text-xs"
               />
             </div>

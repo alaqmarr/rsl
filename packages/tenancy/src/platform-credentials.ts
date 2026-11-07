@@ -1556,7 +1556,7 @@ export function generateFreshVapidKeyPair(): {
 export function getPlatformVapidConfig(): PlatformVapidConfig {
   const env = getEnv();
   const row = readRow("web_push_vapid");
-  const defaultSubject = `mailto:notifications@${env.PRIMARY_DOMAIN || "rapidshiftlabs.in"}`;
+  const defaultSubject = `mailto:app@${env.PRIMARY_DOMAIN || "rapidshiftlabs.in"}`;
 
   if (row) {
     const pub = parseJsonObject<{ subject: string; publicKey: string }>(row.publicConfigJson);
@@ -1626,7 +1626,7 @@ export function savePlatformVapidConfig(params: {
   const subject = (
     params.subject ||
     current.subject ||
-    `mailto:notifications@${env.PRIMARY_DOMAIN || "rapidshiftlabs.in"}`
+    `mailto:app@${env.PRIMARY_DOMAIN || "rapidshiftlabs.in"}`
   ).trim();
 
   let publicKey = (params.publicKey || current.publicKey || "").trim();
@@ -1931,8 +1931,8 @@ export function buildPlatformCredentialsSeedTemplate(): PlatformCredentialsSeedB
       host: "smtp.gmail.com",
       port: 465,
       secure: true,
-      from: "RapidShift Labs <info@thewebsensei.email>",
-      user: "info@thewebsensei.email",
+      from: "RapidShift Labs <app@rapidshiftlabs.in>",
+      user: "app@rapidshiftlabs.in",
       password: "YOUR_16_CHAR_GOOGLE_APP_PASSWORD",
     },
     cloudflare_r2: {
@@ -1982,7 +1982,7 @@ export function buildPlatformCredentialsSeedTemplate(): PlatformCredentialsSeedB
     },
     web_push_vapid: {
       enabled: true,
-      subject: "mailto:info@thewebsensei.email",
+      subject: "mailto:app@rapidshiftlabs.in",
       autoGenerate: true,
     },
     bhashini: {

@@ -17,6 +17,7 @@ import {
   ensurePlatformVapidConfig,
   getSafePlatformCredentialsAdminSnapshot,
   savePlatformCloudflareEmailConfig,
+  savePlatformVapidConfig,
   seedPlatformCredentialsBundle,
   type PlatformCredentialsSeedBundle,
 } from "@rsl/tenancy";
@@ -71,7 +72,17 @@ async function main() {
   }
 
   if (args.includes("--auto-free")) {
-    const vapid = ensurePlatformVapidConfig();
+    let vapid = ensurePlatformVapidConfig();
+    if (
+      vapid.subject.includes("thewebsensei.email") ||
+      vapid.subject.includes("notifications@")
+    ) {
+      vapid = savePlatformVapidConfig({
+        enabled: true,
+        subject: `mailto:app@${env.PRIMARY_DOMAIN || "rapidshiftlabs.in"}`,
+        staffId: "cli_auto_free",
+      });
+    }
     const eml = savePlatformCloudflareEmailConfig({
       enabled: true,
       inboundDomain: env.CF_EMAIL_INBOUND_DOMAIN || env.PRIMARY_DOMAIN || "rapidshiftlabs.in",

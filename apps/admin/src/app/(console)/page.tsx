@@ -111,14 +111,14 @@ export default async function AdminHomePage({
           label="Pending Plan Requests"
           value={String(pendingPlanRequests.length)}
           sublabel="Clients waiting for feature activation"
-          accent={pendingPlanRequests.length > 0 ? "amber" : "emerald"}
+          accent={pendingPlanRequests.length > 0 ? "amber" : "indigo"}
           icon={<Clock className="h-4 w-4" />}
         />
         <MetricCard
           label="Pending Wallet Top-Ups"
           value={String(pendingRecharges.length)}
           sublabel="UPI / Bank transfers waiting for check"
-          accent={pendingRecharges.length > 0 ? "amber" : "emerald"}
+          accent={pendingRecharges.length > 0 ? "copper" : "teal"}
           icon={<Wallet className="h-3.5 w-3.5" />}
         />
         <MetricCard
@@ -136,6 +136,7 @@ export default async function AdminHomePage({
               ? ` (${adminData.totals.freeAccessClientsCount} free-access)`
               : ""
           } • ${formatInr(adminData.totals.totalWalletLiabilityPaise, { showDecimals: true })} in wallets`}
+          accent="sky"
           icon={<Building2 className="h-3.5 w-3.5" />}
         />
       </div>
@@ -143,7 +144,8 @@ export default async function AdminHomePage({
       {/* SECTION 1: Pending Plan Activation Requests */}
       <SectionCard
         title={`Plan Activation Requests (${pendingPlanRequests.length})`}
-        subtitle="Clients cannot turn on plans themselves — record their payment below to unlock the feature and issue a GST invoice"
+        subtitle="Record verified client payments below to unlock requested modules and issue statutory GST invoices."
+        accent={pendingPlanRequests.length > 0 ? "amber" : "indigo"}
         action={
           <StatusPill
             label={
@@ -372,6 +374,7 @@ export default async function AdminHomePage({
       <SectionCard
         title={`Wallet Top-Up Payments (${pendingRecharges.length})`}
         subtitle="Verify UPI / Bank transfers before adding balance to a client's wallet"
+        accent={pendingRecharges.length > 0 ? "amber" : "teal"}
         action={
           <StatusPill
             label={pendingRecharges.length > 0 ? `${pendingRecharges.length} Waiting` : "Zero Pending"}

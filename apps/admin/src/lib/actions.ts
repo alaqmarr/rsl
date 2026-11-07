@@ -2590,7 +2590,7 @@ export async function staffSaveWebPushVapidAction(formData: FormData) {
     const autoGenerate = formData.get("autoGenerate") === "1";
     const saved = savePlatformVapidConfig({
       enabled: autoGenerate ? true : formData.get("enabled") === "on",
-      subject: String(formData.get("subject") || "mailto:info@thewebsensei.email").trim(),
+      subject: String(formData.get("subject") || "mailto:app@rapidshiftlabs.in").trim(),
       publicKey: String(formData.get("publicKey") || "").trim() || undefined,
       privateKeyD: String(formData.get("privateKey") || "").trim() || undefined,
       autoGenerate,

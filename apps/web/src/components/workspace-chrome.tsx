@@ -337,6 +337,79 @@ const ICON_BY_HREF: Record<string, React.ComponentType<{ className?: string }>> 
   "/help": BookOpen,
 };
 
+interface NavDomainPalette {
+  activeRow: string;
+  activeIcon: string;
+  idleIcon: string;
+  dot: string;
+}
+
+const NAV_TONE_PALETTES: Record<
+  "indigo" | "sky" | "violet" | "emerald" | "copper" | "amber" | "teal" | "slate",
+  NavDomainPalette
+> = {
+  indigo: {
+    activeRow: "bg-indigo-50/95 font-semibold text-indigo-950 ring-1 ring-indigo-200/90 shadow-2xs",
+    activeIcon: "text-indigo-600",
+    idleIcon: "text-indigo-500/80 group-hover:text-indigo-700",
+    dot: "bg-indigo-600",
+  },
+  sky: {
+    activeRow: "bg-sky-50/95 font-semibold text-sky-950 ring-1 ring-sky-200/90 shadow-2xs",
+    activeIcon: "text-sky-600",
+    idleIcon: "text-sky-500/85 group-hover:text-sky-700",
+    dot: "bg-sky-600",
+  },
+  violet: {
+    activeRow: "bg-violet-50/95 font-semibold text-violet-950 ring-1 ring-violet-200/90 shadow-2xs",
+    activeIcon: "text-violet-600",
+    idleIcon: "text-violet-500/85 group-hover:text-violet-700",
+    dot: "bg-violet-600",
+  },
+  emerald: {
+    activeRow: "bg-emerald-50/95 font-semibold text-emerald-950 ring-1 ring-emerald-200/90 shadow-2xs",
+    activeIcon: "text-emerald-600",
+    idleIcon: "text-emerald-600/85 group-hover:text-emerald-700",
+    dot: "bg-emerald-600",
+  },
+  copper: {
+    activeRow: "bg-orange-50/95 font-semibold text-orange-950 ring-1 ring-orange-200/90 shadow-2xs",
+    activeIcon: "text-orange-600",
+    idleIcon: "text-orange-500/85 group-hover:text-orange-700",
+    dot: "bg-orange-600",
+  },
+  amber: {
+    activeRow: "bg-amber-50/95 font-semibold text-amber-950 ring-1 ring-amber-200/90 shadow-2xs",
+    activeIcon: "text-amber-600",
+    idleIcon: "text-amber-500/90 group-hover:text-amber-700",
+    dot: "bg-amber-500",
+  },
+  teal: {
+    activeRow: "bg-teal-50/95 font-semibold text-teal-950 ring-1 ring-teal-200/90 shadow-2xs",
+    activeIcon: "text-teal-600",
+    idleIcon: "text-teal-500/85 group-hover:text-teal-700",
+    dot: "bg-teal-600",
+  },
+  slate: {
+    activeRow: "bg-slate-100/95 font-semibold text-slate-950 ring-1 ring-slate-300/80 shadow-2xs",
+    activeIcon: "text-slate-700",
+    idleIcon: "text-slate-400 group-hover:text-slate-700",
+    dot: "bg-slate-700",
+  },
+};
+
+function getNavPaletteForHref(href: string): NavDomainPalette {
+  if (href === "/" || href === "/analytics") return NAV_TONE_PALETTES.indigo;
+  if (href === "/inbox") return NAV_TONE_PALETTES.sky;
+  if (href.startsWith("/tally") || href === "/inventory") return NAV_TONE_PALETTES.violet;
+  if (href === "/whatsapp") return NAV_TONE_PALETTES.emerald;
+  if (href === "/campaigns") return NAV_TONE_PALETTES.copper;
+  if (href === "/reviews" || href === "/billing") return NAV_TONE_PALETTES.amber;
+  if (href === "/connections" || href === "/backups") return NAV_TONE_PALETTES.teal;
+  if (href === "/settings/tokens" || href === "/settings/business") return NAV_TONE_PALETTES.indigo;
+  return NAV_TONE_PALETTES.slate;
+}
+
 export function SidebarNavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -369,6 +442,7 @@ export function SidebarNavLinks({ onNavigate }: { onNavigate?: () => void }) {
           <ul className="mt-1.5 space-y-0.5">
             {sec.items.map((item) => {
               const Icon = ICON_BY_HREF[item.href] || LayoutDashboard;
+              const tone = getNavPaletteForHref(item.href);
               const isActive =
                 item.href === "/"
                   ? pathname === "/"
@@ -405,28 +479,28 @@ export function SidebarNavLinks({ onNavigate }: { onNavigate?: () => void }) {
                     }}
                     className={`group flex items-center justify-between rounded-xl px-2.5 py-2 text-[13px] transition-all ${
                       isActive
-                        ? "bg-emerald-50/90 font-semibold text-emerald-800 ring-1 ring-emerald-200/80"
+                        ? tone.activeRow
                         : isItemLoading
-                          ? "bg-zinc-100/80 font-semibold text-slate-900"
-                          : "font-medium text-zinc-600 hover:bg-zinc-50 hover:text-slate-900"
+                          ? "bg-slate-100/90 font-semibold text-slate-900"
+                          : "font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-950"
                     }`}
                   >
                     <span className="inline-flex min-w-0 items-center gap-2.5 truncate">
                       <Icon
                         className={`h-4 w-4 shrink-0 transition-colors ${
                           isActive
-                            ? "text-emerald-600"
+                            ? tone.activeIcon
                             : isItemLoading
                               ? "text-slate-900"
-                              : "text-zinc-400 group-hover:text-slate-700"
+                              : tone.idleIcon
                         }`}
                       />
                       <span className="truncate">{item.label}</span>
                     </span>
                     {isItemLoading ? (
-                      <IosSpinner size="xs" className="text-emerald-600" />
+                      <IosSpinner size="xs" className="text-indigo-600" />
                     ) : isActive ? (
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-600" />
+                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} />
                     ) : null}
                   </Link>
                 </li>
@@ -594,13 +668,13 @@ export function TopWorkspaceBar({
 
   return (
     <>
-      <header className="sticky top-0 z-30 shrink-0 border-b border-zinc-200/80 bg-white/85 backdrop-blur-md">
+      <header className="sticky top-0 z-20 shrink-0 border-b border-slate-200/90 bg-white/90 shadow-[0_4px_20px_-12px_rgba(15,23,42,0.08)] backdrop-blur-xl">
         <div className="flex w-full items-center justify-between gap-4 px-5 py-3 lg:px-8 xl:px-10">
           <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-zinc-200 bg-white text-slate-900 shadow-2xs lg:hidden"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-900 shadow-2xs lg:hidden"
               aria-label="Open navigation menu"
             >
               <Menu className="h-4 w-4" />
@@ -609,10 +683,10 @@ export function TopWorkspaceBar({
               <BrandLogo variant="mark" size="sm" />
             </Link>
             <div className="inline-flex min-w-0 items-center gap-2 text-xs">
-              <span className="hidden font-medium text-zinc-500 sm:inline">{workspaceName}</span>
-              <span className="hidden text-zinc-300 sm:inline">/</span>
-              <span className="truncate font-semibold text-slate-900">{currentItem.label}</span>
-              {isBarPending && <IosSpinner size="xs" className="text-emerald-600" />}
+              <span className="hidden font-medium text-slate-500 sm:inline">{workspaceName}</span>
+              <span className="hidden text-slate-300 sm:inline">/</span>
+              <span className="truncate font-bold text-slate-950">{currentItem.label}</span>
+              {isBarPending && <IosSpinner size="xs" className="text-indigo-600" />}
             </div>
           </div>
 
@@ -620,12 +694,12 @@ export function TopWorkspaceBar({
             <button
               type="button"
               onClick={() => setPaletteOpen(true)}
-              className="inline-flex items-center gap-2.5 rounded-xl border border-zinc-200/90 bg-zinc-50/70 px-3 py-1.5 text-xs text-zinc-500 transition hover:border-zinc-300 hover:bg-white hover:text-slate-900"
+              className="inline-flex items-center gap-2.5 rounded-xl border border-slate-200/95 bg-slate-50/80 px-3 py-1.5 text-xs text-slate-500 shadow-2xs transition hover:border-indigo-300 hover:bg-white hover:text-slate-900"
             >
-              <Search className="h-3.5 w-3.5 text-zinc-400" />
+              <Search className="h-3.5 w-3.5 text-indigo-500" />
               <span className="hidden sm:inline">Jump to screen, Tally, templates, or help...</span>
               <span className="sm:hidden">Search</span>
-              <kbd className="hidden items-center gap-0.5 rounded-md border border-zinc-200 bg-white px-1.5 py-0.5 font-mono text-[10px] font-semibold text-zinc-500 md:inline-flex">
+              <kbd className="hidden items-center gap-0.5 rounded-md border border-indigo-200/80 bg-indigo-50/70 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-indigo-700 md:inline-flex">
                 <Command className="h-2.5 w-2.5" />K
               </kbd>
             </button>
@@ -681,10 +755,10 @@ export function TopWorkspaceBar({
             <button
               type="button"
               onClick={() => setHelpOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-2xs transition hover:bg-zinc-50"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200/90 bg-indigo-50/75 px-3 py-1.5 text-xs font-semibold text-indigo-900 shadow-2xs transition hover:bg-indigo-100/80"
               title="Open help for this page"
             >
-              <HelpCircle className="h-3.5 w-3.5 text-emerald-600" />
+              <HelpCircle className="h-3.5 w-3.5 text-indigo-600" />
               <span className="hidden sm:inline">Page Guide</span>
             </button>
           </div>

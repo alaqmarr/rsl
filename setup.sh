@@ -148,7 +148,7 @@ DATA_DIR=/var/lib/rsl
 LOG_DIR=/var/log/rsl
 BACKUP_STAGING_DIR=/var/lib/rsl/staging
 SSL_CERT_DIR=/var/lib/rsl/ssl
-SSL_ACME_EMAIL=ssl-ops@${PRIMARY_DOMAIN}
+SSL_ACME_EMAIL=app@${PRIMARY_DOMAIN}
 SSL_PROVISION_MODE=certbot_webroot
 SSL_PROVISION_COMMAND=/usr/local/bin/rsl-provision-client-ssl
 REDIS_URL=redis://127.0.0.1:4579
@@ -171,11 +171,11 @@ META_APP_ID=
 META_APP_SECRET=
 META_GRAPH_VERSION=v21.0
 META_CONFIG_ID=
-EMAIL_FROM="RapidShift Labs <noreply@${PRIMARY_DOMAIN}>"
+EMAIL_FROM="RapidShift Labs <app@${PRIMARY_DOMAIN}>"
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=465
 SMTP_SECURE=true
-GMAIL_SMTP_USER=
+GMAIL_SMTP_USER=app@${PRIMARY_DOMAIN}
 GMAIL_SMTP_APP_PASSWORD=
 EOF
   chmod 600 "$APP_DIR/.env"
@@ -252,7 +252,7 @@ else
   exit 1
 fi
 
-$SUDO PRIMARY_DOMAIN="${PRIMARY_DOMAIN}" SSL_ACME_EMAIL="${SSL_ACME_EMAIL:-ssl-ops@${PRIMARY_DOMAIN}}" /usr/local/bin/rsl-provision-client-ssl --core || true
+$SUDO PRIMARY_DOMAIN="${PRIMARY_DOMAIN}" SSL_ACME_EMAIL="${SSL_ACME_EMAIL:-app@${PRIMARY_DOMAIN}}" /usr/local/bin/rsl-provision-client-ssl --core || true
 
 echo "==> [6/8] Installing workspace dependencies & building production bundles..."
 NODE_ENV=development pnpm install --prod=false --frozen-lockfile || NODE_ENV=development pnpm install --prod=false

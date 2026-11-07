@@ -383,13 +383,26 @@ export function PendingSubmitButton({
   );
 }
 
-export type Tone = "emerald" | "amber" | "ruby" | "sky" | "stone" | "copper" | "neutral";
+export type Tone =
+  | "emerald"
+  | "amber"
+  | "ruby"
+  | "sky"
+  | "indigo"
+  | "violet"
+  | "teal"
+  | "stone"
+  | "copper"
+  | "neutral";
 
 const TONE_STYLES: Record<Tone, { bg: string; text: string; border: string; dot: string }> = {
   emerald: { bg: "#ECFDF5", text: "#047857", border: "#A7F3D0", dot: "#059669" },
   amber: { bg: "#FFFBEB", text: "#B45309", border: "#FDE68A", dot: "#D97706" },
   ruby: { bg: "#FEF2F2", text: "#B91C1C", border: "#FECACA", dot: "#DC2626" },
   sky: { bg: "#EFF6FF", text: "#1D4ED8", border: "#BFDBFE", dot: "#2563EB" },
+  indigo: { bg: "#EEF2FF", text: "#3730A3", border: "#C7D2FE", dot: "#4F46E5" },
+  violet: { bg: "#F5F3FF", text: "#5B21B6", border: "#DDD6FE", dot: "#7C3AED" },
+  teal: { bg: "#F0FDFA", text: "#0F766E", border: "#99F6E4", dot: "#0D9488" },
   stone: { bg: "#F4F4F5", text: "#3F3F46", border: "#E4E4E7", dot: "#71717A" },
   neutral: { bg: "#F4F4F5", text: "#3F3F46", border: "#E4E4E7", dot: "#71717A" },
   copper: { bg: "#FFF7ED", text: "#C2410C", border: "#FED7AA", dot: "#EA580C" },
@@ -444,7 +457,7 @@ export function PageHeader({
         {(eyebrow || badge) && (
           <div className="mb-1.5 flex flex-wrap items-center gap-2">
             {typeof eyebrow === "string" ? (
-              <span className="text-[11px] font-semibold tracking-[0.07em] text-zinc-500 uppercase">
+              <span className="inline-flex items-center gap-1.5 rounded-md border border-indigo-200/70 bg-indigo-50/70 px-2 py-0.5 font-mono text-[10.5px] font-bold tracking-[0.06em] text-indigo-800 uppercase">
                 {eyebrow}
               </span>
             ) : (
@@ -453,11 +466,11 @@ export function PageHeader({
             {badge}
           </div>
         )}
-        <h1 className="text-[22px] sm:text-[24px] font-semibold leading-[1.25] tracking-[-0.025em] text-slate-900">
+        <h1 className="text-[22px] sm:text-[24px] font-bold leading-[1.25] tracking-[-0.025em] text-slate-950">
           {title}
         </h1>
         {subtitle && (
-          <p className="mt-1.5 max-w-3xl text-[13.5px] sm:text-sm leading-relaxed text-zinc-600">
+          <p className="mt-1.5 max-w-3xl text-[13.5px] sm:text-sm leading-relaxed text-slate-600">
             {subtitle}
           </p>
         )}
@@ -479,106 +492,155 @@ export function MetricCard({
   value: string;
   sublabel: string;
   changePct?: number | null;
-  accent?: "default" | "emerald" | "amber" | "ruby" | "copper" | "sky";
+  accent?:
+    | "default"
+    | "emerald"
+    | "amber"
+    | "ruby"
+    | "copper"
+    | "sky"
+    | "indigo"
+    | "violet"
+    | "teal";
   icon?: React.ReactNode;
 }) {
   const accents = {
     emerald: {
-      bar: "#059669",
-      chipBg: "bg-emerald-50 text-emerald-600 ring-emerald-200/70",
+      bar: "linear-gradient(90deg, #059669 0%, #10B981 100%)",
+      glow: "rgba(5, 150, 105, 0.08)",
+      chipBg: "bg-emerald-50 text-emerald-700 ring-emerald-200/90 shadow-2xs",
       dot: "bg-emerald-500",
     },
     amber: {
-      bar: "#D97706",
-      chipBg: "bg-amber-50 text-amber-600 ring-amber-200/70",
+      bar: "linear-gradient(90deg, #D97706 0%, #F59E0B 100%)",
+      glow: "rgba(217, 119, 6, 0.08)",
+      chipBg: "bg-amber-50 text-amber-700 ring-amber-200/90 shadow-2xs",
       dot: "bg-amber-500",
     },
     ruby: {
-      bar: "#DC2626",
-      chipBg: "bg-rose-50 text-rose-600 ring-rose-200/70",
+      bar: "linear-gradient(90deg, #DC2626 0%, #F43F5E 100%)",
+      glow: "rgba(220, 38, 38, 0.08)",
+      chipBg: "bg-rose-50 text-rose-700 ring-rose-200/90 shadow-2xs",
       dot: "bg-rose-500",
     },
     copper: {
-      bar: "#EA580C",
-      chipBg: "bg-orange-50 text-orange-600 ring-orange-200/70",
+      bar: "linear-gradient(90deg, #EA580C 0%, #F97316 100%)",
+      glow: "rgba(234, 88, 12, 0.08)",
+      chipBg: "bg-orange-50 text-orange-700 ring-orange-200/90 shadow-2xs",
       dot: "bg-orange-500",
     },
     sky: {
-      bar: "#0284C7",
-      chipBg: "bg-sky-50 text-sky-600 ring-sky-200/70",
+      bar: "linear-gradient(90deg, #0284C7 0%, #38BDF8 100%)",
+      glow: "rgba(2, 132, 199, 0.08)",
+      chipBg: "bg-sky-50 text-sky-700 ring-sky-200/90 shadow-2xs",
       dot: "bg-sky-500",
     },
+    indigo: {
+      bar: "linear-gradient(90deg, #4338CA 0%, #6366F1 100%)",
+      glow: "rgba(67, 56, 202, 0.08)",
+      chipBg: "bg-indigo-50 text-indigo-700 ring-indigo-200/90 shadow-2xs",
+      dot: "bg-indigo-600",
+    },
+    violet: {
+      bar: "linear-gradient(90deg, #6D28D9 0%, #8B5CF6 100%)",
+      glow: "rgba(109, 40, 217, 0.08)",
+      chipBg: "bg-violet-50 text-violet-700 ring-violet-200/90 shadow-2xs",
+      dot: "bg-violet-600",
+    },
+    teal: {
+      bar: "linear-gradient(90deg, #0F766E 0%, #14B8A6 100%)",
+      glow: "rgba(15, 118, 110, 0.08)",
+      chipBg: "bg-teal-50 text-teal-700 ring-teal-200/90 shadow-2xs",
+      dot: "bg-teal-600",
+    },
     default: {
-      bar: "#E4E4E7",
-      chipBg: "bg-zinc-100 text-zinc-600 ring-zinc-200/80",
-      dot: "bg-zinc-400",
+      bar: "linear-gradient(90deg, #334155 0%, #6366F1 100%)",
+      glow: "rgba(79, 70, 229, 0.06)",
+      chipBg: "bg-indigo-50/70 text-indigo-700 ring-indigo-200/80 shadow-2xs",
+      dot: "bg-indigo-500",
     },
   };
   const accentMap = accents[accent] ?? accents.default;
   const isLongText = value.length > 15;
 
   return (
-    <div className="group relative flex flex-col justify-between overflow-hidden rounded-2xl border border-zinc-200/90 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all duration-150 hover:border-zinc-300/90 hover:shadow-[0_6px_16px_-6px_rgba(15,23,42,0.08)]">
-      <div>
-        <div className="flex items-center justify-between gap-2.5">
-          <div className="flex min-w-0 items-center gap-2">
-            <span
-              style={{ width: 8, height: 8, flexShrink: 0 }}
-              className={`inline-block h-2 w-2 shrink-0 rounded-full ${accentMap.dot}`}
-            />
-            <span className="truncate text-[12.5px] font-medium tracking-tight text-zinc-600">
-              {label}
-            </span>
+    <div className="group relative z-10 flex flex-col justify-between overflow-hidden rounded-2xl border border-slate-200/95 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.05),0_10px_24px_-12px_rgba(15,23,42,0.11)] transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_16px_32px_-12px_rgba(15,23,42,0.16)]">
+      {/* Chromatic Top Depth Bar */}
+      <div
+        aria-hidden="true"
+        className="h-[3px] w-full shrink-0"
+        style={{ background: accentMap.bar }}
+      />
+
+      {/* Ambient Corner Tint Wash */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-8 -right-8 h-28 w-28 rounded-full blur-2xl"
+        style={{ backgroundColor: accentMap.glow }}
+      />
+
+      <div className="relative flex flex-1 flex-col justify-between p-5">
+        <div>
+          <div className="flex items-center justify-between gap-2.5">
+            <div className="flex min-w-0 items-center gap-2">
+              <span
+                style={{ width: 8, height: 8, flexShrink: 0 }}
+                className={`inline-block h-2 w-2 shrink-0 rounded-full ${accentMap.dot}`}
+              />
+              <span className="truncate text-[12.5px] font-semibold tracking-tight text-slate-600">
+                {label}
+              </span>
+            </div>
+
+            {icon ? (
+              <span
+                style={{ width: 32, height: 32, flexShrink: 0 }}
+                className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1 [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0 ${accentMap.chipBg}`}
+              >
+                {icon}
+              </span>
+            ) : changePct !== undefined && changePct !== null ? (
+              <span
+                className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${
+                  changePct >= 0
+                    ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border border-rose-200 bg-rose-50 text-rose-700"
+                }`}
+              >
+                {changePct >= 0 ? `+${changePct}%` : `${changePct}%`}
+              </span>
+            ) : null}
           </div>
 
-          {icon ? (
-            <span
-              style={{ width: 32, height: 32, flexShrink: 0 }}
-              className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1 [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0 ${accentMap.chipBg}`}
-            >
-              {icon}
-            </span>
-          ) : changePct !== undefined && changePct !== null ? (
-            <span
-              className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${
-                changePct >= 0
-                  ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
-                  : "border border-rose-200 bg-rose-50 text-rose-700"
+          <div className="mt-3 flex items-baseline justify-between gap-2">
+            <div
+              title={value}
+              className={`min-w-0 font-bold tracking-[-0.03em] text-slate-950 tabular-nums ${
+                isLongText
+                  ? "truncate text-[17px] sm:text-[18px] leading-snug"
+                  : "text-[26px] xl:text-[28px] leading-none"
               }`}
             >
-              {changePct >= 0 ? `+${changePct}%` : `${changePct}%`}
-            </span>
-          ) : null}
+              {value}
+            </div>
+            {icon && changePct !== undefined && changePct !== null && (
+              <span
+                className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${
+                  changePct >= 0
+                    ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border border-rose-200 bg-rose-50 text-rose-700"
+                }`}
+              >
+                {changePct >= 0 ? `+${changePct}%` : `${changePct}%`}
+              </span>
+            )}
+          </div>
         </div>
 
-        <div className="mt-3 flex items-baseline justify-between gap-2">
-          <div
-            title={value}
-            className={`min-w-0 font-semibold tracking-[-0.03em] text-slate-900 tabular-nums ${
-              isLongText
-                ? "truncate text-[17px] sm:text-[18px] leading-snug"
-                : "text-[26px] xl:text-[28px] leading-none"
-            }`}
-          >
-            {value}
-          </div>
-          {icon && changePct !== undefined && changePct !== null && (
-            <span
-              className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${
-                changePct >= 0
-                  ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
-                  : "border border-rose-200 bg-rose-50 text-rose-700"
-              }`}
-            >
-              {changePct >= 0 ? `+${changePct}%` : `${changePct}%`}
-            </span>
-          )}
-        </div>
+        <p className="mt-3.5 border-t border-slate-100 pt-2.5 text-[12px] leading-4 text-slate-500">
+          {sublabel}
+        </p>
       </div>
-
-      <p className="mt-3.5 border-t border-zinc-100 pt-2.5 text-[12px] leading-4 text-zinc-500">
-        {sublabel}
-      </p>
     </div>
   );
 }
@@ -589,22 +651,58 @@ export function SectionCard({
   action,
   children,
   noPadding = false,
+  accent = "default",
 }: {
   title: string;
   subtitle?: string;
   action?: React.ReactNode;
   children: React.ReactNode;
   noPadding?: boolean;
+  accent?: "default" | "emerald" | "indigo" | "amber" | "sky" | "violet" | "ruby" | "teal";
 }) {
+  const accentBars: Record<string, string> = {
+    default: "linear-gradient(90deg, #0F172A 0%, #4338CA 55%, #059669 100%)",
+    emerald: "linear-gradient(90deg, #047857 0%, #10B981 100%)",
+    indigo: "linear-gradient(90deg, #4338CA 0%, #6366F1 100%)",
+    amber: "linear-gradient(90deg, #D97706 0%, #F59E0B 100%)",
+    sky: "linear-gradient(90deg, #0284C7 0%, #38BDF8 100%)",
+    violet: "linear-gradient(90deg, #6D28D9 0%, #8B5CF6 100%)",
+    ruby: "linear-gradient(90deg, #DC2626 0%, #F43F5E 100%)",
+    teal: "linear-gradient(90deg, #0F766E 0%, #14B8A6 100%)",
+  };
+  const pillBars: Record<string, string> = {
+    default: "bg-indigo-600",
+    emerald: "bg-emerald-600",
+    indigo: "bg-indigo-600",
+    amber: "bg-amber-500",
+    sky: "bg-sky-600",
+    violet: "bg-violet-600",
+    ruby: "bg-rose-600",
+    teal: "bg-teal-600",
+  };
+
   return (
-    <section className="flex flex-col overflow-hidden rounded-2xl border border-zinc-200/90 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-100 bg-zinc-50/55 px-5 py-4 sm:px-6">
+    <section className="relative z-10 flex flex-col overflow-hidden rounded-2xl border border-slate-200/95 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04),0_12px_28px_-14px_rgba(15,23,42,0.10)]">
+      {accent !== "default" && (
+        <div
+          aria-hidden="true"
+          className="h-[3px] w-full shrink-0"
+          style={{ background: accentBars[accent] ?? accentBars.default }}
+        />
+      )}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 bg-gradient-to-b from-slate-50/95 to-white px-5 py-4 sm:px-6">
         <div className="min-w-0">
-          <h2 className="text-[15px] font-semibold leading-5 tracking-[-0.015em] text-slate-900">
-            {title}
-          </h2>
+          <div className="flex items-center gap-2">
+            <span
+              aria-hidden="true"
+              className={`h-3.5 w-1 shrink-0 rounded-full ${pillBars[accent] ?? pillBars.default}`}
+            />
+            <h2 className="text-[15px] font-semibold leading-5 tracking-[-0.015em] text-slate-950">
+              {title}
+            </h2>
+          </div>
           {subtitle && (
-            <p className="mt-0.5 text-[13px] leading-5 text-zinc-500">{subtitle}</p>
+            <p className="mt-1 pl-3 text-[13px] leading-5 text-slate-500">{subtitle}</p>
           )}
         </div>
         {action && <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div>}

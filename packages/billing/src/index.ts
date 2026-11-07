@@ -2948,12 +2948,12 @@ const BILLING_SETTINGS_KEY = "platform.billing_receiving_details";
 const DEFAULT_BILLING_SETTINGS: PlatformBillingSettings = {
   upiQrMode: "bank_account",
   upiId: "",
-  payeeName: "RSL Marketing Technologies",
+  payeeName: "RapidShift Labs",
   bankName: "HDFC Bank",
   accountNumber: "50200091827364",
   ifscCode: "HDFC0001234",
   gstin: "27AAACR5055K1Z1",
-  billingEmail: "billing@rapidshiftlabs.in",
+  billingEmail: "app@rapidshiftlabs.in",
   supportPhone: "+91 98200 00000",
 };
 

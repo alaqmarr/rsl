@@ -76,36 +76,38 @@ export default async function DashboardLayout({ children }: { children: React.Re
   ].filter((link) => canRoleAccessWebRoute(session.roleSlug, link.href, session.workspace.id));
 
   const workspaceSwitcherCard = (
-    <div className="mt-4 rounded-2xl border border-zinc-200/90 bg-zinc-50/75 p-3.5">
+    <div className="mt-4 overflow-hidden rounded-2xl border border-slate-800/90 bg-gradient-to-br from-[#0B1220] via-slate-900 to-[#1E1B4B] p-3.5 text-white shadow-[0_14px_28px_-10px_rgba(11,18,32,0.45)]">
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold text-zinc-500">Active Business</span>
+        <span className="font-mono text-[10px] font-bold tracking-wider text-indigo-200/80 uppercase">
+          Active Business
+        </span>
         {isSuspended ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+          <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-semibold text-amber-200 ring-1 ring-amber-400/40">
             Paused
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300 ring-1 ring-emerald-400/30">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
             Active
           </span>
         )}
       </div>
-      <div className="mt-1 flex items-center justify-between gap-2">
-        <div className="min-w-0 truncate text-sm font-bold tracking-tight text-slate-900">
+      <div className="mt-1.5 flex items-center justify-between gap-2">
+        <div className="min-w-0 truncate text-sm font-bold tracking-tight text-white">
           {session.workspace.name}
         </div>
         {canViewBusinessSettings && (
           <ActionLink
             href="/settings/business"
             spinnerSize="xs"
-            className="shrink-0 text-[11px] font-semibold text-zinc-500 hover:text-emerald-700 hover:underline"
+            className="shrink-0 text-[11px] font-semibold text-indigo-300 hover:text-white hover:underline"
           >
             Settings
           </ActionLink>
         )}
       </div>
       {session.workspace.industry && (
-        <div className="mt-0.5 truncate text-[11px] text-zinc-500">
+        <div className="mt-0.5 truncate text-[11px] text-slate-400">
           {session.workspace.industry}
         </div>
       )}
@@ -115,36 +117,36 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <select
             name="workspaceId"
             defaultValue={session.workspace.id}
-            className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs font-medium text-slate-900"
+            className="w-full rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-xs font-medium text-white"
           >
             {session.workspaces.map((w) => (
-              <option key={w.id} value={w.id}>
+              <option key={w.id} value={w.id} className="bg-slate-900 text-white">
                 {w.name}
               </option>
             ))}
           </select>
           <SubmitButton
             spinnerSize="xs"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-slate-800"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-500 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-400"
           >
             Switch
           </SubmitButton>
         </form>
       )}
 
-      <div className="mt-3 space-y-2 border-t border-zinc-200/80 pt-2.5 text-xs">
+      <div className="mt-3 space-y-2 border-t border-white/10 pt-2.5 text-xs">
         <div className="flex items-center justify-between">
-          <span className="font-medium text-zinc-600">Active Tools</span>
+          <span className="font-medium text-slate-300">Active Tools</span>
           {canViewBilling ? (
             <ActionLink
               href="/billing"
               spinnerSize="xs"
-              className="font-bold text-slate-900 tabular-nums hover:text-emerald-700 hover:underline"
+              className="font-mono font-bold text-indigo-200 tabular-nums hover:text-white hover:underline"
             >
               {unlockedToolsCount} / {workspaceServices.length}
             </ActionLink>
           ) : (
-            <span className="font-bold text-slate-900 tabular-nums">
+            <span className="font-mono font-bold text-indigo-200 tabular-nums">
               {unlockedToolsCount} / {workspaceServices.length}
             </span>
           )}
@@ -153,16 +155,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
         {canViewBilling && (
           <div>
             <div className="flex items-center justify-between">
-              <span className="font-medium text-zinc-600">Prepaid Wallet</span>
+              <span className="font-medium text-slate-300">Prepaid Wallet</span>
               <ActionLink
                 href="/billing?tab=wallet"
                 spinnerSize="xs"
-                className={`font-bold tabular-nums hover:underline ${
+                className={`font-mono font-bold tabular-nums hover:underline ${
                   isOverdraftExhausted
-                    ? "text-rose-700 hover:text-rose-800"
+                    ? "text-rose-300 hover:text-rose-200"
                     : isNegativeWallet
-                      ? "text-amber-700 hover:text-amber-800"
-                      : "text-emerald-700 hover:text-emerald-800"
+                      ? "text-amber-300 hover:text-amber-200"
+                      : "text-emerald-300 hover:text-emerald-200"
                 }`}
               >
                 {walletFormatted}
@@ -171,7 +173,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             {isNegativeWallet && (
               <div
                 className={`mt-0.5 text-[10px] font-medium tabular-nums ${
-                  isOverdraftExhausted ? "text-rose-700" : "text-amber-800"
+                  isOverdraftExhausted ? "text-rose-300" : "text-amber-300"
                 }`}
               >
                 {isOverdraftExhausted
@@ -184,15 +186,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
         {setupProgress.doneCount < setupProgress.totalCount && (
           <div>
-            <div className="flex items-center justify-between text-[10px] text-zinc-500">
+            <div className="flex items-center justify-between text-[10px] text-slate-400">
               <span>Setup progress</span>
-              <span className="font-semibold text-slate-700 tabular-nums">
+              <span className="font-mono font-semibold text-white tabular-nums">
                 {setupProgress.doneCount}/{setupProgress.totalCount}
               </span>
             </div>
-            <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-zinc-200/80">
+            <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
               <div
-                className="h-full rounded-full bg-emerald-600 transition-all"
+                className="h-full rounded-full bg-gradient-to-r from-indigo-400 to-emerald-400 transition-all"
                 style={{ width: `${setupPct}%` }}
               />
             </div>
@@ -202,7 +204,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 <ActionLink
                   href={nextMilestone.href}
                   spinnerSize="xs"
-                  className="mt-1.5 inline-flex items-center gap-1 text-[10.5px] font-semibold text-emerald-700 hover:text-emerald-800 hover:underline"
+                  className="mt-1.5 inline-flex items-center gap-1 text-[10.5px] font-semibold text-emerald-300 hover:text-emerald-200 hover:underline"
                 >
                   <span>Next: {nextMilestone.label} →</span>
                 </ActionLink>
@@ -216,7 +218,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <WorkspaceAccessProvider roleSlug={session.roleSlug} permissions={grantedPermissions}>
-      <div className="flex min-h-screen w-full flex-col bg-[#F8F9FB] text-slate-900 lg:h-screen lg:overflow-hidden">
+      <div className="flex min-h-screen w-full flex-col bg-[#F1F5F9] text-slate-900 lg:h-screen lg:overflow-hidden">
         {session.impersonatorStaffId && (
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-6 py-2.5 text-xs font-medium text-amber-900 lg:px-10">
             <span className="inline-flex items-center gap-2">
@@ -261,8 +263,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
         )}
 
         <div className="flex min-h-0 w-full flex-1 flex-col lg:flex-row lg:overflow-hidden">
-          {/* Desktop Fixed Non-Scrolling Quiet White Left Sidebar */}
-          <aside className="hidden border-r border-zinc-200/90 bg-white px-4 py-5 lg:flex lg:h-full lg:w-[268px] lg:shrink-0 lg:flex-col lg:justify-between lg:overflow-hidden">
+          {/* Desktop Fixed Elevated Sidebar (Z-30 Plane) */}
+          <aside className="relative z-30 hidden border-r border-slate-200/95 bg-white px-4 py-5 shadow-[4px_0_24px_-12px_rgba(15,23,42,0.10)] lg:flex lg:h-full lg:w-[272px] lg:shrink-0 lg:flex-col lg:justify-between lg:overflow-hidden">
             <div className="shrink-0">
               <div className="flex items-center justify-between gap-2 px-1.5">
                 <Link href={homeHref} className="min-w-0">
@@ -270,7 +272,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 </Link>
                 <span
                   title={formatRoleLabel(session.roleSlug)}
-                  className="shrink-0 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-bold tracking-wide text-zinc-600 uppercase"
+                  className="shrink-0 rounded-md border border-indigo-200/80 bg-indigo-50/80 px-2 py-0.5 text-[10px] font-bold tracking-wide text-indigo-800 uppercase"
                 >
                   {formatRoleLabel(session.roleSlug)}
                 </span>
@@ -313,8 +315,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </div>
           </aside>
 
-          {/* Independent Scrolling Main Workspace Column */}
-          <div className="flex min-w-0 flex-1 flex-col lg:h-full lg:overflow-y-auto">
+          {/* Independent Scrolling Main Workspace Column (Z-0 Canvas with Multi-Tone Ambient Wash) */}
+          <div
+            className="relative flex min-w-0 flex-1 flex-col lg:h-full lg:overflow-y-auto"
+            style={{
+              backgroundImage:
+                "radial-gradient(55% 420px at 15% 0%, rgba(67, 56, 202, 0.055) 0%, transparent 75%), radial-gradient(45% 380px at 88% 0%, rgba(5, 150, 105, 0.055) 0%, transparent 75%)",
+            }}
+          >
             <TopWorkspaceBar
               workspaceName={session.workspace.name}
               walletFormatted={walletFormatted}
