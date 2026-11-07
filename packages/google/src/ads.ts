@@ -17,14 +17,16 @@ const GOOGLE_ADS_API_VERSION = "v18";
 
 function buildGoogleAdsHeaders(creds: {
   accessToken: string;
-  developerToken: string;
+  developerToken?: string;
   loginCustomerId?: string;
 }): Record<string, string> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${creds.accessToken}`,
-    "developer-token": creds.developerToken,
     "Content-Type": "application/json",
   };
+  if (creds.developerToken && creds.developerToken.trim().length > 0) {
+    headers["developer-token"] = creds.developerToken.trim();
+  }
   if (creds.loginCustomerId) {
     headers["login-customer-id"] = creds.loginCustomerId.replace(/[^0-9]/g, "");
   }
@@ -311,7 +313,7 @@ export const createGoogleAdCampaign = defineAction({
             method: "POST",
             headers: buildGoogleAdsHeaders({
               accessToken: creds.accessToken!,
-              developerToken: creds.developerToken!,
+              developerToken: creds.developerToken,
               loginCustomerId: creds.loginCustomerId,
             }),
             body: JSON.stringify({ mutateOperations }),
@@ -340,7 +342,7 @@ export const createGoogleAdCampaign = defineAction({
         rollbackVaultIfAllocated();
         throw new RslError(
           "RSL-VAL-1001",
-          `Google Ads API rejected campaign launch (HTTP ${mutateResp.status}): ${mutateBody.error?.message || "Verify Google Ads billing setup & Developer Token access level."}`
+          `Google Ads API rejected campaign launch (HTTP ${mutateResp.status}): ${mutateBody.error?.message || "Verify Google Ads billing setup & Google Cloud Console → Google Ads API Overview access level (Explorer / Basic / Standard)."}`
         );
       }
 
@@ -451,7 +453,7 @@ export async function mutateGoogleAdCampaignStatusInternal(params: {
           method: "POST",
           headers: buildGoogleAdsHeaders({
             accessToken: creds.accessToken!,
-            developerToken: creds.developerToken!,
+            developerToken: creds.developerToken,
             loginCustomerId: creds.loginCustomerId,
           }),
           body: JSON.stringify({
@@ -581,7 +583,7 @@ export async function updateGoogleAdCampaignBudgetInternal(params: {
           method: "POST",
           headers: buildGoogleAdsHeaders({
             accessToken: creds.accessToken!,
-            developerToken: creds.developerToken!,
+            developerToken: creds.developerToken,
             loginCustomerId: creds.loginCustomerId,
           }),
           body: JSON.stringify({
@@ -686,7 +688,7 @@ export async function syncGoogleAdCampaignsInsightsForWorkspace(workspaceId: str
           method: "POST",
           headers: buildGoogleAdsHeaders({
             accessToken: creds.accessToken!,
-            developerToken: creds.developerToken!,
+            developerToken: creds.developerToken,
             loginCustomerId: creds.loginCustomerId,
           }),
           body: JSON.stringify({ query }),

@@ -2447,13 +2447,13 @@ export async function staffSaveGoogleAdsCredentialsAction(formData: FormData) {
     logStaffCredentialAction(
       staff.id,
       "platform.credentials.google_ads.saved",
-      `Updated Google Ads Developer Token & MCC (${saved.loginCustomerId || "direct"}, Managed MCC=${saved.isManagedAdsReady ? "READY" : "OFF"}) in control.db`
+      `Updated Google Ads & Managed MCC config (${saved.loginCustomerId || "cloud-project-direct"}, Managed MCC=${saved.isManagedAdsReady ? "READY" : "OFF"}) in control.db`
     );
 
     return flashAdminRedirect(
       "/credentials",
       "notice",
-      `Google Ads API Developer Token (${saved.apiVersion}) encrypted and active in control.db.`
+      `Google Ads API settings (${saved.apiVersion}, Cloud Project OAuth mode) saved in control.db.`
     );
   } catch (err) {
     return flashAdminRedirect(

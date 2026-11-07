@@ -853,6 +853,7 @@ function normalizeCustomerIdDigits(raw: string | undefined | null): string {
 
 export function getPlatformGoogleAdsConfig(): PlatformGoogleAdsConfig {
   const env = getEnv();
+  const oauth = getPlatformGoogleOAuthConfig();
   const row = readRow("google_ads");
 
   if (row) {
@@ -886,10 +887,10 @@ export function getPlatformGoogleAdsConfig(): PlatformGoogleAdsConfig {
       managedCustomerId,
       managedRefreshToken,
       apiVersion: (pub.apiVersion || "v18").trim(),
-      source: developerToken ? "database" : "unconfigured",
-      isReady: row.enabled && Boolean(developerToken),
+      source: "database",
+      isReady: row.enabled && ((oauth.isReady && oauth.enableGoogleAdsOAuth) || Boolean(developerToken)),
       isManagedAdsReady:
-        row.enabled && Boolean(developerToken && managedCustomerId && managedRefreshToken),
+        row.enabled && oauth.isReady && Boolean(managedCustomerId && managedRefreshToken),
       maskedDeveloperToken: maskCredentialSecret(developerToken),
       maskedManagedRefreshToken: maskCredentialSecret(managedRefreshToken),
       updatedAt: row.updatedAt,
@@ -900,7 +901,9 @@ export function getPlatformGoogleAdsConfig(): PlatformGoogleAdsConfig {
   const loginCustomerId = normalizeCustomerIdDigits(env.GOOGLE_ADS_LOGIN_CUSTOMER_ID);
   const managedCustomerId = normalizeCustomerIdDigits(env.GOOGLE_ADS_MANAGED_CUSTOMER_ID);
   const managedRefreshToken = (env.GOOGLE_ADS_MANAGED_REFRESH_TOKEN || "").trim();
-  const hasEnv = Boolean(developerToken);
+  const hasAnyAdsEnv = Boolean(
+    developerToken || loginCustomerId || managedCustomerId || managedRefreshToken
+  );
 
   return {
     enabled: true,
@@ -909,9 +912,9 @@ export function getPlatformGoogleAdsConfig(): PlatformGoogleAdsConfig {
     managedCustomerId,
     managedRefreshToken,
     apiVersion: "v18",
-    source: hasEnv ? "env" : "unconfigured",
-    isReady: hasEnv,
-    isManagedAdsReady: Boolean(developerToken && managedCustomerId && managedRefreshToken),
+    source: hasAnyAdsEnv ? "env" : oauth.isReady ? oauth.source : "unconfigured",
+    isReady: (oauth.isReady && oauth.enableGoogleAdsOAuth) || Boolean(developerToken),
+    isManagedAdsReady: oauth.isReady && Boolean(managedCustomerId && managedRefreshToken),
     maskedDeveloperToken: maskCredentialSecret(developerToken),
     maskedManagedRefreshToken: maskCredentialSecret(managedRefreshToken),
     updatedAt: null,
@@ -922,9 +925,9 @@ export function getPublicGoogleAdsStatus(): PublicGoogleAdsStatus {
   const cfg = getPlatformGoogleAdsConfig();
   const oauth = getPlatformGoogleOAuthConfig();
   return {
-    isReady: oauth.isReady && oauth.enableGoogleAdsOAuth,
+    isReady: cfg.enabled && oauth.isReady && oauth.enableGoogleAdsOAuth,
     isManagedAdsReady: cfg.isManagedAdsReady && oauth.isReady,
-    hasDeveloperToken: cfg.isReady,
+    hasDeveloperToken: Boolean(cfg.developerToken) || (oauth.isReady && oauth.enableGoogleAdsOAuth),
     apiVersion: cfg.apiVersion,
   };
 }
@@ -940,20 +943,13 @@ export function savePlatformGoogleAdsConfig(params: {
 }): PlatformGoogleAdsConfig {
   const current = getPlatformGoogleAdsConfig();
   const developerToken =
-    params.developerToken && params.developerToken.trim().length > 0
-      ? params.developerToken.trim()
+    params.developerToken !== undefined
+      ? params.developerToken.trim() || current.developerToken
       : current.developerToken;
   const managedRefreshToken =
     params.managedRefreshToken && params.managedRefreshToken.trim().length > 0
       ? params.managedRefreshToken.trim()
       : current.managedRefreshToken;
-
-  if (!developerToken) {
-    throw new RslError(
-      "RSL-VAL-1001",
-      "Enter your Google Ads API Developer Token (from Google Ads Manager MCC → Tools → API Center)."
-    );
-  }
 
   const publicConfig = {
     loginCustomerId: normalizeCustomerIdDigits(
@@ -2041,11 +2037,17 @@ export function seedPlatformCredentialsBundle(
     skipped.push("google_oauth (empty/placeholder)");
   }
 
-  if (bundle.google_ads && !isPlaceholderValue(bundle.google_ads.developerToken)) {
+  if (
+    bundle.google_ads &&
+    (!isPlaceholderValue(bundle.google_ads.developerToken) ||
+      !isPlaceholderValue(bundle.google_ads.loginCustomerId) ||
+      !isPlaceholderValue(bundle.google_ads.managedCustomerId) ||
+      bundle.google_ads.enabled === true)
+  ) {
     savePlatformGoogleAdsConfig({ ...bundle.google_ads, staffId });
     seeded.push("google_ads");
   } else if (bundle.google_ads) {
-    skipped.push("google_ads (empty)");
+    skipped.push("google_ads (optional — uses google_oauth Cloud Project automatically)");
   }
 
   if (

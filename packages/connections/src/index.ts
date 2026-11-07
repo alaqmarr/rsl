@@ -3098,42 +3098,9 @@ export async function discoverAndHydrateGoogleAdsAccounts(params: {
   }
 
   const adsCfg = getPlatformGoogleAdsConfig();
-  if (!adsCfg.developerToken) {
-    const manualCid = normalizeGoogleAdsCustomerId(
-      params.preferredCustomerId || meta.customerId || conn.externalAccountId
-    );
-    const manualFmt = manualCid.length === 10 ? formatGoogleAdsCustomerId(manualCid) : undefined;
-    const detail = manualFmt
-      ? `Google Ads Sign-In (${emailHint || "active"}) linked to Customer ID ${manualFmt}. Add a Google Ads Developer Token in Platform Credentials to enable live campaign API mutations.`
-      : `Google Ads Sign-In (${emailHint || "active"}) is connected! Add your Google Ads Developer Token in Platform Credentials (or enter your 10-digit Customer ID via Edit) to discover ad accounts automatically.`;
-    const nextMeta: ConnectionMetadata = {
-      ...meta,
-      channelKind: "google_ads",
-      customerId: manualCid.length === 10 ? manualCid : meta.customerId,
-      formattedCustomerId: manualFmt ?? meta.formattedCustomerId,
-      adsDiscoveryStatus: "dev_token_missing",
-      adsDiscoveryDetail: detail,
-      lastAdsDiscoveredAt: now,
-      lastLiveCheckMessage: detail,
-    };
-    db.update(controlSchema.connections)
-      .set({
-        metadataJson: JSON.stringify(nextMeta),
-        updatedAt: now,
-      })
-      .where(eq(controlSchema.connections.id, conn.id))
-      .run();
-    return {
-      connected: true,
-      connectionId: conn.id,
-      displayName: conn.displayName,
-      customerId: nextMeta.customerId,
-      formattedCustomerId: nextMeta.formattedCustomerId,
-      availableAdCustomers: meta.availableAdCustomers ?? [],
-      adsDiscoveryStatus: "dev_token_missing",
-      adsDiscoveryDetail: detail,
-    };
-  }
+  const optDevTokenHeader: Record<string, string> = adsCfg.developerToken
+    ? { "developer-token": adsCfg.developerToken }
+    : {};
 
   const discovered = new Map<string, GoogleAdsCustomerSummary>();
   let apiFailureDetail = "";
@@ -3145,14 +3112,20 @@ export async function discoverAndHydrateGoogleAdsAccounts(params: {
         method: "GET",
         headers: {
           Authorization: `Bearer ${token}`,
-          "developer-token": adsCfg.developerToken,
+          ...optDevTokenHeader,
         },
         signal: AbortSignal.timeout(8000),
       }
     );
     const listTxt = await listResp.text().catch(() => "");
     if (!listResp.ok) {
-      apiFailureDetail = `Google Ads API listAccessibleCustomers returned HTTP ${listResp.status}: ${listTxt.slice(0, 180)}`;
+      const hint =
+        listResp.status === 403 && /SERVICE_DISABLED|has not been used|disabled/i.test(listTxt)
+          ? " (Enable 'Google Ads API' in Google Cloud Console → APIs & Services, and check Google Ads API Overview access level)."
+          : listResp.status === 403 && /TEST_ACCOUNT|EXPLORER|PERMISSION_DENIED/i.test(listTxt)
+            ? " (In Google Cloud Console → Google Ads API → Overview, upgrade access level from Test to Explorer/Basic for live ad accounts)."
+            : "";
+      apiFailureDetail = `Google Ads API listAccessibleCustomers returned HTTP ${listResp.status}: ${listTxt.slice(0, 180)}${hint}`;
     } else {
       const parsed = JSON.parse(listTxt || "{}") as { resourceNames?: string[] };
       const cids = (parsed.resourceNames ?? [])
@@ -3168,7 +3141,7 @@ export async function discoverAndHydrateGoogleAdsAccounts(params: {
               method: "POST",
               headers: {
                 Authorization: `Bearer ${token}`,
-                "developer-token": adsCfg.developerToken,
+                ...optDevTokenHeader,
                 "Content-Type": "application/json",
                 ...(adsCfg.loginCustomerId
                   ? { "login-customer-id": normalizeGoogleAdsCustomerId(adsCfg.loginCustomerId) }
@@ -3214,7 +3187,7 @@ export async function discoverAndHydrateGoogleAdsAccounts(params: {
                   method: "POST",
                   headers: {
                     Authorization: `Bearer ${token}`,
-                    "developer-token": adsCfg.developerToken,
+                    ...optDevTokenHeader,
                     "login-customer-id": resolvedCid,
                     "Content-Type": "application/json",
                   },
@@ -3420,7 +3393,7 @@ export async function resolveWorkspaceGoogleAdsCredentials(params: {
 
   if (params.billingMode === "rsl_managed_vault") {
     const managedCid = normalizeGoogleAdsCustomerId(adsCfg.managedCustomerId);
-    if (managedCid && adsCfg.managedRefreshToken && adsCfg.developerToken && oauthCfg.isReady) {
+    if (managedCid && adsCfg.managedRefreshToken && oauthCfg.isReady) {
       if (/^(rsl_sandbox_|sandbox_|test_)/i.test(adsCfg.managedRefreshToken)) {
         return {
           ok: true,
@@ -3428,7 +3401,7 @@ export async function resolveWorkspaceGoogleAdsCredentials(params: {
           accessToken: adsCfg.managedRefreshToken,
           customerId: managedCid,
           loginCustomerId: normalizeGoogleAdsCustomerId(adsCfg.loginCustomerId) || undefined,
-          developerToken: adsCfg.developerToken,
+          developerToken: adsCfg.developerToken || undefined,
         };
       }
       try {
@@ -3452,7 +3425,7 @@ export async function resolveWorkspaceGoogleAdsCredentials(params: {
             accessToken: tokenData.access_token,
             customerId: managedCid,
             loginCustomerId: normalizeGoogleAdsCustomerId(adsCfg.loginCustomerId) || undefined,
-            developerToken: adsCfg.developerToken,
+            developerToken: adsCfg.developerToken || undefined,
           };
         }
       } catch {
@@ -3501,7 +3474,7 @@ export async function resolveWorkspaceGoogleAdsCredentials(params: {
       accessToken,
       customerId: customerId || "1234567890",
       loginCustomerId: meta.loginCustomerId,
-      developerToken: adsCfg.developerToken || "sandbox_dev_token",
+      developerToken: adsCfg.developerToken || undefined,
     };
   }
 
@@ -3513,14 +3486,6 @@ export async function resolveWorkspaceGoogleAdsCredentials(params: {
     };
   }
 
-  if (!adsCfg.developerToken) {
-    return {
-      ok: false,
-      mode: "live",
-      error: "Google Ads Developer Token is not configured yet in Platform Credentials.",
-    };
-  }
-
   return {
     ok: true,
     mode: "live",
@@ -3528,7 +3493,7 @@ export async function resolveWorkspaceGoogleAdsCredentials(params: {
     customerId,
     loginCustomerId:
       meta.loginCustomerId || normalizeGoogleAdsCustomerId(adsCfg.loginCustomerId) || undefined,
-    developerToken: adsCfg.developerToken,
+    developerToken: adsCfg.developerToken || undefined,
   };
 }
 

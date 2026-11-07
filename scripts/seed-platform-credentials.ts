@@ -25,7 +25,19 @@ function printStatusTable() {
   const snap = getSafePlatformCredentialsAdminSnapshot();
   const rows = [
     { provider: "google_oauth", ready: snap.google.isReady, source: snap.google.source, detail: snap.google.clientId || "—" },
-    { provider: "google_ads", ready: snap.googleAds.isReady, source: snap.googleAds.source, detail: snap.googleAds.maskedDeveloperToken || "—" },
+    {
+      provider: "google_ads",
+      ready: snap.googleAds.isReady,
+      source: snap.googleAds.source,
+      detail:
+        snap.googleAds.managedCustomerId
+          ? `Managed Vault: ${snap.googleAds.managedCustomerId}`
+          : snap.googleAds.loginCustomerId
+            ? `MCC: ${snap.googleAds.loginCustomerId}`
+            : snap.google.isReady
+              ? "Cloud Project OAuth (Tokenless)"
+              : snap.googleAds.maskedDeveloperToken || "—",
+    },
     { provider: "smtp_email", ready: snap.smtp.isReady, source: snap.smtp.source, detail: snap.smtp.user || "—" },
     { provider: "cloudflare_r2", ready: snap.r2.isReady, source: snap.r2.source, detail: snap.r2.bucketPrivate || "—" },
     { provider: "meta_app", ready: snap.meta.isReady, source: snap.meta.source, detail: snap.meta.appId || "—" },

@@ -9,13 +9,14 @@ import {
   isManualCredentialsEnabledForWorkspace,
   listWorkspaceConnections,
   refreshMetaChannelAssets,
+  resolveWorkspaceGoogleAdsCredentials,
   selectGoogleSearchConsoleSite,
   selectMetaChannelAsset,
   staffSetWorkspaceManualCredentialsPolicy,
 } from "@rsl/connections";
 import { RslError } from "@rsl/core";
 import {
-  savePlatformGoogleAdsConfig,
+  clearPlatformCredentialOverride,
   savePlatformGoogleOAuthConfig,
   savePlatformMetaAppConfig,
 } from "@rsl/tenancy";
@@ -354,11 +355,8 @@ describe("Phase 33 Suite (1-Click Connection Suite Revamp, Multi-Asset Switching
       defaultDriveFolderName: "RapidShift Backups",
       staffId: "staff_phase33",
     });
-    savePlatformGoogleAdsConfig({
-      enabled: true,
-      developerToken: "gads_dev_tok_phase33",
-      staffId: "staff_phase33",
-    });
+    // Google sunset Developer Tokens — verify Google Ads works purely via Google Cloud Project OAuth!
+    clearPlatformCredentialOverride("google_ads");
 
     const googleAuthUrl = buildGoogleOAuthAuthorizeUrl({
       redirectUri: "http://localhost:4500/api/oauth/google/callback",
@@ -513,5 +511,14 @@ describe("Phase 33 Suite (1-Click Connection Suite Revamp, Multi-Asset Switching
       siteUrl: "sc-domain:radiantgroup.co.in",
     });
     expect(switchedSite.siteUrl).toBe("sc-domain:radiantgroup.co.in");
+
+    const liveAdsCreds = await resolveWorkspaceGoogleAdsCredentials({
+      workspaceId: reg.workspaceId,
+      billingMode: "direct_client",
+    });
+    expect(liveAdsCreds.ok).toBe(true);
+    expect(liveAdsCreds.mode).toBe("live");
+    expect(liveAdsCreds.customerId).toBe("5556667770");
+    expect(liveAdsCreds.developerToken).toBeUndefined();
   });
 });

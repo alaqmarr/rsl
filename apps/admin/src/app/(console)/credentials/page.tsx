@@ -1137,26 +1137,28 @@ export default async function AdminPlatformCredentialsPage({
         </SectionCard>
       </div>
 
-      {/* 4B. Google Ads Developer Token & Managed MCC */}
+      {/* 4B. Google Ads Cloud Project Access & Optional Managed MCC */}
       <SectionCard
-        title="5. Google Ads API Developer Token & Master MCC (Direct Client Ads + Managed Ad Spend Vault)"
-        subtitle="Paste your Google Ads Manager (MCC) Developer Token from Tools → API Center so clients can connect their own Google Ads accounts OR fund RSL Managed Google Search & Performance Max campaigns"
+        title="5. Google Ads API & Managed Ad Vault (Cloud Project Access — No Developer Token Required)"
+        subtitle="Google sunset Developer Tokens — Direct Client 1-Click Google Ads works automatically via your Google Cloud OAuth Client ID above once Google Ads API is enabled & upgraded to Explorer/Basic Access in Google Cloud Console. Fill the optional Managed MCC fields below only if running RSL-funded Managed Vault campaigns."
         action={sourcePill(snap.googleAds.source, snap.googleAds.isReady)}
       >
         <form action={staffSaveGoogleAdsCredentialsAction} className="space-y-3.5 text-xs">
           <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
             <div>
               <label className="mb-1 block font-semibold text-zinc-700">
-                Developer Token{" "}
-                {snap.googleAds.maskedDeveloperToken ? `(${snap.googleAds.maskedDeveloperToken})` : "*"}
+                Legacy Developer Token{" "}
+                {snap.googleAds.maskedDeveloperToken
+                  ? `(${snap.googleAds.maskedDeveloperToken})`
+                  : "(Not Required — Sunset)"}
               </label>
               <input
                 name="developerToken"
                 type="password"
                 placeholder={
                   snap.googleAds.maskedDeveloperToken
-                    ? "Leave blank to keep saved Developer Token"
-                    : "Google Ads MCC Developer Token"
+                    ? "Leave blank to keep saved legacy token"
+                    : "Leave blank (managed in Google Cloud Console)"
                 }
                 className="adm-input font-mono text-xs"
               />
