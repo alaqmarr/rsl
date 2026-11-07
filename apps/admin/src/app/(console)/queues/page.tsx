@@ -1,8 +1,10 @@
+import React from "react";
 import { desc } from "drizzle-orm";
 import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  Eye,
   Mail,
 } from "lucide-react";
 import { getPlatformAdminAnalytics } from "@rsl/analytics";
@@ -12,7 +14,16 @@ import {
   formatStaffRoleLabel,
 } from "@rsl/auth";
 import { controlSchema } from "@rsl/database";
-import { listRecentEmails } from "@rsl/notifications";
+import {
+  BillingAndWalletAlertTemplate,
+  EmailVerificationTemplate,
+  listRecentEmails,
+  PasswordResetTemplate,
+  renderEmailPreviewHtml,
+  SmtpDiagnosticTemplate,
+  StorageAndBackupReportTemplate,
+  TeamInvitationTemplate,
+} from "@rsl/notifications";
 import { getPlatformQueueOverview } from "@rsl/queue";
 import { controlDb } from "@rsl/tenancy";
 import {
@@ -97,6 +108,94 @@ export default async function QueuesAndOpsPage({
     .orderBy(desc(controlSchema.providerRequests.createdAt))
     .all();
   const businessNameById = new Map(adminData.businesses.map((b) => [b.id, b.name]));
+
+  const templateShowcaseSpecs = [
+    {
+      key: "email_verification",
+      title: "1. Email Verification (6-Digit Keycap Vault)",
+      badge: "Emerald • OTP",
+      tone: "emerald" as const,
+      element: React.createElement(EmailVerificationTemplate, {
+        recipientName: "Rohan Mehta",
+        recipientEmail: "rohan@mehtaelectricals.in",
+        verificationCode: "482910",
+        verifyUrl: "https://app.rapidshiftlabs.in/login?verifyEmail=rohan%40mehtaelectricals.in&code=482910",
+      }),
+    },
+    {
+      key: "password_reset",
+      title: "2. Password Reset (Security Telemetry)",
+      badge: "Amber • Security",
+      tone: "amber" as const,
+      element: React.createElement(PasswordResetTemplate, {
+        recipientName: "Rohan Mehta",
+        recipientEmail: "rohan@mehtaelectricals.in",
+        resetUrl: "https://app.rapidshiftlabs.in/reset-password?token=sec_8492019",
+        requestedFromIp: "49.36.112.18",
+      }),
+    },
+    {
+      key: "team_invite",
+      title: "3. Workspace Invite (Membership Pass)",
+      badge: "Indigo • RBAC",
+      tone: "indigo" as const,
+      element: React.createElement(TeamInvitationTemplate, {
+        inviterName: "Rohan Mehta",
+        businessName: "Mehta Electricals Pvt Ltd",
+        roleLabel: "Billing & Accounts",
+        recipientEmail: "ca@mehtaelectricals.in",
+        acceptUrl: "https://app.rapidshiftlabs.in/accept-invite?token=inv_772910",
+      }),
+    },
+    {
+      key: "billing_alert",
+      title: "4. GST Ledger Receipt (Perforated Slip)",
+      badge: "Teal • GST 998314",
+      tone: "teal" as const,
+      element: React.createElement(BillingAndWalletAlertTemplate, {
+        businessName: "Mehta Electricals Pvt Ltd",
+        headline: "GST Tax Invoice Issued",
+        bodyText: "Your annual Tally Prime & WhatsApp Cloud plan is active and your tax invoice is ready.",
+        walletBalanceFormatted: "₹2,450.00",
+        invoiceNumber: "RSL/26-27/0019",
+        billingUrl: "https://app.rapidshiftlabs.in/billing",
+      }),
+    },
+    {
+      key: "backup_report",
+      title: "5. Backup Vault Integrity (SHA-256 Console)",
+      badge: "Violet • Vault",
+      tone: "violet" as const,
+      element: React.createElement(StorageAndBackupReportTemplate, {
+        businessName: "Mehta Electricals Pvt Ltd",
+        operationTitle: "Encrypted Google Drive Backup Completed",
+        summaryLine: "Nightly workspace archive uploaded and verified against its cryptographic digest.",
+        checksumOrDetails: "SHA256: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+        backupsUrl: "https://app.rapidshiftlabs.in/backups",
+      }),
+    },
+    {
+      key: "smtp_test",
+      title: "6. SMTP Transport Telemetry (Scorecard)",
+      badge: "Sky • Relay",
+      tone: "sky" as const,
+      element: React.createElement(SmtpDiagnosticTemplate, {
+        recipientEmail: "app@rapidshiftlabs.in",
+        smtpHost: "smtp.gmail.com",
+        smtpPort: 465,
+        fromHeader: "RapidShift Labs <app@rapidshiftlabs.in>",
+        credentialSource: "database",
+        adminCredentialsUrl: "https://admin.rapidshiftlabs.in/credentials",
+      }),
+    },
+  ];
+
+  const templateShowcase = await Promise.all(
+    templateShowcaseSpecs.map(async (spec) => ({
+      ...spec,
+      html: await renderEmailPreviewHtml(spec.element),
+    }))
+  );
 
   return (
     <div className="w-full space-y-6">
@@ -267,19 +366,27 @@ export default async function QueuesAndOpsPage({
                         <td className="px-6 py-3.5">
                           <div className="font-semibold text-slate-900">{e.subject}</div>
                           <details className="mt-1 text-[11px] text-zinc-500">
-                            <summary className="cursor-pointer font-medium text-emerald-700 hover:underline">
-                              Preview email &amp; link
+                            <summary className="inline-flex cursor-pointer items-center gap-1 font-medium text-indigo-700 hover:underline">
+                              <Eye className="h-3.5 w-3.5" />
+                              Preview visual email &amp; link
                             </summary>
-                            <div className="mt-1.5 space-y-1.5 rounded-lg border border-zinc-200 bg-zinc-50/80 p-2.5 text-zinc-700">
-                              <p className="leading-relaxed">{preview.excerpt}</p>
+                            <div className="mt-2 space-y-2 rounded-xl border border-zinc-200 bg-zinc-50/90 p-3 text-zinc-700">
                               {preview.actionUrl && (
                                 <div>
                                   <span className="font-semibold text-slate-900">Action Link:</span>
-                                  <code className="mt-0.5 block rounded border border-zinc-200 bg-white px-2 py-1 font-mono text-[10.5px] break-all text-emerald-800 select-all">
+                                  <code className="mt-0.5 block rounded border border-zinc-200 bg-white px-2 py-1 font-mono text-[10.5px] break-all text-indigo-800 select-all">
                                     {preview.actionUrl}
                                   </code>
                                 </div>
                               )}
+                              <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
+                                <iframe
+                                  sandbox="allow-same-origin"
+                                  srcDoc={e.renderedHtml}
+                                  title={`Email preview: ${e.subject}`}
+                                  className="h-[520px] w-full border-0"
+                                />
+                              </div>
                             </div>
                           </details>
                         </td>
@@ -296,6 +403,39 @@ export default async function QueuesAndOpsPage({
           )}
         </SectionCard>
       </div>
+
+      {/* Live Transactional Email Design Suite Preview */}
+      <SectionCard
+        title="Transactional Email Template Suite (Live Preview)"
+        subtitle="All 6 production HTML email templates rendered with official /public/email-logo.png & /public/logo.png brand assets (attached inline via MIME CID during SMTP dispatch)"
+        accent="indigo"
+      >
+        <details className="group">
+          <summary className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50/80 px-3.5 py-2 text-xs font-semibold text-indigo-900 hover:bg-indigo-100/80">
+            <Eye className="h-3.5 w-3.5 text-indigo-700" />
+            Expand All 6 Live Email Template Previews
+          </summary>
+          <div className="mt-4 grid grid-cols-1 gap-5 xl:grid-cols-2">
+            {templateShowcase.map((tpl) => (
+              <div
+                key={tpl.key}
+                className="overflow-hidden rounded-xl border border-zinc-200/90 bg-white shadow-2xs"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200/80 bg-zinc-50/80 px-4 py-2.5">
+                  <span className="text-xs font-bold text-slate-900">{tpl.title}</span>
+                  <StatusPill label={tpl.badge} tone={tpl.tone} />
+                </div>
+                <iframe
+                  sandbox="allow-same-origin"
+                  srcDoc={tpl.html}
+                  title={tpl.title}
+                  className="h-[640px] w-full border-0 bg-[#EDF1F7]"
+                />
+              </div>
+            ))}
+          </div>
+        </details>
+      </SectionCard>
 
       {/* Custom Storage Connector Requests */}
       <SectionCard
@@ -414,7 +554,7 @@ export default async function QueuesAndOpsPage({
                   className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200/80 bg-zinc-50/70 px-3.5 py-2"
                 >
                   <span className="text-slate-800">
-                    <strong>{f.slug}</strong> {f.comment ? `— ${f.comment}` : ""}
+                    <strong>{f.slug}</strong> {f.comment ? `\u2022 ${f.comment}` : ""}
                   </span>
                   <StatusPill
                     label={f.helpful ? "Helpful" : "Needs Update"}

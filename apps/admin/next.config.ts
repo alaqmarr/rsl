@@ -36,7 +36,7 @@ const adminCsp = [
   "style-src 'self' 'unsafe-inline'",
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} https://challenges.cloudflare.com`,
   `connect-src 'self' https:${isDev ? " http: ws: wss:" : ""}`,
-  "frame-src https://challenges.cloudflare.com",
+  "frame-src 'self' https://challenges.cloudflare.com",
 ].join("; ");
 
 const nextConfig: NextConfig = {

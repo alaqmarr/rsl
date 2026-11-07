@@ -9,9 +9,13 @@ import { getPlatformBillingSettings } from "@rsl/billing";
 import { getEnv } from "@rsl/core";
 import {
   BillingAndWalletAlertTemplate,
+  EMAIL_FOOTER_LOGO_CID,
+  EMAIL_HEADER_LOGO_CID,
   EmailVerificationTemplate,
   listRecentEmails,
   PasswordResetTemplate,
+  prepareSmtpEmailPayload,
+  resolvePublicLogoAssetPath,
   sendBillingNotification,
   sendEmailVerificationCode,
   sendStorageAndBackupNotification,
@@ -79,9 +83,28 @@ describe("Phase 34 — Corporate Email Suite, app@rapidshiftlabs.in Migration, S
       expect(html).toContain("/logo.png");
       expect(html).toContain("app@rapidshiftlabs.in");
       expect(html).toContain('role="presentation"');
+      expect(html).toContain('content="light only"');
+      expect(html).toContain("linear-gradient(#FFFFFF, #FFFFFF)");
       expect(html).not.toContain("—");
       expect(html).not.toContain("thewebsensei.email");
+
+      // Verify SMTP inline CID logo payload resolves directly from workspace root public/ folder
+      const smtpPayload = prepareSmtpEmailPayload(html);
+      expect(smtpPayload.html).toContain(`src="cid:${EMAIL_HEADER_LOGO_CID}"`);
+      expect(smtpPayload.html).toContain(`src="cid:${EMAIL_FOOTER_LOGO_CID}"`);
+      expect(smtpPayload.attachments).toHaveLength(2);
+      expect(smtpPayload.attachments[0]?.path).toBe(path.join(REPO_ROOT, "public", "email-logo.png"));
+      expect(smtpPayload.attachments[0]?.contentDisposition).toBe("inline");
+      expect(smtpPayload.attachments[1]?.path).toBe(path.join(REPO_ROOT, "public", "logo.png"));
+      expect(smtpPayload.attachments[1]?.contentDisposition).toBe("inline");
     }
+
+    expect(resolvePublicLogoAssetPath("email-logo.png")).toBe(
+      path.join(REPO_ROOT, "public", "email-logo.png")
+    );
+    expect(resolvePublicLogoAssetPath("logo.png")).toBe(
+      path.join(REPO_ROOT, "public", "logo.png")
+    );
 
     // End-to-end notifications dispatch check via @react-email/render inside @rsl/notifications
     const suffix = crypto.randomBytes(4).toString("hex");

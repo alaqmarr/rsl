@@ -1,4 +1,7 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import React from "react";
 import { and, desc, eq, gt } from "drizzle-orm";
 import nodemailer from "nodemailer";
@@ -8,6 +11,10 @@ import { controlSchema } from "@rsl/database";
 import { controlDb, getPlatformSmtpConfig } from "@rsl/tenancy";
 import {
   BillingAndWalletAlertTemplate,
+  EMAIL_FOOTER_LOGO_CID,
+  EMAIL_FOOTER_LOGO_PUBLIC_PATH,
+  EMAIL_HEADER_LOGO_CID,
+  EMAIL_HEADER_LOGO_PUBLIC_PATH,
   EmailVerificationTemplate,
   PasswordResetTemplate,
   SmtpDiagnosticTemplate,
@@ -25,6 +32,91 @@ export interface CustomSmtpConfig {
   user: string;
   pass: string;
   from: string;
+}
+
+export interface InlineEmailLogoAttachment {
+  filename: string;
+  path: string;
+  cid: string;
+  contentType: string;
+  contentDisposition: "inline";
+}
+
+export function resolvePublicLogoAssetPath(filename: string): string | null {
+  const cleanName = filename.replace(/^\/+/, "");
+  const startDirs: string[] = [];
+
+  try {
+    startDirs.push(path.dirname(fileURLToPath(import.meta.url)));
+  } catch {
+    // Bundled runtime fallback uses process.cwd()
+  }
+  startDirs.push(process.cwd());
+
+  const workspaceRootCandidates: string[] = [];
+  const fallbackCandidates: string[] = [];
+
+  for (const start of startDirs) {
+    let current = path.resolve(start);
+    for (let depth = 0; depth < 7; depth += 1) {
+      const candidate = path.join(current, "public", cleanName);
+      if (fs.existsSync(path.join(current, "pnpm-workspace.yaml"))) {
+        workspaceRootCandidates.push(candidate);
+      } else {
+        fallbackCandidates.push(candidate);
+      }
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  }
+
+  for (const candidate of [...workspaceRootCandidates, ...fallbackCandidates]) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+export function prepareSmtpEmailPayload(renderedHtml: string): {
+  html: string;
+  attachments: InlineEmailLogoAttachment[];
+} {
+  let html = renderedHtml;
+  const attachments: InlineEmailLogoAttachment[] = [];
+
+  const headerLogoPath = resolvePublicLogoAssetPath(EMAIL_HEADER_LOGO_PUBLIC_PATH);
+  if (headerLogoPath) {
+    html = html.replace(
+      /src=(["'])(?:https?:\/\/[^"']+)?\/email-logo\.png\1/gi,
+      `src="cid:${EMAIL_HEADER_LOGO_CID}"`
+    );
+    attachments.push({
+      filename: "email-logo.png",
+      path: headerLogoPath,
+      cid: EMAIL_HEADER_LOGO_CID,
+      contentType: "image/png",
+      contentDisposition: "inline",
+    });
+  }
+
+  const footerLogoPath = resolvePublicLogoAssetPath(EMAIL_FOOTER_LOGO_PUBLIC_PATH);
+  if (footerLogoPath) {
+    html = html.replace(
+      /src=(["'])(?:https?:\/\/[^"']+)?\/logo\.png\1/gi,
+      `src="cid:${EMAIL_FOOTER_LOGO_CID}"`
+    );
+    attachments.push({
+      filename: "logo.png",
+      path: footerLogoPath,
+      cid: EMAIL_FOOTER_LOGO_CID,
+      contentType: "image/png",
+      contentDisposition: "inline",
+    });
+  }
+
+  return { html, attachments };
 }
 
 async function dispatchHtmlEmail(params: {
@@ -45,6 +137,7 @@ async function dispatchHtmlEmail(params: {
 
   if (useCustom || usePlatformGmail) {
     const transportMode = useCustom ? "client_smtp" : "gmail_smtp";
+    const smtpPayload = prepareSmtpEmailPayload(renderedHtml);
     const transporter = nodemailer.createTransport({
       host: useCustom ? params.customSmtp!.host : platformSmtp.host,
       port: useCustom ? params.customSmtp!.port : platformSmtp.port,
@@ -60,8 +153,9 @@ async function dispatchHtmlEmail(params: {
         from: useCustom ? params.customSmtp!.from : platformSmtp.from || platformSmtp.user,
         to: params.to,
         subject: params.subject,
-        html: renderedHtml,
+        html: smtpPayload.html,
         text: renderedText,
+        attachments: smtpPayload.attachments,
       });
 
       controlDb()
@@ -398,6 +492,10 @@ export async function sendStorageAndBackupNotification(params: {
       backupsUrl: `${getEnv().APP_URL}/backups`,
     }),
   });
+}
+
+export async function renderEmailPreviewHtml(element: React.ReactElement): Promise<string> {
+  return render(element);
 }
 
 export function listRecentEmails(workspaceId?: string, limit = 30) {
