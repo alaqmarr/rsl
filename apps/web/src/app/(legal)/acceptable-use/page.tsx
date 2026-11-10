@@ -5,7 +5,7 @@ import { getLegalDocumentBySlug } from "@/lib/legal-documents";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Acceptable Use & WhatsApp Messaging Compliance Policy — RapidShift Labs",
+  title: "Acceptable Use & WhatsApp Messaging Compliance Policy - RapidShift Labs",
   description:
     "Mandatory WhatsApp opt-in consent rules, automatic STOP suppression, Meta Business Messaging compliance, and anti-spam standards.",
   alternates: { canonical: "/acceptable-use" },

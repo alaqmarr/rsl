@@ -17,6 +17,8 @@ export interface RequestContext {
   userAgent?: string | null;
   roleSlug?: string;
   assetScope?: string[] | null;
+  apiKeyScopes?: string[] | null;
+  systemCapability?: string | null;
 }
 
 const storage = new AsyncLocalStorage<RequestContext>();

@@ -1,6 +1,8 @@
 import React from "react";
-import { BookOpen, Building2, FileSpreadsheet, Package, Users } from "lucide-react";
+import { Building2, FileSpreadsheet, Package, Users } from "lucide-react";
+import { GuideDrawerButton } from "@rsl/ui";
 import { ActionLink } from "@/components/ios-feedback";
+import { buildTallySuiteGuideContent } from "@/lib/tally-guide-drawer";
 
 export interface TallySuiteCompanyOption {
   id: string;
@@ -62,11 +64,12 @@ export function TallySuiteNav({
   ];
 
   return (
-    <div className="w-full rounded-2xl border border-zinc-200/90 bg-white shadow-2xs">
-      <div className="flex w-full flex-wrap items-center justify-between gap-3 px-3 py-2">
+    <div className="rsl-frost-surface w-full rounded-2xl">
+      <div className="flex w-full flex-wrap items-center justify-between gap-3 px-3.5 py-2.5">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="hidden rounded-lg bg-emerald-50 px-2.5 py-1 text-[10.5px] font-bold tracking-wider text-emerald-800 uppercase ring-1 ring-emerald-200/80 sm:inline-flex">
-            All-in-One Tally Suite
+          <span className="rsl-eyebrow hidden sm:inline-flex">
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--sunset-orange)]" />
+            <span>Tally Suite</span>
           </span>
           {items.map((item) => {
             const Icon = item.icon;
@@ -78,16 +81,18 @@ export function TallySuiteNav({
                 spinnerSize="xs"
                 className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition ${
                   active
-                    ? "bg-slate-900 text-white shadow-xs"
+                    ? "bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)] shadow-xs"
                     : "text-zinc-600 hover:bg-zinc-100/80 hover:text-slate-900"
                 }`}
               >
-                <Icon className={`h-3.5 w-3.5 ${active ? "text-emerald-300" : "text-zinc-500"}`} />
+                <Icon className="h-3.5 w-3.5" />
                 <span>{item.label}</span>
                 {typeof item.count === "number" && (
                   <span
                     className={`rounded-md px-1.5 py-0.5 font-mono text-[10.5px] tabular-nums ${
-                      active ? "bg-white/15 text-white" : "bg-zinc-100 text-zinc-600"
+                      active
+                        ? "bg-black/15 text-current"
+                        : "bg-zinc-100 text-zinc-600"
                     }`}
                   >
                     {item.count}
@@ -98,34 +103,29 @@ export function TallySuiteNav({
           })}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
-          <span className="hidden xl:inline">
-            Auto Paid-in-Tally Settlements • Direct Product Sync • Multi-Company
-          </span>
-          <ActionLink
-            href="/tally?tab=connect#tally-setup-guide"
-            spinnerSize="xs"
-            className="inline-flex items-center gap-1 rounded-lg border border-emerald-200/90 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 transition hover:bg-emerald-100/80"
-          >
-            <BookOpen className="h-3 w-3" />
-            <span>Tally Prime Setup &amp; F11 Guide</span>
-          </ActionLink>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+          <GuideDrawerButton
+            drawerId="tally-suite-guide"
+            label="Need help?"
+            badgeText="Tally Guide"
+            guide={buildTallySuiteGuideContent()}
+          />
         </div>
       </div>
 
       {companies.length >= 1 && (
-        <div className="flex w-full flex-wrap items-center justify-between gap-2 border-t border-zinc-100 bg-zinc-50/55 px-3.5 py-2">
+        <div className="flex w-full flex-wrap items-center justify-between gap-2 border-t border-zinc-200 bg-zinc-50/70 px-3.5 py-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-600">
+            <span className="inline-flex items-center gap-1 text-xs font-semibold text-zinc-600">
               <Building2 className="h-3.5 w-3.5 text-emerald-700" />
               <span>Tally Company:</span>
             </span>
             <ActionLink
               href={baseSectionPath}
               spinnerSize="xs"
-              className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition ${
+              className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
                 selectedCompanyId === "all"
-                  ? "bg-slate-900 text-white shadow-2xs"
+                  ? "bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)] shadow-2xs"
                   : "border border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100 hover:text-slate-900"
               }`}
             >
@@ -138,7 +138,7 @@ export function TallySuiteNav({
                   key={c.id}
                   href={`${baseSectionPath}?company=${encodeURIComponent(c.id)}`}
                   spinnerSize="xs"
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition ${
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
                     isSelected
                       ? "bg-emerald-700 text-white shadow-2xs"
                       : "border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100 hover:text-slate-900"
@@ -147,7 +147,7 @@ export function TallySuiteNav({
                   <span
                     className={`h-1.5 w-1.5 rounded-full ${
                       isSelected
-                        ? "bg-emerald-200"
+                        ? "bg-[var(--sunset-orange)]"
                         : c.lastSyncedAt
                           ? "bg-emerald-500"
                           : "bg-zinc-300"
@@ -158,10 +158,8 @@ export function TallySuiteNav({
               );
             })}
           </div>
-          <span className="text-[11px] text-zinc-500">
-            {companies.length === 1
-              ? "Have more Tally companies? Open them via F3 in Tally Prime and click Sync All Now."
-              : `${companies.length} Tally companies isolated & active`}
+          <span className="font-mono text-xs text-zinc-500">
+            {companies.length} {companies.length === 1 ? "company synced" : "companies synced"}
           </span>
         </div>
       )}

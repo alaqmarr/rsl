@@ -1,13 +1,23 @@
 import crypto from "node:crypto";
-import { and, eq, gt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import { ensureServiceCatalogSeeded } from "@rsl/billing";
 import {
+  buildTotpOtpAuthUri,
+  buildTotpQrCodeDataUri,
+  consumeMfaBackupCode,
   decryptEnvelope,
   encryptEnvelope,
+  generateMfaBackupCodes,
+  generateTotpSecret,
+  getEnv,
   hashPassword,
+  hashPasswordAsync,
   newId,
+  passwordHashNeedsUpgrade,
   RslError,
   verifyPassword,
+  verifyPasswordAsync,
+  verifyTotpCode,
 } from "@rsl/core";
 import { controlSchema, platformLogsSchema } from "@rsl/database";
 import { appendActionLog } from "@rsl/logging";
@@ -20,6 +30,7 @@ import {
   formatStaffRoleLabel,
   getPermissionsForRole,
   getStaffPermissions,
+  invalidateRbacCache,
   STAFF_PERMISSION_CATALOG,
   STAFF_ROLE_PERMISSIONS,
   STAFF_ROUTE_ACCESS_RULES,
@@ -43,7 +54,9 @@ export {
 };
 import {
   controlDb,
+  invalidateTenantRegistryCache,
   markWorkspaceSslCertificatesQueued,
+  onTenantRegistryInvalidated,
   platformLogsDb,
   provisionTenantDatabase,
   type TenantContext,
@@ -51,6 +64,55 @@ import {
 
 export const WEB_SESSION_COOKIE = "rsl_session";
 export const ADMIN_SESSION_COOKIE = "rsl_staff_session";
+
+export const WEB_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const WEB_SESSION_IDLE_MS = 24 * 60 * 60 * 1000;
+export const STAFF_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+export const STAFF_SESSION_IDLE_MS = 2 * 60 * 60 * 1000;
+const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
+const SESSION_CACHE_TTL_MS = 3_000;
+const ACCOUNT_LOCKOUT_THRESHOLD = 5;
+const ACCOUNT_LOCKOUT_DURATION_MS = 15 * 60 * 1000;
+
+const authRateWindows = new Map<string, number[]>();
+
+export function consumeAuthRateLimit(params: {
+  bucket: string;
+  key: string;
+  maxAttempts: number;
+  windowMs: number;
+}): void {
+  const now = Date.now();
+  const instances = Math.max(1, Number(process.env.PM2_INSTANCES || 1));
+  const perInstanceLimit =
+    process.env.NODE_ENV === "production" && instances > 1
+      ? Math.max(2, Math.ceil(params.maxAttempts / instances))
+      : params.maxAttempts;
+  const fullKey = `${params.bucket}:${params.key}`;
+  const cutoff = now - params.windowMs;
+  const existing = (authRateWindows.get(fullKey) ?? []).filter((ts) => ts > cutoff);
+  if (existing.length >= perInstanceLimit) {
+    authRateWindows.set(fullKey, existing);
+    throw new RslError(
+      "RSL-AUTH-1004",
+      "Too many authentication attempts. Please wait a minute and try again."
+    );
+  }
+  existing.push(now);
+  authRateWindows.set(fullKey, existing);
+  if (authRateWindows.size > 4096) {
+    for (const [k, stamps] of authRateWindows.entries()) {
+      if (stamps.every((ts) => ts <= cutoff)) {
+        authRateWindows.delete(k);
+      }
+    }
+  }
+}
+
+export function resetAuthRateLimitsForTests(): void {
+  authRateWindows.clear();
+  userSessionCache.clear();
+}
 
 function hashSessionToken(rawToken: string): string {
   return crypto.createHash("sha256").update(rawToken).digest("hex");
@@ -83,6 +145,7 @@ export interface AuthenticatedSession {
   permissions: Permission[];
   impersonatorStaffId: string | null;
   impersonationReason: string | null;
+  stepUpAt: number | null;
   workspaces: Array<{
     id: string;
     name: string;
@@ -93,9 +156,34 @@ export interface AuthenticatedSession {
   ctx: TenantContext;
 }
 
+const userSessionCache = new Map<
+  string,
+  { expiresAtMs: number; session: Omit<AuthenticatedSession, "ctx">; baseCtx: Omit<TenantContext, "requestId" | "correlationId"> }
+>();
+
+export function invalidateSessionCache(workspaceId?: string): void {
+  if (!workspaceId) {
+    userSessionCache.clear();
+    return;
+  }
+  for (const [tokenHash, entry] of userSessionCache.entries()) {
+    if (
+      entry.session.workspace.id === workspaceId ||
+      entry.session.workspaces.some((w) => w.id === workspaceId)
+    ) {
+      userSessionCache.delete(tokenHash);
+    }
+  }
+}
+
+onTenantRegistryInvalidated((tenantId) => {
+  invalidateSessionCache(tenantId);
+  invalidateRbacCache(tenantId);
+});
+
 export const DEFAULT_STARTER_TRIAL_DAYS = 7;
 
-export function registerUserWithWorkspace(params: {
+export interface RegisterUserParams {
   name: string;
   email: string;
   password: string;
@@ -106,13 +194,32 @@ export function registerUserWithWorkspace(params: {
   ipAddress?: string;
   userAgent?: string;
   grantStarterTrialDays?: number;
-}): { rawSessionToken: string; userId: string; workspaceId: string } {
+  emailVerified?: boolean;
+}
+
+function validateAndPrepareRegistration(params: RegisterUserParams) {
   ensureSystemRolesSeeded();
   ensureServiceCatalogSeeded();
 
   if (params.password.length < 8) {
     throw new RslError("RSL-VAL-1001", "Password must be at least 8 characters long.");
   }
+
+  const normalizedEmail = params.email.trim().toLowerCase();
+  if (params.ipAddress) {
+    consumeAuthRateLimit({
+      bucket: "register-ip",
+      key: params.ipAddress,
+      maxAttempts: 10,
+      windowMs: 15 * 60_000,
+    });
+  }
+  consumeAuthRateLimit({
+    bucket: "register-email",
+    key: normalizedEmail,
+    maxAttempts: 4,
+    windowMs: 10 * 60_000,
+  });
 
   const effectiveStateCode = params.stateCode?.trim() || "27";
   const normalizedGstin = params.gstin?.trim().toUpperCase() || null;
@@ -132,8 +239,6 @@ export function registerUserWithWorkspace(params: {
   }
 
   const db = controlDb();
-  const normalizedEmail = params.email.trim().toLowerCase();
-
   const existing = db
     .select()
     .from(controlSchema.users)
@@ -143,23 +248,43 @@ export function registerUserWithWorkspace(params: {
     throw new RslError("RSL-AUTH-1003");
   }
 
+  return { db, normalizedEmail, effectiveStateCode, normalizedGstin };
+}
+
+function finalizeRegistrationWithHash(
+  params: RegisterUserParams,
+  prepared: ReturnType<typeof validateAndPrepareRegistration>,
+  passwordHash: string,
+  startedAt: number
+): { rawSessionToken: string; userId: string; workspaceId: string } {
+  const { db, normalizedEmail, effectiveStateCode, normalizedGstin } = prepared;
   const now = Date.now();
   const userId = newId("usr", params.name);
   const workspaceId = newId("biz", params.businessName);
-  const passwordHash = hashPassword(params.password);
   const slug = slugifyWorkspace(params.businessName);
   const trialDays = Math.max(0, Math.round(params.grantStarterTrialDays ?? 0));
   const freeAccessUntil = trialDays > 0 ? now + trialDays * 86_400_000 : null;
 
   const tx = db.$client.transaction(() => {
+    const conflict = db
+      .select({ id: controlSchema.users.id })
+      .from(controlSchema.users)
+      .where(eq(controlSchema.users.email, normalizedEmail))
+      .get();
+    if (conflict) {
+      throw new RslError("RSL-AUTH-1003");
+    }
+
     db.insert(controlSchema.users)
       .values({
         id: userId,
         name: params.name.trim(),
         email: normalizedEmail,
-        emailVerified: true,
+        emailVerified: Boolean(params.emailVerified ?? false),
         passwordHash,
         totpEnabled: false,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
         activeWorkspaceId: workspaceId,
         createdAt: now,
         updatedAt: now,
@@ -201,9 +326,10 @@ export function registerUserWithWorkspace(params: {
 
   tx.immediate();
 
-  // Provision isolated SQLite files for this business & queue client subdomain SSL
   provisionTenantDatabase(workspaceId);
   markWorkspaceSslCertificatesQueued({ workspaceId, workspaceSlug: slug });
+  invalidateRbacCache(workspaceId);
+  invalidateTenantRegistryCache(workspaceId);
 
   const rawSessionToken = crypto.randomBytes(32).toString("base64url");
   db.insert(controlSchema.sessions)
@@ -214,7 +340,9 @@ export function registerUserWithWorkspace(params: {
       activeWorkspaceId: workspaceId,
       ipAddress: params.ipAddress ?? null,
       userAgent: params.userAgent ?? null,
-      expiresAt: now + 30 * 24 * 60 * 60 * 1000, // 30 days
+      lastActiveAt: now,
+      stepUpAt: now,
+      expiresAt: now + WEB_SESSION_TTL_MS,
       createdAt: now,
     })
     .run();
@@ -229,32 +357,87 @@ export function registerUserWithWorkspace(params: {
     outcome: "success",
     requestId: corrId,
     correlationId: corrId,
-    durationMs: 5,
+    durationMs: Math.max(1, Date.now() - startedAt),
     summary: `Created business account '${params.businessName.trim()}'`,
   });
 
   return { rawSessionToken, userId, workspaceId };
 }
 
-export function signInUser(params: {
-  email: string;
-  password: string;
-  ipAddress?: string;
-  userAgent?: string;
-}): { rawSessionToken: string; userId: string; workspaceId: string } {
-  ensureSystemRolesSeeded();
-  ensureServiceCatalogSeeded();
+export function registerUserWithWorkspace(
+  params: RegisterUserParams
+): { rawSessionToken: string; userId: string; workspaceId: string } {
+  const startedAt = Date.now();
+  const prepared = validateAndPrepareRegistration(params);
+  const passwordHash = hashPassword(params.password);
+  return finalizeRegistrationWithHash(params, prepared, passwordHash, startedAt);
+}
 
-  const db = controlDb();
-  const normalizedEmail = params.email.trim().toLowerCase();
-  const user = db
-    .select()
+export async function registerUserWithWorkspaceAsync(
+  params: RegisterUserParams
+): Promise<{ rawSessionToken: string; userId: string; workspaceId: string }> {
+  const startedAt = Date.now();
+  const prepared = validateAndPrepareRegistration(params);
+  const passwordHash = await hashPasswordAsync(params.password);
+  return finalizeRegistrationWithHash(params, prepared, passwordHash, startedAt);
+}
+
+export function assertUserEmailVerified(userId: string, actionDescription?: string): void {
+  const usr = controlDb()
+    .select({ emailVerified: controlSchema.users.emailVerified })
     .from(controlSchema.users)
-    .where(eq(controlSchema.users.email, normalizedEmail))
+    .where(eq(controlSchema.users.id, userId))
     .get();
+  if (!usr || !usr.emailVerified) {
+    throw new RslError(
+      "RSL-AUTH-1005",
+      actionDescription
+        ? `Please verify your email address before ${actionDescription}.`
+        : undefined
+    );
+  }
+}
 
-  if (!user || !user.passwordHash || !verifyPassword(params.password, user.passwordHash)) {
-    throw new RslError("RSL-AUTH-1002");
+function recordUserFailedSignIn(user: typeof controlSchema.users.$inferSelect): never {
+  const now = Date.now();
+  const nextAttempts = (user.failedLoginAttempts ?? 0) + 1;
+  const shouldLock = nextAttempts >= ACCOUNT_LOCKOUT_THRESHOLD;
+  controlDb()
+    .update(controlSchema.users)
+    .set({
+      failedLoginAttempts: nextAttempts,
+      lockedUntil: shouldLock ? now + ACCOUNT_LOCKOUT_DURATION_MS : user.lockedUntil,
+      updatedAt: now,
+    })
+    .where(eq(controlSchema.users.id, user.id))
+    .run();
+
+  if (shouldLock) {
+    throw new RslError(
+      "RSL-AUTH-1004",
+      "Account temporarily locked after repeated failed sign-in attempts. Please wait 15 minutes or reset your password."
+    );
+  }
+  throw new RslError("RSL-AUTH-1002");
+}
+
+function mintAuthenticatedUserSession(
+  user: typeof controlSchema.users.$inferSelect,
+  params: { ipAddress?: string; userAgent?: string },
+  upgradedPasswordHash?: string | null
+): { rawSessionToken: string; userId: string; workspaceId: string } {
+  const db = controlDb();
+  const now = Date.now();
+  if ((user.failedLoginAttempts ?? 0) > 0 || user.lockedUntil || upgradedPasswordHash) {
+    db.update(controlSchema.users)
+      .set({
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        ...(upgradedPasswordHash ? { passwordHash: upgradedPasswordHash } : {}),
+        updatedAt: now,
+      })
+      .where(eq(controlSchema.users.id, user.id))
+      .run();
   }
 
   const userMemberships = db
@@ -271,7 +454,6 @@ export function signInUser(params: {
     throw new RslError("RSL-AUTH-1001", "No business workspace is linked to this account.");
   }
 
-  const now = Date.now();
   const rawSessionToken = crypto.randomBytes(32).toString("base64url");
   db.insert(controlSchema.sessions)
     .values({
@@ -281,7 +463,9 @@ export function signInUser(params: {
       activeWorkspaceId,
       ipAddress: params.ipAddress ?? null,
       userAgent: params.userAgent ?? null,
-      expiresAt: now + 30 * 24 * 60 * 60 * 1000,
+      lastActiveAt: now,
+      stepUpAt: now,
+      expiresAt: now + WEB_SESSION_TTL_MS,
       createdAt: now,
     })
     .run();
@@ -289,26 +473,291 @@ export function signInUser(params: {
   return { rawSessionToken, userId: user.id, workspaceId: activeWorkspaceId };
 }
 
-export function signOutSession(rawToken: string): void {
-  const tokenHash = hashSessionToken(rawToken);
-  controlDb().delete(controlSchema.sessions).where(eq(controlSchema.sessions.tokenHash, tokenHash)).run();
-}
-
-export function resolveUserSessionFromToken(rawToken: string | undefined | null): AuthenticatedSession | null {
-  if (!rawToken) return null;
+export function signInUser(params: {
+  email: string;
+  password: string;
+  totpCode?: string;
+  requireTotpIfEnrolled?: boolean;
+  ipAddress?: string;
+  userAgent?: string;
+}): { rawSessionToken: string; userId: string; workspaceId: string } {
   ensureSystemRolesSeeded();
+  ensureServiceCatalogSeeded();
+
+  const normalizedEmail = params.email.trim().toLowerCase();
+  const ipKey = params.ipAddress?.trim() || "local";
+  consumeAuthRateLimit({
+    bucket: "signin-acct-min",
+    key: `${ipKey}:${normalizedEmail}`,
+    maxAttempts: 5,
+    windowMs: 60_000,
+  });
+  consumeAuthRateLimit({
+    bucket: "signin-acct-hr",
+    key: normalizedEmail,
+    maxAttempts: 20,
+    windowMs: 3_600_000,
+  });
+  if (params.ipAddress) {
+    consumeAuthRateLimit({
+      bucket: "signin-ip",
+      key: params.ipAddress,
+      maxAttempts: 25,
+      windowMs: 60_000,
+    });
+  }
 
   const db = controlDb();
   const now = Date.now();
+  const user = db
+    .select()
+    .from(controlSchema.users)
+    .where(eq(controlSchema.users.email, normalizedEmail))
+    .get();
+
+  if (user?.lockedUntil && user.lockedUntil > now) {
+    throw new RslError(
+      "RSL-AUTH-1004",
+      "Account temporarily locked after repeated failed sign-in attempts. Please wait 15 minutes or reset your password."
+    );
+  }
+
+  if (!user || !user.passwordHash) {
+    throw new RslError("RSL-AUTH-1002");
+  }
+
+  if (!verifyPassword(params.password, user.passwordHash)) {
+    recordUserFailedSignIn(user);
+  }
+
+  if (user.totpEnabled && user.totpSecretEncrypted && (params.requireTotpIfEnrolled || params.totpCode !== undefined)) {
+    const cleanCode = (params.totpCode || "").trim();
+    if (!cleanCode) {
+      throw new RslError(
+        "RSL-AUTH-1006",
+        "Enter the 6-digit code from your authenticator app (or a recovery code) to complete sign-in."
+      );
+    }
+    if (!verifyUserTotpOrBackupCode(user.id, cleanCode)) {
+      throw new RslError(
+        "RSL-AUTH-1006",
+        "Invalid 6-digit authenticator or recovery code. Check your authenticator app and try again."
+      );
+    }
+  }
+
+  const upgraded = passwordHashNeedsUpgrade(user.passwordHash)
+    ? hashPassword(params.password)
+    : null;
+  return mintAuthenticatedUserSession(user, params, upgraded);
+}
+
+export async function signInUserAsync(params: {
+  email: string;
+  password: string;
+  totpCode?: string;
+  requireTotpIfEnrolled?: boolean;
+  ipAddress?: string;
+  userAgent?: string;
+}): Promise<{ rawSessionToken: string; userId: string; workspaceId: string }> {
+  ensureSystemRolesSeeded();
+  ensureServiceCatalogSeeded();
+
+  const normalizedEmail = params.email.trim().toLowerCase();
+  const ipKey = params.ipAddress?.trim() || "local";
+  consumeAuthRateLimit({
+    bucket: "signin-acct-min",
+    key: `${ipKey}:${normalizedEmail}`,
+    maxAttempts: 5,
+    windowMs: 60_000,
+  });
+  consumeAuthRateLimit({
+    bucket: "signin-acct-hr",
+    key: normalizedEmail,
+    maxAttempts: 20,
+    windowMs: 3_600_000,
+  });
+  if (params.ipAddress) {
+    consumeAuthRateLimit({
+      bucket: "signin-ip",
+      key: params.ipAddress,
+      maxAttempts: 25,
+      windowMs: 60_000,
+    });
+  }
+
+  const db = controlDb();
+  const now = Date.now();
+  const user = db
+    .select()
+    .from(controlSchema.users)
+    .where(eq(controlSchema.users.email, normalizedEmail))
+    .get();
+
+  if (user?.lockedUntil && user.lockedUntil > now) {
+    throw new RslError(
+      "RSL-AUTH-1004",
+      "Account temporarily locked after repeated failed sign-in attempts. Please wait 15 minutes or reset your password."
+    );
+  }
+
+  if (!user || !user.passwordHash) {
+    throw new RslError("RSL-AUTH-1002");
+  }
+
+  if (!(await verifyPasswordAsync(params.password, user.passwordHash))) {
+    recordUserFailedSignIn(user);
+  }
+
+  if (user.totpEnabled && user.totpSecretEncrypted && (params.requireTotpIfEnrolled || params.totpCode !== undefined)) {
+    const cleanCode = (params.totpCode || "").trim();
+    if (!cleanCode) {
+      throw new RslError(
+        "RSL-AUTH-1006",
+        "Enter the 6-digit code from your authenticator app (or a recovery code) to complete sign-in."
+      );
+    }
+    if (!verifyUserTotpOrBackupCode(user.id, cleanCode)) {
+      throw new RslError(
+        "RSL-AUTH-1006",
+        "Invalid 6-digit authenticator or recovery code. Check your authenticator app and try again."
+      );
+    }
+  }
+
+  const upgraded = passwordHashNeedsUpgrade(user.passwordHash)
+    ? await hashPasswordAsync(params.password)
+    : null;
+  return mintAuthenticatedUserSession(user, params, upgraded);
+}
+
+export function signOutSession(rawToken: string): void {
   const tokenHash = hashSessionToken(rawToken);
+  userSessionCache.delete(tokenHash);
+  controlDb()
+    .delete(controlSchema.sessions)
+    .where(eq(controlSchema.sessions.tokenHash, tokenHash))
+    .run();
+}
+
+export function endImpersonationSession(rawToken: string | undefined | null): { ended: boolean } {
+  if (!rawToken) return { ended: false };
+  const tokenHash = hashSessionToken(rawToken);
+  userSessionCache.delete(tokenHash);
+  const db = controlDb();
+  const session = db
+    .select()
+    .from(controlSchema.sessions)
+    .where(eq(controlSchema.sessions.tokenHash, tokenHash))
+    .get();
+  if (!session || !session.impersonatorStaffId) {
+    return { ended: false };
+  }
+
+  const now = Date.now();
+  db.delete(controlSchema.sessions)
+    .where(eq(controlSchema.sessions.id, session.id))
+    .run();
+
+  try {
+    const latestImpLog = platformLogsDb()
+      .select()
+      .from(platformLogsSchema.impersonationLogs)
+      .where(
+        and(
+          eq(platformLogsSchema.impersonationLogs.staffId, session.impersonatorStaffId),
+          eq(
+            platformLogsSchema.impersonationLogs.workspaceId,
+            session.activeWorkspaceId ?? ""
+          ),
+          isNull(platformLogsSchema.impersonationLogs.endedAt)
+        )
+      )
+      .orderBy(desc(platformLogsSchema.impersonationLogs.startedAt))
+      .get();
+    if (latestImpLog) {
+      platformLogsDb()
+        .update(platformLogsSchema.impersonationLogs)
+        .set({ endedAt: now })
+        .where(eq(platformLogsSchema.impersonationLogs.id, latestImpLog.id))
+        .run();
+    }
+    platformLogsDb()
+      .insert(platformLogsSchema.staffActionLogs)
+      .values({
+        id: newId(),
+        ts: now,
+        staffId: session.impersonatorStaffId,
+        action: "staff.impersonation.ended",
+        targetTenantId: session.activeWorkspaceId ?? null,
+        summary: `Ended support impersonation session early`,
+        correlationId: newId(),
+      })
+      .run();
+  } catch {
+    // Do not block session termination if audit log update fails
+  }
+
+  return { ended: true };
+}
+
+export function resolveUserSessionFromToken(
+  rawToken: string | undefined | null
+): AuthenticatedSession | null {
+  if (!rawToken) return null;
+  const now = Date.now();
+  const tokenHash = hashSessionToken(rawToken);
+
+  const cached = userSessionCache.get(tokenHash);
+  if (cached && cached.expiresAtMs > now) {
+    const stillActive = controlDb()
+      .$client.prepare("SELECT 1 FROM sessions WHERE id = ? AND expires_at > ? LIMIT 1")
+      .get(cached.session.sessionId, now);
+    if (!stillActive) {
+      userSessionCache.delete(tokenHash);
+      return null;
+    }
+    const reqId = newId();
+    return {
+      ...cached.session,
+      ctx: {
+        ...cached.baseCtx,
+        requestId: reqId,
+        correlationId: reqId,
+      },
+    };
+  }
+
+  ensureSystemRolesSeeded();
+  const db = controlDb();
 
   const session = db
     .select()
     .from(controlSchema.sessions)
-    .where(and(eq(controlSchema.sessions.tokenHash, tokenHash), gt(controlSchema.sessions.expiresAt, now)))
+    .where(
+      and(eq(controlSchema.sessions.tokenHash, tokenHash), gt(controlSchema.sessions.expiresAt, now))
+    )
     .get();
 
-  if (!session) return null;
+  if (!session) {
+    userSessionCache.delete(tokenHash);
+    return null;
+  }
+
+  if (session.lastActiveAt && now - session.lastActiveAt > WEB_SESSION_IDLE_MS) {
+    db.delete(controlSchema.sessions)
+      .where(eq(controlSchema.sessions.id, session.id))
+      .run();
+    userSessionCache.delete(tokenHash);
+    return null;
+  }
+
+  if (!session.lastActiveAt || now - session.lastActiveAt > SESSION_TOUCH_INTERVAL_MS) {
+    db.update(controlSchema.sessions)
+      .set({ lastActiveAt: now })
+      .where(eq(controlSchema.sessions.id, session.id))
+      .run();
+  }
 
   const user = db
     .select()
@@ -325,6 +774,7 @@ export function resolveUserSessionFromToken(rawToken: string | undefined | null)
       name: controlSchema.workspaces.name,
       slug: controlSchema.workspaces.slug,
       billingStatus: controlSchema.workspaces.billingStatus,
+      deletedAt: controlSchema.workspaces.deletedAt,
     })
     .from(controlSchema.memberships)
     .innerJoin(
@@ -332,7 +782,8 @@ export function resolveUserSessionFromToken(rawToken: string | undefined | null)
       eq(controlSchema.memberships.workspaceId, controlSchema.workspaces.id)
     )
     .where(eq(controlSchema.memberships.userId, user.id))
-    .all();
+    .all()
+    .filter((m) => !m.deletedAt);
 
   if (allMemberships.length === 0) return null;
 
@@ -344,26 +795,24 @@ export function resolveUserSessionFromToken(rawToken: string | undefined | null)
     .from(controlSchema.workspaces)
     .where(eq(controlSchema.workspaces.id, currentMembership.workspaceId))
     .get();
-  if (!workspace) return null;
+  if (!workspace || workspace.deletedAt) return null;
 
   const permissions = Array.from(getPermissionsForRole(currentMembership.roleSlug, workspace.id));
   const assetScope = currentMembership.assetScopeJson
     ? (JSON.parse(currentMembership.assetScopeJson) as string[])
     : null;
 
-  const reqId = newId();
-  const ctx: TenantContext = {
+  const baseCtx: Omit<TenantContext, "requestId" | "correlationId"> = {
     workspaceId: workspace.id,
-    actorType: session.impersonatorStaffId ? "staff" : "user",
+    actorType: "user",
     actorId: user.id,
     roleSlug: currentMembership.roleSlug,
     assetScope,
     impersonatorId: session.impersonatorStaffId ?? null,
-    requestId: reqId,
-    correlationId: reqId,
   };
 
-  return {
+  const reqId = newId();
+  const baseSession: Omit<AuthenticatedSession, "ctx"> = {
     sessionId: session.id,
     user: {
       id: user.id,
@@ -380,6 +829,7 @@ export function resolveUserSessionFromToken(rawToken: string | undefined | null)
     permissions,
     impersonatorStaffId: session.impersonatorStaffId ?? null,
     impersonationReason: session.impersonationReason ?? null,
+    stepUpAt: session.stepUpAt ?? null,
     workspaces: allMemberships.map((m) => ({
       id: m.workspaceId,
       name: m.name,
@@ -387,7 +837,21 @@ export function resolveUserSessionFromToken(rawToken: string | undefined | null)
       roleSlug: m.roleSlug,
       billingStatus: m.billingStatus,
     })),
-    ctx,
+  };
+
+  userSessionCache.set(tokenHash, {
+    expiresAtMs: now + SESSION_CACHE_TTL_MS,
+    session: baseSession,
+    baseCtx,
+  });
+
+  return {
+    ...baseSession,
+    ctx: {
+      ...baseCtx,
+      requestId: reqId,
+      correlationId: reqId,
+    },
   };
 }
 
@@ -417,6 +881,8 @@ export function switchActiveWorkspace(sessionId: string, userId: string, targetW
     .set({ activeWorkspaceId: targetWorkspaceId, updatedAt: Date.now() })
     .where(eq(controlSchema.users.id, userId))
     .run();
+
+  invalidateSessionCache();
 }
 
 export function createAdditionalWorkspace(params: {
@@ -514,6 +980,13 @@ export function addOrInviteTeamMember(params: {
   email: string;
   rawInviteToken?: string;
 } {
+  consumeAuthRateLimit({
+    bucket: "team-invite-ws",
+    key: params.workspaceId,
+    maxAttempts: 30,
+    windowMs: 15 * 60_000,
+  });
+
   const db = controlDb();
   const normalized = params.email.trim().toLowerCase();
   const now = Date.now();
@@ -576,6 +1049,8 @@ export function addOrInviteTeamMember(params: {
         set: { roleSlug: params.roleSlug },
       })
       .run();
+    invalidateRbacCache(params.workspaceId);
+    invalidateSessionCache();
     return { mode: "added_existing", email: normalized };
   }
 
@@ -586,7 +1061,7 @@ export function addOrInviteTeamMember(params: {
         id: userId,
         name: params.name.trim(),
         email: normalized,
-        emailVerified: true,
+        emailVerified: false,
         passwordHash: hashPassword(params.initialPassword),
         totpEnabled: false,
         activeWorkspaceId: params.workspaceId,
@@ -604,6 +1079,8 @@ export function addOrInviteTeamMember(params: {
         createdAt: now,
       })
       .run();
+    invalidateRbacCache(params.workspaceId);
+    invalidateSessionCache();
     return { mode: "created_member", email: normalized };
   }
 
@@ -684,6 +1161,19 @@ export function updateWorkspaceMemberRole(params: {
     .where(eq(controlSchema.memberships.id, membership.id))
     .run();
 
+  // Rotate sessions on privilege change so active sessions re-authenticate or pick up updated bounds cleanly
+  db.delete(controlSchema.sessions)
+    .where(
+      and(
+        eq(controlSchema.sessions.userId, membership.userId),
+        eq(controlSchema.sessions.activeWorkspaceId, params.workspaceId)
+      )
+    )
+    .run();
+
+  invalidateRbacCache(params.workspaceId);
+  invalidateSessionCache();
+
   return { email: usr?.email ?? membership.userId, roleSlug: params.roleSlug };
 }
 
@@ -752,6 +1242,9 @@ export function removeWorkspaceMember(params: {
       )
     )
     .run();
+
+  invalidateRbacCache(params.workspaceId);
+  invalidateSessionCache();
 
   return { email: usr?.email ?? membership.userId };
 }
@@ -890,6 +1383,7 @@ export function acceptWorkspaceInvitation(params: {
   workspaceName: string;
   email: string;
 } {
+  const startedAt = Date.now();
   ensureSystemRolesSeeded();
   const trimmed = params.rawToken.trim();
   if (!trimmed) {
@@ -985,6 +1479,9 @@ export function acceptWorkspaceInvitation(params: {
     .where(eq(controlSchema.invitations.id, inv.id))
     .run();
 
+  invalidateRbacCache(ws.id);
+  invalidateSessionCache();
+
   const rawSessionToken = crypto.randomBytes(32).toString("base64url");
   db.insert(controlSchema.sessions)
     .values({
@@ -992,7 +1489,9 @@ export function acceptWorkspaceInvitation(params: {
       userId,
       tokenHash: hashSessionToken(rawSessionToken),
       activeWorkspaceId: ws.id,
-      expiresAt: now + 30 * 24 * 60 * 60 * 1000,
+      lastActiveAt: now,
+      stepUpAt: now,
+      expiresAt: now + WEB_SESSION_TTL_MS,
       createdAt: now,
     })
     .run();
@@ -1007,7 +1506,7 @@ export function acceptWorkspaceInvitation(params: {
     outcome: "success",
     requestId: corrId,
     correlationId: corrId,
-    durationMs: 5,
+    durationMs: Math.max(1, Date.now() - startedAt),
     summary: `${inv.email} accepted invitation and joined '${ws.name}' as ${inv.roleSlug}`,
   });
 
@@ -1044,12 +1543,13 @@ export function changeAuthenticatedUserPassword(params: {
   db.update(controlSchema.users)
     .set({
       passwordHash: hashPassword(params.newPassword),
+      failedLoginAttempts: 0,
+      lockedUntil: null,
       updatedAt: Date.now(),
     })
     .where(eq(controlSchema.users.id, usr.id))
     .run();
 
-  // Security (SEC-06): revoke active sessions on password change
   if (params.preserveSessionId) {
     db.delete(controlSchema.sessions)
       .where(
@@ -1064,6 +1564,56 @@ export function changeAuthenticatedUserPassword(params: {
       .where(eq(controlSchema.sessions.userId, usr.id))
       .run();
   }
+  invalidateSessionCache();
+}
+
+export async function changeAuthenticatedUserPasswordAsync(params: {
+  userId: string;
+  currentPassword: string;
+  newPassword: string;
+  preserveSessionId?: string;
+}): Promise<void> {
+  if (params.newPassword.length < 8) {
+    throw new RslError("RSL-VAL-1001", "New password must be at least 8 characters long.");
+  }
+
+  const db = controlDb();
+  const usr = db
+    .select()
+    .from(controlSchema.users)
+    .where(eq(controlSchema.users.id, params.userId))
+    .get();
+
+  if (!usr || !usr.passwordHash || !(await verifyPasswordAsync(params.currentPassword, usr.passwordHash))) {
+    throw new RslError("RSL-AUTH-1002", "Your current password did not match.");
+  }
+
+  const nextHash = await hashPasswordAsync(params.newPassword);
+  db.update(controlSchema.users)
+    .set({
+      passwordHash: nextHash,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+      updatedAt: Date.now(),
+    })
+    .where(eq(controlSchema.users.id, usr.id))
+    .run();
+
+  if (params.preserveSessionId) {
+    db.delete(controlSchema.sessions)
+      .where(
+        and(
+          eq(controlSchema.sessions.userId, usr.id),
+          ne(controlSchema.sessions.id, params.preserveSessionId)
+        )
+      )
+      .run();
+  } else {
+    db.delete(controlSchema.sessions)
+      .where(eq(controlSchema.sessions.userId, usr.id))
+      .run();
+  }
+  invalidateSessionCache();
 }
 
 const GSTIN_FORMAT_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
@@ -1177,6 +1727,8 @@ export function updateAuthenticatedUserProfile(params: {
     .where(eq(controlSchema.users.id, existing.id))
     .run();
 
+  invalidateSessionCache();
+
   return {
     name: cleanName,
     email: nextEmail,
@@ -1233,6 +1785,7 @@ export function revokeUserSessionById(params: {
   if (!target) return { revoked: false };
 
   db.delete(controlSchema.sessions).where(eq(controlSchema.sessions.id, target.id)).run();
+  invalidateSessionCache();
   return { revoked: true };
 }
 
@@ -1253,7 +1806,285 @@ export function revokeAllOtherUserSessions(params: {
     db.delete(controlSchema.sessions).where(eq(controlSchema.sessions.id, r.id)).run();
     revokedCount++;
   }
+  if (revokedCount > 0) invalidateSessionCache();
   return { revokedCount };
+}
+
+const USER_TOTP_BACKUP_PREFIX = "user_totp_backup:";
+const USER_TOTP_PENDING_PREFIX = "user_totp_pending:";
+
+function readUserTotpBackupHashes(userId: string): string[] {
+  const row = controlDb()
+    .select()
+    .from(controlSchema.verifications)
+    .where(eq(controlSchema.verifications.identifier, `${USER_TOTP_BACKUP_PREFIX}${userId}`))
+    .get();
+  if (!row) return [];
+  try {
+    const parsed = JSON.parse(row.valueHash) as string[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeUserTotpBackupHashes(userId: string, hashes: string[]): void {
+  const db = controlDb();
+  const identifier = `${USER_TOTP_BACKUP_PREFIX}${userId}`;
+  db.delete(controlSchema.verifications)
+    .where(eq(controlSchema.verifications.identifier, identifier))
+    .run();
+  if (hashes.length > 0) {
+    const now = Date.now();
+    db.insert(controlSchema.verifications)
+      .values({
+        id: newId(),
+        identifier,
+        valueHash: JSON.stringify(hashes),
+        failedAttempts: 0,
+        expiresAt: now + 10 * 365 * 86_400_000,
+        createdAt: now,
+      })
+      .run();
+  }
+}
+
+export function getUserTotpStatus(userId: string): {
+  totpEnabled: boolean;
+  backupCodesRemaining: number;
+} {
+  const usr = controlDb()
+    .select({
+      totpEnabled: controlSchema.users.totpEnabled,
+      totpSecretEncrypted: controlSchema.users.totpSecretEncrypted,
+    })
+    .from(controlSchema.users)
+    .where(eq(controlSchema.users.id, userId))
+    .get();
+  const totpEnabled = Boolean(usr?.totpEnabled && usr?.totpSecretEncrypted);
+  const backupCodesRemaining = totpEnabled ? readUserTotpBackupHashes(userId).length : 0;
+  return { totpEnabled, backupCodesRemaining };
+}
+
+export function beginUserTotpEnrollment(userId: string): {
+  secret: string;
+  otpauthUri: string;
+  qrCodeDataUri: string;
+  accountEmail: string;
+  issuer: string;
+} {
+  const db = controlDb();
+  const usr = db
+    .select()
+    .from(controlSchema.users)
+    .where(eq(controlSchema.users.id, userId))
+    .get();
+  if (!usr) {
+    throw new RslError("RSL-AUTH-1001", "User account not found.");
+  }
+
+  const secret = generateTotpSecret();
+  const now = Date.now();
+  const pendingIdentifier = `${USER_TOTP_PENDING_PREFIX}${usr.id}`;
+  db.delete(controlSchema.verifications)
+    .where(eq(controlSchema.verifications.identifier, pendingIdentifier))
+    .run();
+  db.insert(controlSchema.verifications)
+    .values({
+      id: newId(),
+      identifier: pendingIdentifier,
+      valueHash: encryptEnvelope(secret),
+      failedAttempts: 0,
+      expiresAt: now + 30 * 60_000,
+      createdAt: now,
+    })
+    .run();
+
+  const issuer = "RapidShift Labs";
+  const otpauthUri = buildTotpOtpAuthUri({
+    secretBase32: secret,
+    accountEmail: usr.email,
+    issuer,
+  });
+
+  return {
+    secret,
+    otpauthUri,
+    qrCodeDataUri: buildTotpQrCodeDataUri(otpauthUri),
+    accountEmail: usr.email,
+    issuer,
+  };
+}
+
+export function confirmUserTotpEnrollment(params: {
+  userId: string;
+  code: string;
+  sessionId?: string;
+}): { backupCodes: string[] } {
+  const db = controlDb();
+  const usr = db
+    .select()
+    .from(controlSchema.users)
+    .where(eq(controlSchema.users.id, params.userId))
+    .get();
+  if (!usr) {
+    throw new RslError("RSL-AUTH-1001", "User account not found.");
+  }
+
+  const now = Date.now();
+  const pendingIdentifier = `${USER_TOTP_PENDING_PREFIX}${usr.id}`;
+  const pendingRow = db
+    .select()
+    .from(controlSchema.verifications)
+    .where(
+      and(
+        eq(controlSchema.verifications.identifier, pendingIdentifier),
+        gt(controlSchema.verifications.expiresAt, now)
+      )
+    )
+    .get();
+
+  const encryptedCandidate = pendingRow?.valueHash ?? usr.totpSecretEncrypted;
+  if (!encryptedCandidate) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Start Authenticator QR setup first before verifying a 6-digit code."
+    );
+  }
+
+  const secret = decryptEnvelope(encryptedCandidate);
+  if (!verifyTotpCode(secret, params.code)) {
+    throw new RslError(
+      "RSL-AUTH-1002",
+      "Invalid 6-digit authenticator code. Check your device clock and try again."
+    );
+  }
+
+  const { plainCodes, hashedCodes } = generateMfaBackupCodes(8);
+  db.update(controlSchema.users)
+    .set({
+      totpSecretEncrypted: encryptEnvelope(secret),
+      totpEnabled: true,
+      updatedAt: now,
+    })
+    .where(eq(controlSchema.users.id, usr.id))
+    .run();
+
+  db.delete(controlSchema.verifications)
+    .where(eq(controlSchema.verifications.identifier, pendingIdentifier))
+    .run();
+  writeUserTotpBackupHashes(usr.id, hashedCodes);
+
+  if (params.sessionId) {
+    db.update(controlSchema.sessions)
+      .set({ stepUpAt: now, lastActiveAt: now })
+      .where(eq(controlSchema.sessions.id, params.sessionId))
+      .run();
+  }
+  invalidateSessionCache();
+
+  return { backupCodes: plainCodes };
+}
+
+export function verifyUserTotpOrBackupCode(userId: string, rawCode: string): boolean {
+  const usr = controlDb()
+    .select()
+    .from(controlSchema.users)
+    .where(eq(controlSchema.users.id, userId))
+    .get();
+  if (!usr || !usr.totpEnabled || !usr.totpSecretEncrypted) {
+    return false;
+  }
+  const secret = decryptEnvelope(usr.totpSecretEncrypted);
+  if (verifyTotpCode(secret, rawCode)) {
+    return true;
+  }
+  const existingHashes = readUserTotpBackupHashes(userId);
+  if (existingHashes.length > 0) {
+    const consumed = consumeMfaBackupCode(rawCode, existingHashes);
+    if (consumed.matched) {
+      writeUserTotpBackupHashes(userId, consumed.remainingHashes);
+      return true;
+    }
+  }
+  return false;
+}
+
+export function disableUserTotpMfa(params: {
+  userId: string;
+  codeOrPassword: string;
+}): void {
+  const db = controlDb();
+  const usr = db
+    .select()
+    .from(controlSchema.users)
+    .where(eq(controlSchema.users.id, params.userId))
+    .get();
+  if (!usr) {
+    throw new RslError("RSL-AUTH-1001", "User account not found.");
+  }
+
+  const candidate = (params.codeOrPassword || "").trim();
+  if (!candidate) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Enter your current 6-digit authenticator code or account password to disable 2FA."
+    );
+  }
+
+  const validTotp = verifyUserTotpOrBackupCode(usr.id, candidate);
+  const validPwd = Boolean(usr.passwordHash && verifyPassword(candidate, usr.passwordHash));
+  if (!validTotp && !validPwd) {
+    throw new RslError(
+      "RSL-AUTH-1002",
+      "Confirmation failed. Enter a valid 6-digit authenticator code, recovery code, or account password."
+    );
+  }
+
+  db.update(controlSchema.users)
+    .set({
+      totpEnabled: false,
+      totpSecretEncrypted: null,
+      updatedAt: Date.now(),
+    })
+    .where(eq(controlSchema.users.id, usr.id))
+    .run();
+
+  db.delete(controlSchema.verifications)
+    .where(eq(controlSchema.verifications.identifier, `${USER_TOTP_PENDING_PREFIX}${usr.id}`))
+    .run();
+  writeUserTotpBackupHashes(usr.id, []);
+  invalidateSessionCache();
+}
+
+export function verifyUserStepUp(params: {
+  userId: string;
+  sessionId: string;
+  currentPassword: string;
+}): void {
+  const db = controlDb();
+  const usr = db
+    .select()
+    .from(controlSchema.users)
+    .where(eq(controlSchema.users.id, params.userId))
+    .get();
+  if (!usr) {
+    throw new RslError("RSL-AUTH-1002", "Password confirmation did not match.");
+  }
+  const candidate = params.currentPassword || "";
+  const validTotp =
+    usr.totpEnabled && usr.totpSecretEncrypted
+      ? verifyUserTotpOrBackupCode(usr.id, candidate)
+      : false;
+  const validPwd = Boolean(usr.passwordHash && verifyPassword(candidate, usr.passwordHash));
+  if (!validTotp && !validPwd) {
+    throw new RslError("RSL-AUTH-1002", "Password or authenticator confirmation did not match.");
+  }
+  db.update(controlSchema.sessions)
+    .set({ stepUpAt: Date.now() })
+    .where(eq(controlSchema.sessions.id, params.sessionId))
+    .run();
+  invalidateSessionCache();
 }
 
 export function updateWorkspaceBusinessSettings(params: {
@@ -1371,6 +2202,7 @@ export function updateWorkspaceBusinessSettings(params: {
     .run();
 
   markWorkspaceSslCertificatesQueued({ workspaceId: params.workspaceId });
+  invalidateSessionCache();
 
   return {
     name: cleanName,
@@ -1393,44 +2225,82 @@ export function countPlatformStaff(): number {
   return Number(row?.c ?? 0);
 }
 
-export function bootstrapFirstPlatformStaff(params: {
-  name: string;
-  email: string;
-  password: string;
-}): { rawToken: string; staffId: string } {
-  if (countPlatformStaff() > 0) {
-    throw new Error("Initial staff account already exists. Sign in instead.");
+function assertSetupBootstrapTokenValid(providedToken?: string): void {
+  const configuredToken = (getEnv().SETUP_BOOTSTRAP_TOKEN || "").trim();
+  if (process.env.NODE_ENV === "production" && !configuredToken) {
+    throw new RslError(
+      "RSL-AUTH-1001",
+      "SETUP_BOOTSTRAP_TOKEN must be configured in .env before initializing the first Super Admin account."
+    );
   }
-  if (params.password.length < 8) {
-    throw new RslError("RSL-VAL-1001", "Password must be at least 8 characters long.");
+  if (!configuredToken) return;
+  const provided = (providedToken || "").trim();
+  if (!provided) {
+    throw new RslError(
+      "RSL-AUTH-1002",
+      "Enter the one-time Setup Bootstrap Key from SETUP_BOOTSTRAP_TOKEN in .env."
+    );
   }
+  const expectedDigest = crypto.createHash("sha256").update(configuredToken).digest();
+  const actualDigest = crypto.createHash("sha256").update(provided).digest();
+  if (!crypto.timingSafeEqual(expectedDigest, actualDigest)) {
+    throw new RslError(
+      "RSL-AUTH-1002",
+      "Invalid Setup Bootstrap Key. Check SETUP_BOOTSTRAP_TOKEN in .env."
+    );
+  }
+}
+
+function finalizeStaffBootstrapWithHash(
+  params: { name: string; email: string; setupBootstrapToken?: string },
+  passwordHash: string
+): { rawToken: string; staffId: string } {
+  assertSetupBootstrapTokenValid(params.setupBootstrapToken);
 
   const db = controlDb();
   const staffId = newId();
-  const now = Date.now();
-  db.insert(controlSchema.platformStaff)
-    .values({
-      id: staffId,
-      name: params.name.trim(),
-      email: params.email.trim().toLowerCase(),
-      passwordHash: hashPassword(params.password),
-      staffRole: "super_admin",
-      totpEnabled: false,
-      active: true,
-      createdAt: now,
-    })
-    .run();
-
   const rawToken = crypto.randomBytes(32).toString("base64url");
-  db.insert(controlSchema.platformStaffSessions)
-    .values({
-      id: newId(),
-      staffId,
-      tokenHash: hashSessionToken(rawToken),
-      expiresAt: now + 12 * 60 * 60 * 1000, // 12h staff session
-      createdAt: now,
-    })
-    .run();
+  const now = Date.now();
+  const normalizedEmail = params.email.trim().toLowerCase();
+
+  const tx = db.$client.transaction(() => {
+    const existingRow = db
+      .select({ c: sql<number>`count(*)` })
+      .from(controlSchema.platformStaff)
+      .get();
+    if (Number(existingRow?.c ?? 0) > 0) {
+      throw new Error("Initial staff account already exists. Sign in instead.");
+    }
+
+    db.insert(controlSchema.platformStaff)
+      .values({
+        id: staffId,
+        name: params.name.trim(),
+        email: normalizedEmail,
+        passwordHash,
+        staffRole: "super_admin",
+        totpEnabled: false,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        active: true,
+        createdAt: now,
+      })
+      .run();
+
+    db.insert(controlSchema.platformStaffSessions)
+      .values({
+        id: newId(),
+        staffId,
+        tokenHash: hashSessionToken(rawToken),
+        lastActiveAt: now,
+        stepUpAt: now,
+        expiresAt: now + STAFF_SESSION_TTL_MS,
+        createdAt: now,
+      })
+      .run();
+  });
+
+  tx.immediate();
 
   platformLogsDb()
     .insert(platformLogsSchema.staffActionLogs)
@@ -1439,7 +2309,7 @@ export function bootstrapFirstPlatformStaff(params: {
       ts: now,
       staffId,
       action: "staff.bootstrapped",
-      summary: `Created initial super_admin staff account (${params.email.trim().toLowerCase()})`,
+      summary: `Created initial super_admin staff account (${normalizedEmail})`,
       correlationId: newId(),
     })
     .run();
@@ -1447,37 +2317,194 @@ export function bootstrapFirstPlatformStaff(params: {
   return { rawToken, staffId };
 }
 
-export function signInPlatformStaff(params: {
+export function bootstrapFirstPlatformStaff(params: {
+  name: string;
   email: string;
   password: string;
+  setupBootstrapToken?: string;
 }): { rawToken: string; staffId: string } {
-  const db = controlDb();
-  const staff = db
-    .select()
-    .from(controlSchema.platformStaff)
-    .where(eq(controlSchema.platformStaff.email, params.email.trim().toLowerCase()))
-    .get();
+  if (countPlatformStaff() > 0) {
+    throw new Error("Initial staff account already exists. Sign in instead.");
+  }
+  if (params.password.length < 8) {
+    throw new RslError("RSL-VAL-1001", "Password must be at least 8 characters long.");
+  }
+  const passwordHash = hashPassword(params.password);
+  return finalizeStaffBootstrapWithHash(params, passwordHash);
+}
 
-  if (!staff || !staff.active || !verifyPassword(params.password, staff.passwordHash)) {
-    throw new RslError("RSL-AUTH-1002");
+export async function bootstrapFirstPlatformStaffAsync(params: {
+  name: string;
+  email: string;
+  password: string;
+  setupBootstrapToken?: string;
+}): Promise<{ rawToken: string; staffId: string }> {
+  if (countPlatformStaff() > 0) {
+    throw new Error("Initial staff account already exists. Sign in instead.");
+  }
+  if (params.password.length < 8) {
+    throw new RslError("RSL-VAL-1001", "Password must be at least 8 characters long.");
+  }
+  assertSetupBootstrapTokenValid(params.setupBootstrapToken);
+  const passwordHash = await hashPasswordAsync(params.password);
+  return finalizeStaffBootstrapWithHash(params, passwordHash);
+}
+
+function recordStaffFailedSignIn(staff: typeof controlSchema.platformStaff.$inferSelect): never {
+  const now = Date.now();
+  const nextAttempts = (staff.failedLoginAttempts ?? 0) + 1;
+  const shouldLock = nextAttempts >= ACCOUNT_LOCKOUT_THRESHOLD;
+  controlDb()
+    .update(controlSchema.platformStaff)
+    .set({
+      failedLoginAttempts: nextAttempts,
+      lockedUntil: shouldLock ? now + ACCOUNT_LOCKOUT_DURATION_MS : staff.lockedUntil,
+    })
+    .where(eq(controlSchema.platformStaff.id, staff.id))
+    .run();
+  if (shouldLock) {
+    throw new RslError(
+      "RSL-AUTH-1004",
+      "Staff account locked for 15 minutes after repeated failed sign-in attempts."
+    );
+  }
+  throw new RslError("RSL-AUTH-1002");
+}
+
+function mintPlatformStaffSession(
+  staff: typeof controlSchema.platformStaff.$inferSelect,
+  upgradedHash?: string | null
+): { rawToken: string; staffId: string; mfaRequired: boolean } {
+  const db = controlDb();
+  const now = Date.now();
+  if ((staff.failedLoginAttempts ?? 0) > 0 || staff.lockedUntil || upgradedHash) {
+    db.update(controlSchema.platformStaff)
+      .set({
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        ...(upgradedHash ? { passwordHash: upgradedHash } : {}),
+      })
+      .where(eq(controlSchema.platformStaff.id, staff.id))
+      .run();
   }
 
-  const now = Date.now();
+  const mfaRequired = Boolean(staff.totpEnabled) || process.env.NODE_ENV === "production";
   const rawToken = crypto.randomBytes(32).toString("base64url");
   db.insert(controlSchema.platformStaffSessions)
     .values({
       id: newId(),
       staffId: staff.id,
       tokenHash: hashSessionToken(rawToken),
-      expiresAt: now + 12 * 60 * 60 * 1000,
+      mfaVerifiedAt: mfaRequired ? null : now,
+      stepUpAt: mfaRequired ? null : now,
+      lastActiveAt: now,
+      expiresAt: now + STAFF_SESSION_TTL_MS,
       createdAt: now,
     })
     .run();
 
-  return { rawToken, staffId: staff.id };
+  return { rawToken, staffId: staff.id, mfaRequired };
 }
 
-export function resolveStaffSessionFromToken(rawToken: string | undefined | null) {
+export function signInPlatformStaff(params: {
+  email: string;
+  password: string;
+  ipAddress?: string;
+}): { rawToken: string; staffId: string; mfaRequired: boolean } {
+  const normalizedEmail = params.email.trim().toLowerCase();
+  const ipKey = params.ipAddress?.trim() || "local";
+  consumeAuthRateLimit({
+    bucket: "staff-signin-min",
+    key: `${ipKey}:${normalizedEmail}`,
+    maxAttempts: 5,
+    windowMs: 60_000,
+  });
+
+  const db = controlDb();
+  const now = Date.now();
+  const staff = db
+    .select()
+    .from(controlSchema.platformStaff)
+    .where(eq(controlSchema.platformStaff.email, normalizedEmail))
+    .get();
+
+  if (staff?.lockedUntil && staff.lockedUntil > now) {
+    throw new RslError(
+      "RSL-AUTH-1004",
+      "Staff account locked for 15 minutes after repeated failed sign-in attempts."
+    );
+  }
+
+  if (!staff || !staff.active) {
+    throw new RslError("RSL-AUTH-1002");
+  }
+
+  if (!verifyPassword(params.password, staff.passwordHash)) {
+    recordStaffFailedSignIn(staff);
+  }
+
+  const upgraded = passwordHashNeedsUpgrade(staff.passwordHash)
+    ? hashPassword(params.password)
+    : null;
+  return mintPlatformStaffSession(staff, upgraded);
+}
+
+export async function signInPlatformStaffAsync(params: {
+  email: string;
+  password: string;
+  ipAddress?: string;
+}): Promise<{ rawToken: string; staffId: string; mfaRequired: boolean }> {
+  const normalizedEmail = params.email.trim().toLowerCase();
+  const ipKey = params.ipAddress?.trim() || "local";
+  consumeAuthRateLimit({
+    bucket: "staff-signin-min",
+    key: `${ipKey}:${normalizedEmail}`,
+    maxAttempts: 5,
+    windowMs: 60_000,
+  });
+
+  const db = controlDb();
+  const now = Date.now();
+  const staff = db
+    .select()
+    .from(controlSchema.platformStaff)
+    .where(eq(controlSchema.platformStaff.email, normalizedEmail))
+    .get();
+
+  if (staff?.lockedUntil && staff.lockedUntil > now) {
+    throw new RslError(
+      "RSL-AUTH-1004",
+      "Staff account locked for 15 minutes after repeated failed sign-in attempts."
+    );
+  }
+
+  if (!staff || !staff.active) {
+    throw new RslError("RSL-AUTH-1002");
+  }
+
+  if (!(await verifyPasswordAsync(params.password, staff.passwordHash))) {
+    recordStaffFailedSignIn(staff);
+  }
+
+  const upgraded = passwordHashNeedsUpgrade(staff.passwordHash)
+    ? await hashPasswordAsync(params.password)
+    : null;
+  return mintPlatformStaffSession(staff, upgraded);
+}
+
+export interface ResolvedStaffSession {
+  sessionId: string;
+  staff: typeof controlSchema.platformStaff.$inferSelect;
+  mfaEnrolled: boolean;
+  mfaVerified: boolean;
+  mfaRequired: boolean;
+  stepUpAt: number | null;
+}
+
+export function resolveStaffSessionFromToken(
+  rawToken: string | undefined | null,
+  options?: { allowPendingMfa?: boolean }
+): ResolvedStaffSession | null {
   if (!rawToken) return null;
   const db = controlDb();
   const now = Date.now();
@@ -1493,6 +2520,20 @@ export function resolveStaffSessionFromToken(rawToken: string | undefined | null
     .get();
   if (!sess) return null;
 
+  if (sess.lastActiveAt && now - sess.lastActiveAt > STAFF_SESSION_IDLE_MS) {
+    db.delete(controlSchema.platformStaffSessions)
+      .where(eq(controlSchema.platformStaffSessions.id, sess.id))
+      .run();
+    return null;
+  }
+
+  if (!sess.lastActiveAt || now - sess.lastActiveAt > SESSION_TOUCH_INTERVAL_MS) {
+    db.update(controlSchema.platformStaffSessions)
+      .set({ lastActiveAt: now })
+      .where(eq(controlSchema.platformStaffSessions.id, sess.id))
+      .run();
+  }
+
   const staff = db
     .select()
     .from(controlSchema.platformStaff)
@@ -1500,7 +2541,270 @@ export function resolveStaffSessionFromToken(rawToken: string | undefined | null
     .get();
   if (!staff || !staff.active) return null;
 
-  return { sessionId: sess.id, staff };
+  const mfaEnrolled = Boolean(staff.totpEnabled && staff.totpSecretEncrypted);
+  const mfaVerified = Boolean(sess.mfaVerifiedAt);
+  const mfaRequired = mfaEnrolled || process.env.NODE_ENV === "production";
+
+  if (mfaRequired && !mfaVerified && !options?.allowPendingMfa) {
+    return null;
+  }
+
+  return {
+    sessionId: sess.id,
+    staff,
+    mfaEnrolled,
+    mfaVerified,
+    mfaRequired,
+    stepUpAt: sess.stepUpAt ?? null,
+  };
+}
+
+export function beginPlatformStaffTotpEnrollment(staffId: string): {
+  secret: string;
+  otpauthUri: string;
+  qrCodeDataUri: string;
+  accountEmail: string;
+  issuer: string;
+} {
+  const db = controlDb();
+  const staff = db
+    .select()
+    .from(controlSchema.platformStaff)
+    .where(eq(controlSchema.platformStaff.id, staffId))
+    .get();
+  if (!staff || !staff.active) {
+    throw new RslError("RSL-AUTH-1001", "Staff account not found.");
+  }
+  const secret = generateTotpSecret();
+  db.update(controlSchema.platformStaff)
+    .set({
+      totpSecretEncrypted: encryptEnvelope(secret),
+      totpEnabled: false,
+    })
+    .where(eq(controlSchema.platformStaff.id, staff.id))
+    .run();
+
+  const issuer = "RapidShift Labs Staff";
+  const otpauthUri = buildTotpOtpAuthUri({
+    secretBase32: secret,
+    accountEmail: staff.email,
+    issuer,
+  });
+
+  return {
+    secret,
+    otpauthUri,
+    qrCodeDataUri: buildTotpQrCodeDataUri(otpauthUri),
+    accountEmail: staff.email,
+    issuer,
+  };
+}
+
+export function confirmPlatformStaffTotpEnrollment(params: {
+  staffId: string;
+  code: string;
+  sessionId?: string;
+}): { backupCodes: string[] } {
+  const db = controlDb();
+  const staff = db
+    .select()
+    .from(controlSchema.platformStaff)
+    .where(eq(controlSchema.platformStaff.id, params.staffId))
+    .get();
+  if (!staff || !staff.totpSecretEncrypted) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Start TOTP authenticator enrollment first before verifying a 6-digit code."
+    );
+  }
+  const secret = decryptEnvelope(staff.totpSecretEncrypted);
+  if (!verifyTotpCode(secret, params.code)) {
+    throw new RslError("RSL-AUTH-1002", "Invalid 6-digit authenticator code. Check device clock and try again.");
+  }
+
+  const { plainCodes, hashedCodes } = generateMfaBackupCodes(8);
+  const now = Date.now();
+  db.update(controlSchema.platformStaff)
+    .set({
+      totpEnabled: true,
+      totpEnrolledAt: now,
+      totpBackupCodesJson: JSON.stringify(hashedCodes),
+    })
+    .where(eq(controlSchema.platformStaff.id, staff.id))
+    .run();
+
+  if (params.sessionId) {
+    db.update(controlSchema.platformStaffSessions)
+      .set({ mfaVerifiedAt: now, stepUpAt: now, lastActiveAt: now })
+      .where(eq(controlSchema.platformStaffSessions.id, params.sessionId))
+      .run();
+  }
+
+  platformLogsDb()
+    .insert(platformLogsSchema.staffActionLogs)
+    .values({
+      id: newId(),
+      ts: now,
+      staffId: staff.id,
+      action: "staff.mfa.enrolled",
+      summary: `Enrolled TOTP multi-factor authenticator for ${staff.email}`,
+      correlationId: newId(),
+    })
+    .run();
+
+  return { backupCodes: plainCodes };
+}
+
+function verifyStaffTotpOrBackupCode(
+  staff: typeof controlSchema.platformStaff.$inferSelect,
+  rawCode: string
+): boolean {
+  if (!staff.totpEnabled || !staff.totpSecretEncrypted) {
+    return false;
+  }
+  const secret = decryptEnvelope(staff.totpSecretEncrypted);
+  if (verifyTotpCode(secret, rawCode)) {
+    return true;
+  }
+  if (staff.totpBackupCodesJson) {
+    try {
+      const parsed = JSON.parse(staff.totpBackupCodesJson) as string[];
+      if (Array.isArray(parsed)) {
+        const consumed = consumeMfaBackupCode(rawCode, parsed);
+        if (consumed.matched) {
+          controlDb()
+            .update(controlSchema.platformStaff)
+            .set({ totpBackupCodesJson: JSON.stringify(consumed.remainingHashes) })
+            .where(eq(controlSchema.platformStaff.id, staff.id))
+            .run();
+          return true;
+        }
+      }
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+export function verifyPlatformStaffSessionMfa(params: {
+  rawToken: string;
+  code: string;
+}): { sessionId: string; staffId: string } {
+  const pending = resolveStaffSessionFromToken(params.rawToken, { allowPendingMfa: true });
+  if (!pending) {
+    throw new RslError("RSL-AUTH-1001", "Staff session expired. Sign in again.");
+  }
+
+  consumeAuthRateLimit({
+    bucket: "staff-mfa",
+    key: pending.staff.id,
+    maxAttempts: 6,
+    windowMs: 5 * 60_000,
+  });
+
+  if (!verifyStaffTotpOrBackupCode(pending.staff, params.code)) {
+    throw new RslError("RSL-AUTH-1002", "Invalid 6-digit authenticator or backup recovery code.");
+  }
+
+  const now = Date.now();
+  controlDb()
+    .update(controlSchema.platformStaffSessions)
+    .set({ mfaVerifiedAt: now, stepUpAt: now, lastActiveAt: now })
+    .where(eq(controlSchema.platformStaffSessions.id, pending.sessionId))
+    .run();
+
+  platformLogsDb()
+    .insert(platformLogsSchema.staffActionLogs)
+    .values({
+      id: newId(),
+      ts: now,
+      staffId: pending.staff.id,
+      action: "staff.mfa.verified",
+      summary: `Verified MFA challenge for ${pending.staff.email}`,
+      correlationId: newId(),
+    })
+    .run();
+
+  return { sessionId: pending.sessionId, staffId: pending.staff.id };
+}
+
+export function verifyPlatformStaffStepUp(params: {
+  sessionId: string;
+  staffId: string;
+  totpOrBackupCode?: string;
+  currentPassword?: string;
+}): void {
+  const db = controlDb();
+  const staff = db
+    .select()
+    .from(controlSchema.platformStaff)
+    .where(eq(controlSchema.platformStaff.id, params.staffId))
+    .get();
+  if (!staff || !staff.active) {
+    throw new RslError("RSL-AUTH-1001", "Staff account not found.");
+  }
+
+  consumeAuthRateLimit({
+    bucket: "staff-stepup",
+    key: staff.id,
+    maxAttempts: 6,
+    windowMs: 5 * 60_000,
+  });
+
+  if (staff.totpEnabled && staff.totpSecretEncrypted) {
+    const code = (params.totpOrBackupCode || "").trim();
+    if (!code || !verifyStaffTotpOrBackupCode(staff, code)) {
+      throw new RslError(
+        "RSL-AUTH-1006",
+        "Step-up verification failed. Enter a valid 6-digit authenticator or backup recovery code."
+      );
+    }
+  } else {
+    if (process.env.NODE_ENV === "production") {
+      throw new RslError(
+        "RSL-AUTH-1006",
+        "Enroll TOTP multi-factor authentication before performing privileged actions."
+      );
+    }
+    const pwd = params.currentPassword || "";
+    if (!pwd || !verifyPassword(pwd, staff.passwordHash)) {
+      throw new RslError(
+        "RSL-AUTH-1006",
+        "Confirm your staff password (or enroll TOTP MFA) to authorize this privileged action."
+      );
+    }
+  }
+
+  const now = Date.now();
+  db.update(controlSchema.platformStaffSessions)
+    .set({ stepUpAt: now, lastActiveAt: now })
+    .where(eq(controlSchema.platformStaffSessions.id, params.sessionId))
+    .run();
+}
+
+export function assertPlatformStaffStepUp(
+  session: Pick<ResolvedStaffSession, "sessionId" | "staff" | "stepUpAt">,
+  inlineStepUp?: { totpOrBackupCode?: string; currentPassword?: string },
+  maxAgeMs = 15 * 60 * 1000
+): void {
+  const now = Date.now();
+  if (session.stepUpAt && now - session.stepUpAt <= maxAgeMs) {
+    return;
+  }
+  if (inlineStepUp?.totpOrBackupCode?.trim() || inlineStepUp?.currentPassword) {
+    verifyPlatformStaffStepUp({
+      sessionId: session.sessionId,
+      staffId: session.staff.id,
+      totpOrBackupCode: inlineStepUp.totpOrBackupCode,
+      currentPassword: inlineStepUp.currentPassword,
+    });
+    return;
+  }
+  throw new RslError(
+    "RSL-AUTH-1006",
+    "Recent step-up re-authentication (within 15 minutes) is required for impersonation, credential changes, password resets, and database restores."
+  );
 }
 
 export function signOutPlatformStaff(rawToken: string | undefined | null): void {
@@ -1512,7 +2816,7 @@ export function signOutPlatformStaff(rawToken: string | undefined | null): void 
 }
 
 /**
- * Audited 30-minute Staff Impersonation (Section 10)
+ * Audited 30-minute Staff Impersonation
  */
 export function createImpersonationSession(params: {
   staffId: string;
@@ -1532,7 +2836,7 @@ export function createImpersonationSession(params: {
   if (!ws) throw new Error("Workspace not found");
 
   const now = Date.now();
-  const expiresAt = now + 30 * 60 * 1000; // Hard 30-minute cap
+  const expiresAt = now + 30 * 60 * 1000;
   const rawToken = crypto.randomBytes(32).toString("base64url");
   const handoffCode = crypto.randomBytes(24).toString("base64url");
   const handoffCodeHash = crypto.createHash("sha256").update(handoffCode).digest("hex");
@@ -1545,12 +2849,12 @@ export function createImpersonationSession(params: {
       activeWorkspaceId: ws.id,
       impersonatorStaffId: params.staffId,
       impersonationReason: params.reason.trim(),
+      lastActiveAt: now,
       expiresAt,
       createdAt: now,
     })
     .run();
 
-  // Single-use 60-second encrypted handoff code (SEC-07): prevents raw session tokens in URLs
   db.insert(controlSchema.verifications)
     .values({
       id: newId(),
@@ -1612,7 +2916,6 @@ export function consumeImpersonationHandoffCode(handoffCode: string): string | n
 
   if (!row) return null;
 
-  // Atomically burn the handoff code on first consumption
   db.delete(controlSchema.verifications)
     .where(eq(controlSchema.verifications.id, row.id))
     .run();
@@ -1661,6 +2964,9 @@ export function staffUpdateClientWorkspace(params: {
     })
     .where(eq(controlSchema.tenantRegistry.tenantId, params.workspaceId))
     .run();
+
+  invalidateTenantRegistryCache(params.workspaceId);
+  invalidateSessionCache();
 }
 
 export function staffResetClientUserPassword(params: {
@@ -1684,15 +2990,17 @@ export function staffResetClientUserPassword(params: {
     .set({
       passwordHash: hashPassword(params.newPassword),
       emailVerified: true,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
       updatedAt: Date.now(),
     })
     .where(eq(controlSchema.users.id, usr.id))
     .run();
 
-  // Security (SEC-06): revoke all existing sessions when password is reset by staff
   db.delete(controlSchema.sessions)
     .where(eq(controlSchema.sessions.userId, usr.id))
     .run();
+  invalidateSessionCache();
 
   return { email: usr.email };
 }
@@ -1711,6 +3019,7 @@ export function staffVerifyClientUserEmail(params: { userId: string }): { email:
     .set({ emailVerified: true, updatedAt: Date.now() })
     .where(eq(controlSchema.users.id, usr.id))
     .run();
+  invalidateSessionCache();
   return { email: usr.email };
 }
 
@@ -1739,6 +3048,7 @@ export function listPlatformStaffMembers() {
     name: st.name,
     email: st.email,
     staffRole: st.staffRole,
+    totpEnabled: st.totpEnabled,
     active: st.active,
     createdAt: st.createdAt,
     activeSessionsCount: sessionCountByStaff.get(st.id) ?? 0,
@@ -1777,6 +3087,8 @@ export function staffCreatePlatformMember(params: {
       passwordHash: hashPassword(params.password),
       staffRole: params.staffRole,
       totpEnabled: false,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
       active: true,
       createdAt: Date.now(),
     })
@@ -1801,7 +3113,6 @@ export function staffUpdatePlatformMember(params: {
     throw new RslError("RSL-VAL-1001", "Staff member not found.");
   }
 
-  // Prevent locking out the last active super_admin
   if (
     target.staffRole === "super_admin" &&
     (params.active === false || (params.staffRole && params.staffRole !== "super_admin"))
@@ -1833,6 +3144,8 @@ export function staffUpdatePlatformMember(params: {
       throw new RslError("RSL-VAL-1001", "New password must be at least 8 characters long.");
     }
     updates.passwordHash = hashPassword(params.newPassword.trim());
+    updates.failedLoginAttempts = 0;
+    updates.lockedUntil = null;
     passwordChanged = true;
   }
 

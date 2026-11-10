@@ -283,7 +283,7 @@ export default async function GoogleReviewsPage({
                 {gbpMeta?.lastReviewsSyncedAt && (
                   <div className="text-[11px] text-zinc-500">
                     Last synced with Google:{" "}
-                    {new Date(gbpMeta.lastReviewsSyncedAt).toLocaleString("en-IN")}
+                    {new Date(gbpMeta.lastReviewsSyncedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
                   </div>
                 )}
               </div>
@@ -368,7 +368,7 @@ export default async function GoogleReviewsPage({
         >
           {!canReplyReviews ? (
             <p className="text-[13px] leading-relaxed text-zinc-500">
-              Read-only role — your current role can monitor star ratings and published replies across store locations.
+              Read-only role - your current role can monitor star ratings and published replies across store locations.
             </p>
           ) : (
           <form action={recordReviewAction} className="space-y-3.5 text-[13px]">
@@ -397,11 +397,11 @@ export default async function GoogleReviewsPage({
               <div>
                 <label htmlFor="review-star-rating" className="rsl-label">Star Rating</label>
                 <select id="review-star-rating" name="rating" defaultValue="5" className="rsl-input">
-                  <option value="5">5 ★ — Excellent</option>
-                  <option value="4">4 ★ — Good</option>
-                  <option value="3">3 ★ — Average</option>
-                  <option value="2">2 ★ — Below Average</option>
-                  <option value="1">1 ★ — Poor</option>
+                  <option value="5">5 ★ - Excellent</option>
+                  <option value="4">4 ★ - Good</option>
+                  <option value="3">3 ★ - Average</option>
+                  <option value="2">2 ★ - Below Average</option>
+                  <option value="1">1 ★ - Poor</option>
                 </select>
               </div>
             </div>
@@ -451,7 +451,7 @@ export default async function GoogleReviewsPage({
                 <GoogleGLogo className="h-5 w-5" />
               </span>
               <h3 className="mt-3 text-sm font-bold text-slate-900">
-                Connected to {connectedBusinessName} — 0 customer reviews synced yet
+                Connected to {connectedBusinessName} - 0 customer reviews synced yet
               </h3>
               <p className="mt-1 max-w-xl text-xs leading-relaxed text-zinc-600">
                 {isVerifiedGbpLocation
@@ -527,7 +527,7 @@ export default async function GoogleReviewsPage({
                         </span>
                       )}
                       <span className="text-xs text-zinc-500">
-                        • {new Date(rev.reviewedAt).toLocaleDateString("en-IN")}
+                        • {new Date(rev.reviewedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}
                       </span>
                     </div>
                     <StatusPill
@@ -553,14 +553,14 @@ export default async function GoogleReviewsPage({
                   ) : !canReplyReviews ? (
                     <div className="mt-3 text-xs text-zinc-500">
                       {isDraftReady
-                        ? "Suggested reply draft prepared — awaiting approval from a team member with review reply access."
+                        ? "Suggested reply draft prepared - awaiting approval from a team member with review reply access."
                         : "Awaiting owner or support executive reply."}
                     </div>
                   ) : (
                     <div className="mt-3 space-y-2.5">
                       {isDraftReady && (
                         <div className="text-xs font-semibold text-sky-800">
-                          Suggested Reply Draft Ready — review or edit below before publishing:
+                          Suggested Reply Draft Ready - review or edit below before publishing:
                         </div>
                       )}
                       <div className="flex flex-wrap items-start gap-2.5">

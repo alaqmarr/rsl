@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, LogOut, MailCheck, Settings, UserCircle2 } from "lucide-react";
 import { getWorkspaceSetupProgress } from "@rsl/analytics";
 import {
   getPlatformBillingSettings,
@@ -19,11 +19,16 @@ import { BrandLogo, PlatformFooter, UserAvatar } from "@rsl/ui";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
 import { WorkspaceAccessProvider } from "@/components/workspace-access-context";
 import { SidebarNavLinks, TopWorkspaceBar } from "@/components/workspace-chrome";
-import { logoutAction, switchWorkspaceAction } from "@/lib/actions";
-import { getOptionalWebSession } from "@/lib/session";
+import {
+  logoutAction,
+  resendVerificationEmailAction,
+  switchWorkspaceAction,
+  verifyEmailCodeAction,
+} from "@/lib/actions";
+import { getOptionalWebSession, getWebLocale } from "@/lib/session";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const session = await getOptionalWebSession();
+  const [session, locale] = await Promise.all([getOptionalWebSession(), getWebLocale()]);
   if (!session) {
     return <>{children}</>;
   }
@@ -60,9 +65,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const setupProgress = getWorkspaceSetupProgress(session.workspace.id);
   const billingSettings = getPlatformBillingSettings();
   const isSuspended = session.workspace.billingStatus === "suspended";
-  const setupPct = Math.round(
-    (setupProgress.doneCount / Math.max(1, setupProgress.totalCount)) * 100
-  );
 
   const footerLinks = [
     { label: "Plans & GST Invoices", href: "/billing" },
@@ -76,48 +78,45 @@ export default async function DashboardLayout({ children }: { children: React.Re
   ].filter((link) => canRoleAccessWebRoute(session.roleSlug, link.href, session.workspace.id));
 
   const workspaceSwitcherCard = (
-    <div className="mt-4 overflow-hidden rounded-2xl border border-slate-800/90 bg-gradient-to-br from-[#0B1220] via-slate-900 to-[#1E1B4B] p-3.5 text-white shadow-[0_14px_28px_-10px_rgba(11,18,32,0.45)]">
-      <div className="flex items-center justify-between">
-        <span className="font-mono text-[10px] font-bold tracking-wider text-indigo-200/80 uppercase">
+    <div className="rsl-hero-surface overflow-hidden rounded-xl p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-bold tracking-[0.06em] uppercase text-[var(--butter-cream)]/85">
           Active Business
         </span>
-        {isSuspended ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-semibold text-amber-200 ring-1 ring-amber-400/40">
-            Paused
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300 ring-1 ring-emerald-400/30">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            Active
-          </span>
-        )}
-      </div>
-      <div className="mt-1.5 flex items-center justify-between gap-2">
-        <div className="min-w-0 truncate text-sm font-bold tracking-tight text-white">
-          {session.workspace.name}
+        <div className="inline-flex items-center gap-1.5">
+          {canViewBilling ? (
+            <ActionLink
+              href="/billing"
+              spinnerSize="xs"
+              className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-[var(--butter-cream)] tabular-nums ring-1 ring-white/15 hover:bg-white/20 hover:text-white"
+            >
+              {unlockedToolsCount}/{workspaceServices.length} tools
+            </ActionLink>
+          ) : (
+            <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-[var(--butter-cream)] tabular-nums ring-1 ring-white/15">
+              {unlockedToolsCount}/{workspaceServices.length} tools
+            </span>
+          )}
+          {isSuspended ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-semibold text-white ring-1 ring-amber-400/40">
+              Paused
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-[var(--butter-cream)] ring-1 ring-white/20">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--sunset-orange)]" />
+              Active
+            </span>
+          )}
         </div>
-        {canViewBusinessSettings && (
-          <ActionLink
-            href="/settings/business"
-            spinnerSize="xs"
-            className="shrink-0 text-[11px] font-semibold text-indigo-300 hover:text-white hover:underline"
-          >
-            Settings
-          </ActionLink>
-        )}
       </div>
-      {session.workspace.industry && (
-        <div className="mt-0.5 truncate text-[11px] text-slate-400">
-          {session.workspace.industry}
-        </div>
-      )}
 
-      {session.workspaces.length > 1 && (
-        <form action={switchWorkspaceAction} className="mt-2.5 flex items-center gap-1.5">
+      {session.workspaces.length > 1 ? (
+        <form action={switchWorkspaceAction} className="mt-1.5 flex items-center gap-1.5">
           <select
             name="workspaceId"
             defaultValue={session.workspace.id}
-            className="w-full rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-xs font-medium text-white"
+            aria-label="Switch active business workspace"
+            className="min-w-0 flex-1 truncate rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-xs font-semibold text-white"
           >
             {session.workspaces.map((w) => (
               <option key={w.id} value={w.id} className="bg-slate-900 text-white">
@@ -127,116 +126,113 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </select>
           <SubmitButton
             spinnerSize="xs"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-500 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-400"
+            className="rsl-btn-spark shrink-0 !min-h-6 !px-2.5 !py-1 !text-[11px]"
           >
             Switch
           </SubmitButton>
         </form>
+      ) : (
+        <div className="mt-1 truncate text-xs font-semibold tracking-[-0.01em] text-white">
+          {session.workspace.name}
+        </div>
       )}
 
-      <div className="mt-3 space-y-2 border-t border-white/10 pt-2.5 text-xs">
-        <div className="flex items-center justify-between">
-          <span className="font-medium text-slate-300">Active Tools</span>
-          {canViewBilling ? (
-            <ActionLink
-              href="/billing"
-              spinnerSize="xs"
-              className="font-mono font-bold text-indigo-200 tabular-nums hover:text-white hover:underline"
-            >
-              {unlockedToolsCount} / {workspaceServices.length}
-            </ActionLink>
-          ) : (
-            <span className="font-mono font-bold text-indigo-200 tabular-nums">
-              {unlockedToolsCount} / {workspaceServices.length}
-            </span>
-          )}
+      {canViewBilling && isNegativeWallet && (
+        <div className="mt-1.5 text-[10.5px] font-medium text-[var(--sunset-orange)] tabular-nums">
+          {isOverdraftExhausted
+            ? `${formatInr(MIN_WALLET_BALANCE_PAISE)} overdraft limit reached`
+            : `Overdraft active • ${formatInr(walletAvailableSpendPaise, { showDecimals: true })} left`}
         </div>
+      )}
 
-        {canViewBilling && (
-          <div>
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-slate-300">Prepaid Wallet</span>
+      {setupProgress.doneCount < setupProgress.totalCount && (
+        <div className="mt-2 flex items-center justify-between gap-2 border-t border-white/10 pt-1.5 text-[11px]">
+          <span className="text-white/80 tabular-nums">
+            Setup <strong className="text-white">{setupProgress.doneCount}/{setupProgress.totalCount}</strong>
+          </span>
+          {(() => {
+            const nextMilestone = setupProgress.milestones.find((m) => !m.done);
+            return nextMilestone ? (
               <ActionLink
-                href="/billing?tab=wallet"
+                href={nextMilestone.href}
                 spinnerSize="xs"
-                className={`font-mono font-bold tabular-nums hover:underline ${
-                  isOverdraftExhausted
-                    ? "text-rose-300 hover:text-rose-200"
-                    : isNegativeWallet
-                      ? "text-amber-300 hover:text-amber-200"
-                      : "text-emerald-300 hover:text-emerald-200"
-                }`}
+                className="truncate font-semibold text-[var(--butter-cream)] hover:text-white hover:underline"
               >
-                {walletFormatted}
+                <span>Next: {nextMilestone.label} →</span>
               </ActionLink>
-            </div>
-            {isNegativeWallet && (
-              <div
-                className={`mt-0.5 text-[10px] font-medium tabular-nums ${
-                  isOverdraftExhausted ? "text-rose-300" : "text-amber-300"
-                }`}
-              >
-                {isOverdraftExhausted
-                  ? `${formatInr(MIN_WALLET_BALANCE_PAISE)} overdraft limit reached`
-                  : `Overdraft active • ${formatInr(walletAvailableSpendPaise, { showDecimals: true })} left of ${formatInr(WALLET_OVERDRAFT_LIMIT_PAISE)}`}
-              </div>
-            )}
-          </div>
-        )}
-
-        {setupProgress.doneCount < setupProgress.totalCount && (
-          <div>
-            <div className="flex items-center justify-between text-[10px] text-slate-400">
-              <span>Setup progress</span>
-              <span className="font-mono font-semibold text-white tabular-nums">
-                {setupProgress.doneCount}/{setupProgress.totalCount}
-              </span>
-            </div>
-            <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-indigo-400 to-emerald-400 transition-all"
-                style={{ width: `${setupPct}%` }}
-              />
-            </div>
-            {(() => {
-              const nextMilestone = setupProgress.milestones.find((m) => !m.done);
-              return nextMilestone ? (
-                <ActionLink
-                  href={nextMilestone.href}
-                  spinnerSize="xs"
-                  className="mt-1.5 inline-flex items-center gap-1 text-[10.5px] font-semibold text-emerald-300 hover:text-emerald-200 hover:underline"
-                >
-                  <span>Next: {nextMilestone.label} →</span>
-                </ActionLink>
-              ) : null;
-            })()}
-          </div>
-        )}
-      </div>
+            ) : null;
+          })()}
+        </div>
+      )}
     </div>
   );
 
   return (
     <WorkspaceAccessProvider roleSlug={session.roleSlug} permissions={grantedPermissions}>
-      <div className="flex min-h-screen w-full flex-col bg-[#F1F5F9] text-slate-900 lg:h-screen lg:overflow-hidden">
+      <div className="flex min-h-screen w-full flex-col bg-[var(--canvas)] text-[var(--ink)] lg:h-screen lg:overflow-hidden">
         {session.impersonatorStaffId && (
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-6 py-2.5 text-xs font-medium text-amber-900 lg:px-10">
             <span className="inline-flex items-center gap-2">
-              <span
-                style={{ width: 8, height: 8, flexShrink: 0 }}
-                className="h-2 w-2 rounded-full bg-amber-500"
-              />
+              <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
               <span>
-                Support Session Active — Assisted by RSL Support • Reason:{" "}
+                Support Session Active - Assisted by RSL Support • Reason:{" "}
                 <strong>{session.impersonationReason}</strong> (auto-expires within 30 minutes)
               </span>
             </span>
-            <a
-              href="/api/auth/impersonate?exit=1"
-              className="rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-900 transition hover:bg-amber-100"
-            >
-              End Support Session
-            </a>
+            <form method="post" action="/api/auth/impersonate">
+              <input type="hidden" name="intent" value="exit" />
+              <button
+                type="submit"
+                className="rsl-btn-secondary !min-h-7 !px-2.5 !py-1 !text-xs"
+              >
+                End Support Session
+              </button>
+            </form>
+          </div>
+        )}
+
+        {!session.user.emailVerified && !session.impersonatorStaffId && (
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-amber-200 bg-amber-50/90 px-6 py-2.5 text-xs text-amber-950 lg:px-10">
+            <span className="inline-flex items-center gap-2 font-medium">
+              <MailCheck className="h-4 w-4 shrink-0 text-amber-700" />
+              <span>
+                Verify your work email (<strong>{session.user.email}</strong>) before inviting team
+                members, issuing API keys, or launching outbound broadcasts.
+              </span>
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <form action={verifyEmailCodeAction} className="inline-flex items-center gap-1.5">
+                <input type="hidden" name="returnPath" value="/" />
+                <label htmlFor="banner-verify-code" className="sr-only">
+                  6-digit email verification code
+                </label>
+                <input
+                  id="banner-verify-code"
+                  name="code"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  required
+                  placeholder="6-digit code"
+                  className="rsl-input !min-h-7 !w-28 !px-2.5 !py-1 font-mono !text-xs"
+                />
+                <SubmitButton
+                  spinnerSize="xs"
+                  className="rsl-btn-primary !min-h-7 !px-3 !py-1 !text-xs"
+                >
+                  Verify
+                </SubmitButton>
+              </form>
+              <form action={resendVerificationEmailAction}>
+                <input type="hidden" name="returnPath" value="/" />
+                <SubmitButton
+                  spinnerSize="xs"
+                  className="rsl-btn-secondary !min-h-7 !px-2.5 !py-1 !text-xs"
+                >
+                  Resend Code
+                </SubmitButton>
+              </form>
+            </div>
           </div>
         )}
 
@@ -263,66 +259,85 @@ export default async function DashboardLayout({ children }: { children: React.Re
         )}
 
         <div className="flex min-h-0 w-full flex-1 flex-col lg:flex-row lg:overflow-hidden">
-          {/* Desktop Fixed Elevated Sidebar (Z-30 Plane) */}
-          <aside className="relative z-30 hidden border-r border-slate-200/95 bg-white px-4 py-5 shadow-[4px_0_24px_-12px_rgba(15,23,42,0.10)] lg:flex lg:h-full lg:w-[272px] lg:shrink-0 lg:flex-col lg:justify-between lg:overflow-hidden">
-            <div className="shrink-0">
-              <div className="flex items-center justify-between gap-2 px-1.5">
-                <Link href={homeHref} className="min-w-0">
-                  <BrandLogo variant="long" size="sm" subtitle="Growth & Tally Suite" />
-                </Link>
-                <span
-                  title={formatRoleLabel(session.roleSlug)}
-                  className="shrink-0 rounded-md border border-indigo-200/80 bg-indigo-50/80 px-2 py-0.5 text-[10px] font-bold tracking-wide text-indigo-800 uppercase"
-                >
-                  {formatRoleLabel(session.roleSlug)}
-                </span>
-              </div>
-
-              {workspaceSwitcherCard}
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-              <SidebarNavLinks />
-            </div>
-
-            <div className="shrink-0 border-t border-zinc-200/80 px-1.5 pt-3.5">
-              <Link
-                href="/settings/profile"
-                className="group flex items-center gap-2.5 rounded-xl p-1 -m-1 transition hover:bg-zinc-50"
-              >
-                <UserAvatar name={session.user.name} seed={session.user.email} size="sm" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="truncate text-xs font-semibold text-slate-900 group-hover:text-emerald-700">
-                      {session.user.name}
-                    </span>
-                    <span className="shrink-0 text-[10px] font-semibold text-zinc-500 group-hover:text-emerald-700">
-                      Profile
-                    </span>
-                  </div>
-                  <div className="truncate text-[11px] text-zinc-500">{session.user.email}</div>
-                </div>
+          {/* Desktop Fixed Frosted Sidebar */}
+          <aside className="rsl-frost-sidebar relative z-30 hidden px-3.5 py-4 lg:flex lg:h-full lg:w-[276px] lg:shrink-0 lg:flex-col lg:justify-between lg:overflow-hidden">
+            {/* Top Brand Header - Clean & Uncluttered */}
+            <div className="shrink-0 border-b border-[var(--border)] px-1.5 pb-3">
+              <Link href={homeHref} className="inline-flex min-w-0">
+                <BrandLogo variant="long" size="sm" subtitle="Growth & Tally Suite" />
               </Link>
-              <form action={logoutAction} className="mt-3">
-                <SubmitButton
-                  pendingText="Signing out..."
-                  spinnerSize="xs"
-                  className="rsl-btn-secondary w-full text-xs"
-                >
-                  Sign Out
-                </SubmitButton>
-              </form>
+            </div>
+
+            {/* Scrollable Deeply Categorized Navigation */}
+            <div className="rsl-sidebar-scroll min-h-0 flex-1 overflow-y-auto pr-1">
+              <SidebarNavLinks locale={locale} />
+            </div>
+
+            {/* Bottom Dock: Active Business Card + Smart Account, Profile & Settings Dock */}
+            <div className="shrink-0 space-y-2 border-t border-[var(--border)] pt-2.5">
+              {workspaceSwitcherCard}
+
+              <div className="rsl-account-dock rounded-xl border border-[var(--border)] bg-[var(--surface-inset)] p-2.5">
+                <div className="flex items-center gap-2.5">
+                  <UserAvatar name={session.user.name} seed={session.user.email} size="sm" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate text-xs font-semibold tracking-[-0.01em] text-[var(--ink)]">
+                        {session.user.name}
+                      </span>
+                      <span
+                        title={formatRoleLabel(session.roleSlug)}
+                        className="rsl-pill rsl-pill-forest shrink-0 !px-1.5 !py-0 !text-[10px]"
+                      >
+                        {formatRoleLabel(session.roleSlug)}
+                      </span>
+                    </div>
+                    <div className="truncate text-[11px] text-[var(--ink-muted)]">
+                      {session.user.email}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-2 flex items-center gap-1.5 border-t border-[var(--border)] pt-2">
+                  <ActionLink
+                    href="/settings/profile"
+                    spinnerSize="xs"
+                    className="rsl-account-dock-btn inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 py-1.5 text-xs font-semibold text-[var(--ink-secondary)] transition hover:bg-[var(--accent-soft)] hover:text-[var(--ink-strong)]"
+                  >
+                    <UserCircle2 className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">Your Profile</span>
+                  </ActionLink>
+
+                  {canViewBusinessSettings && (
+                    <ActionLink
+                      href="/settings/business"
+                      spinnerSize="xs"
+                      aria-label="Open Business Settings"
+                      title="Business Settings"
+                      className="rsl-icon-action-btn inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--ink-secondary)] transition hover:bg-[var(--accent-soft)] hover:text-[var(--ink-strong)]"
+                    >
+                      <Settings className="h-3.5 w-3.5" />
+                    </ActionLink>
+                  )}
+
+                  <form action={logoutAction} className="shrink-0">
+                    <SubmitButton
+                      pendingText="..."
+                      spinnerSize="xs"
+                      aria-label="Sign Out"
+                      title="Sign Out"
+                      className="rsl-icon-action-btn inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--ink-secondary)] transition hover:bg-[var(--accent-soft)] hover:text-[var(--ink-strong)]"
+                    >
+                      <LogOut className="h-3.5 w-3.5" />
+                    </SubmitButton>
+                  </form>
+                </div>
+              </div>
             </div>
           </aside>
 
-          {/* Independent Scrolling Main Workspace Column (Z-0 Canvas with Multi-Tone Ambient Wash) */}
-          <div
-            className="relative flex min-w-0 flex-1 flex-col lg:h-full lg:overflow-y-auto"
-            style={{
-              backgroundImage:
-                "radial-gradient(55% 420px at 15% 0%, rgba(67, 56, 202, 0.055) 0%, transparent 75%), radial-gradient(45% 380px at 88% 0%, rgba(5, 150, 105, 0.055) 0%, transparent 75%)",
-            }}
-          >
+          {/* Independent Scrolling Main Workspace Column */}
+          <div className="rsl-ambient-canvas rsl-custom-scrollbar relative flex min-w-0 flex-1 flex-col lg:h-full lg:overflow-y-auto">
             <TopWorkspaceBar
               workspaceName={session.workspace.name}
               walletFormatted={walletFormatted}
@@ -332,6 +347,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               setupDoneCount={setupProgress.doneCount}
               setupTotalCount={setupProgress.totalCount}
               sidebarSlot={workspaceSwitcherCard}
+              locale={locale}
             />
 
             <main className="w-full flex-1 px-5 py-6 lg:px-8 xl:px-10">

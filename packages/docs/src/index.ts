@@ -8,7 +8,9 @@ import { ERROR_CATALOG, getEnv, newEntityId } from "@rsl/core";
 import { controlSchema, platformLogsSchema } from "@rsl/database";
 import { ACTION_CATALOG, REGISTERED_API_ROUTES, type RegisteredApiRoute } from "@rsl/logging";
 import { PERMISSION_CATALOG, SYSTEM_ROLES } from "@rsl/rbac";
-import { controlDb, platformLogsDb } from "@rsl/tenancy";
+import { closeAllHandlesForShutdown, controlDb, platformLogsDb } from "@rsl/tenancy";
+
+export { closeAllHandlesForShutdown };
 
 export const DocFrontmatterSchema = z.object({
   title: z.string().min(3),
@@ -420,7 +422,7 @@ export function buildDocsSearchIndex(): { indexedItems: number; dbPath: string }
       insertStmt.run(
         "error",
         `/errors/${errItem.code}`,
-        `${errItem.code} — ${errItem.userMessage}`,
+        `${errItem.code} - ${errItem.userMessage}`,
         errItem.remediation,
         `${errItem.code} ${errItem.title} ${errItem.userMessage} ${errItem.remediation}`
       );
@@ -429,7 +431,7 @@ export function buildDocsSearchIndex(): { indexedItems: number; dbPath: string }
       insertStmt.run(
         "api",
         `/api-reference#${ep.id}`,
-        `${ep.method} ${ep.path} — ${ep.title}`,
+        `${ep.method} ${ep.path} - ${ep.title}`,
         ep.summary,
         `${ep.method} ${ep.path} ${ep.scopes.join(" ")} ${ep.summary}`
       );
@@ -515,7 +517,7 @@ export function searchDocs(query: string, surface: "public" | "help" | "admin" =
     }
   }
 
-  // Decoupled from control.db: log into dedicated platform_logs.db with public burst cap (P1-05)
+  // Decoupled from control.db: log into dedicated platform_logs.db with public burst cap
   try {
     const now = Date.now();
     if (now - searchLogWindowStartMs > 1_000) {

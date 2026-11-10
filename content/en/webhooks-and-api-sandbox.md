@@ -29,7 +29,7 @@ Every workspace automatically receives two isolated HTTPS subdomains routed to R
 ## 2. Step-by-Step: Testing Inbound Tally Webhooks Without Polluting Books
 
 1. Open **All API Tokens** (`/settings/tokens`) or **Tally Prime & Bills -> Connect Tally Prime** (`/tally?tab=connect`) and copy your workspace's **`tlwh_...` Tally Webhook Token**.
-2. Run this safe `?mode=ping` request from any terminal or server — it validates DNS, TLS/SSL, workspace slug matching, and token validity **without creating any voucher**:
+2. Run this safe `?mode=ping` request from any terminal or server - it validates DNS, TLS/SSL, workspace slug matching, and token validity **without creating any voucher**:
 
 ```bash
 curl -i -X POST "https://your-workspace.tally.rapidshiftlabs.in/api/webhooks/tally?mode=ping" \
@@ -38,7 +38,7 @@ curl -i -X POST "https://your-workspace.tally.rapidshiftlabs.in/api/webhooks/tal
   -d '{"mode":"ping"}'
 ```
 
-3. Confirm HTTP `200 OK` with `"ok": true` and check `/settings/tokens` — **Pings Received** increments immediately.
+3. Confirm HTTP `200 OK` with `"ok": true` and check `/settings/tokens` - **Pings Received** increments immediately.
 
 ---
 

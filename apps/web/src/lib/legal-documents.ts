@@ -106,7 +106,7 @@ export function getAllLegalDocuments(ctx = getLegalEntityContext()): LegalDocume
       effectiveDate: "1 November 2026",
       lastUpdated: "3 November 2026",
       plainSummary: [
-        "Every customer business gets its own isolated SQLite database file — your Tally Prime bills, contacts, and chats are never mixed with any other company.",
+        "Every customer business gets its own isolated SQLite database file - your Tally Prime bills, contacts, and chats are never mixed with any other company.",
         "We never sell customer data, never run third-party advertising trackers, and never train public AI models on your business records or Tally vouchers.",
         "OAuth tokens (Google Drive, Google Business Profile, Meta, WhatsApp Cloud API) are encrypted at rest with AES-256-GCM envelope encryption and can be revoked in 1 click.",
         "You can export a signed portable backup or request permanent cryptographic deletion of your workspace at any time.",
@@ -340,7 +340,7 @@ export function getAllLegalDocuments(ctx = getLegalEntityContext()): LegalDocume
             `Payments to ${ctx.legalName} can be completed directly inside Billing & Plans (${ctx.appUrl}/billing) through:`,
           ],
           bullets: [
-            "Razorpay Instant Checkout: UPI (Google Pay, PhonePe, Paytm, BHIM), Corporate/Consumer Credit & Debit Cards, and Netbanking — unlocked automatically upon cryptographic signature verification.",
+            "Razorpay Instant Checkout: UPI (Google Pay, PhonePe, Paytm, BHIM), Corporate/Consumer Credit & Debit Cards, and Netbanking - unlocked automatically upon cryptographic signature verification.",
             "Direct UPI QR & Mobile UPI Intent (`upi://pay`): Scan QR or tap Pay via UPI App and submit your 12-digit UPI UTR reference for rapid finance verification.",
             "NEFT / RTGS / IMPS Corporate Bank Transfer: Transfer to the official corporate bank account displayed in your workspace billing screen and record the UTR reference.",
           ],
@@ -417,7 +417,7 @@ export function getAllLegalDocuments(ctx = getLegalEntityContext()): LegalDocume
       effectiveDate: "1 November 2026",
       lastUpdated: "3 November 2026",
       plainSummary: [
-        "Every business gets a 7-day free trial of all 15 tools before paying anything — so you can test Tally Prime sync, WhatsApp billing, and Google Drive backups risk-free.",
+        "Every business gets a 7-day free trial of all 15 tools before paying anything - so you can test Tally Prime sync, WhatsApp billing, and Google Drive backups risk-free.",
         "Cancel any plan in 1 click anytime; there are no cancellation penalties and no surprise auto-debits.",
         "Duplicate payments, gateway capture errors, or verified provisioning failures are refunded 100% within 5–7 business days to your original payment method.",
         "Unused non-promotional Prepaid Wallet deposits can be refunded upon permanent account closure.",
@@ -494,7 +494,7 @@ export function getAllLegalDocuments(ctx = getLegalEntityContext()): LegalDocume
       effectiveDate: "1 November 2026",
       lastUpdated: "3 November 2026",
       plainSummary: [
-        "RapidShift Labs is a 100% digital cloud SaaS platform — no physical goods or couriers are involved.",
+        "RapidShift Labs is a 100% digital cloud SaaS platform - no physical goods or couriers are involved.",
         "New workspaces and 7-day free trials provision instantly (< 5 seconds) upon online signup.",
         "Razorpay & Prepaid Wallet plan activations unlock immediately; manual NEFT/UPI UTR transfers activate within 2–4 business hours.",
       ],
@@ -588,7 +588,7 @@ export function getAllLegalDocuments(ctx = getLegalEntityContext()): LegalDocume
       shortTitle: "Cookie Policy",
       title: "Cookie & Session Security Policy",
       subtitle:
-        "Exact list of strictly necessary security cookies used by RapidShift Labs — with zero third-party advertising trackers.",
+        "Exact list of strictly necessary security cookies used by RapidShift Labs - with zero third-party advertising trackers.",
       category: "Privacy, Security & Messaging",
       badge: "Zero Ad Trackers",
       effectiveDate: "1 November 2026",
@@ -632,7 +632,7 @@ export function getAllLegalDocuments(ctx = getLegalEntityContext()): LegalDocume
           id: "checkout-scripts",
           heading: "2. Payment Gateway Checkout Context",
           paragraphs: [
-            "When—and only when—you initiate an online card/UPI recharge via Razorpay Checkout on the Billing page, `checkout.razorpay.com` may set fraud-prevention session storage or cookies governed by Razorpay's Privacy Policy to complete RBI two-factor authentication.",
+            "When-and only when-you initiate an online card/UPI recharge via Razorpay Checkout on the Billing page, `checkout.razorpay.com` may set fraud-prevention session storage or cookies governed by Razorpay's Privacy Policy to complete RBI two-factor authentication.",
           ],
         },
       ],
@@ -649,7 +649,7 @@ export function getAllLegalDocuments(ctx = getLegalEntityContext()): LegalDocume
       effectiveDate: "1 November 2026",
       lastUpdated: "3 November 2026",
       plainSummary: [
-        "Disconnect Google Drive, Google Business Profile, WhatsApp, Instagram, or Facebook in 1 click from Connected Channels — deleting stored OAuth tokens immediately.",
+        "Disconnect Google Drive, Google Business Profile, WhatsApp, Instagram, or Facebook in 1 click from Connected Channels - deleting stored OAuth tokens immediately.",
         "Download complete JSON/CSV exports or encrypted `.rslbackup` archives anytime from Backups & Storage.",
         "Request permanent cryptographic erasure of your workspace database or end-customer messaging records with guaranteed 24-hour acknowledgment and completion within 15 days.",
       ],
@@ -675,7 +675,7 @@ export function getAllLegalDocuments(ctx = getLegalEntityContext()): LegalDocume
           ],
           bullets: [
             `Step 1 (Optional Export): Visit ${ctx.appUrl}/backups to download a portable export of your contacts, conversations, and Tally voucher summaries.`,
-            `Step 2 (Submit Deletion Request): Send an email from your registered Workspace Owner email to ${ctx.privacyEmail} (or ${ctx.billingEmail}) with the subject line "Data Deletion Request — [Your Business Name]".`,
+            `Step 2 (Submit Deletion Request): Send an email from your registered Workspace Owner email to ${ctx.privacyEmail} (or ${ctx.billingEmail}) with the subject line "Data Deletion Request - [Your Business Name]".`,
             "Step 3 (Verification & Erasure): Our Data Protection Officer verifies ownership within 24 hours, issues a unique Deletion Confirmation Ticket ID, and permanently purges your isolated tenant directory (`data.db`, `logs`, and staged backups) within 7–15 calendar days.",
           ],
           callout: {
@@ -731,7 +731,7 @@ export function getAllLegalDocuments(ctx = getLegalEntityContext()): LegalDocume
           id: "processing-instructions",
           heading: "1. Processing Scope & Documented Instructions",
           paragraphs: [
-            `This Data Processing Addendum ("DPA") supplements the Terms & Conditions between Customer (Data Fiduciary / Controller) and ${ctx.legalName} (Data Processor). RapidShift Labs processes Customer Data solely to execute workflows configured by Customer—such as Tally voucher ingestion, WhatsApp/Inbox delivery, analytics aggregation, and encrypted backup creation.`,
+            `This Data Processing Addendum ("DPA") supplements the Terms & Conditions between Customer (Data Fiduciary / Controller) and ${ctx.legalName} (Data Processor). RapidShift Labs processes Customer Data solely to execute workflows configured by Customer-such as Tally voucher ingestion, WhatsApp/Inbox delivery, analytics aggregation, and encrypted backup creation.`,
           ],
         },
         {
@@ -752,7 +752,7 @@ export function getAllLegalDocuments(ctx = getLegalEntityContext()): LegalDocume
           id: "breach-notification",
           heading: "3. Security Incident Notification (CERT-In & DPDP Alignment)",
           paragraphs: [
-            `In the event of a confirmed personal data breach affecting your workspace, RapidShift Labs will notify the Workspace Owner without undue delay—and in any event within 72 hours (and within statutory CERT-In reporting windows where applicable)—providing root-cause scope, affected records, and containment actions taken.`,
+            `In the event of a confirmed personal data breach affecting your workspace, RapidShift Labs will notify the Workspace Owner without undue delay-and in any event within 72 hours (and within statutory CERT-In reporting windows where applicable)-providing root-cause scope, affected records, and containment actions taken.`,
           ],
         },
       ],

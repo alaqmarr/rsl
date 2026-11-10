@@ -1,5 +1,5 @@
 ---
-title: Complete Workspace Launch Guide — Account Setup to First Automated Bill
+title: Complete Workspace Launch Guide - Account Setup to First Automated Bill
 summary: Every minute step to register your business, configure GSTIN and SSL subdomains, unlock plans, fund your Prepaid Wallet, connect WhatsApp and Tally Prime, and invite your team without skipping a single click.
 section: Getting Started
 audience: customer
@@ -7,7 +7,7 @@ order: 1
 lastReviewed: 2026-11-03
 ---
 
-## Before You Begin — What to Keep Ready
+## Before You Begin - What to Keep Ready
 
 Gather these five items before starting so you can complete your entire workspace setup in one sitting:
 
@@ -19,7 +19,7 @@ Gather these five items before starting so you can complete your entire workspac
 
 ---
 
-## Step 1 — Create Your Account & Verify Personal Security
+## Step 1 - Create Your Account & Verify Personal Security
 
 1. Open `https://app.rapidshiftlabs.in/register` in Chrome or Microsoft Edge.
 2. Fill in **Your Full Name**, **Work Email Address**, **Password** (minimum 8 characters), **Registered Business Name**, **Industry**, **Billing State**, and **15-Character GSTIN** (if registered), then click **Create Business Workspace**.
@@ -30,12 +30,12 @@ Gather these five items before starting so you can complete your entire workspac
 
 ---
 
-## Step 2 — Configure Business GST State, GSTIN & Dedicated SSL Subdomains
+## Step 2 - Configure Business GST State, GSTIN & Dedicated SSL Subdomains
 
 1. Click **Business Settings** (`/settings/business`) in the left sidebar.
 2. Under **Business Identity & GST Tax Configuration**:
    - Confirm **Registered Business Name** matches your legal trade name (this exact name prints under **Bill To** on your official GST Tax Invoices).
-   - Select your exact **Indian State / Union Territory Code** (for example `27 — Maharashtra`, `24 — Gujarat`, `29 — Karnataka`, `07 — Delhi`).
+   - Select your exact **Indian State / Union Territory Code** (for example `27 - Maharashtra`, `24 - Gujarat`, `29 - Karnataka`, `07 - Delhi`).
    - Enter your **15-Character GSTIN** in uppercase (for example `27AABCU9603R1ZM`) with no spaces.
    - Enter your **Registered Billing Address**, **Accounts Email**, and **Business Phone**, then click **Save Business Settings**.
    - **Why this step matters:** Same-state Maharashtra (`27`) invoices automatically split tax into **9% CGST + 9% SGST**, while all other states calculate **18% IGST** under SAC `998314`.
@@ -44,21 +44,21 @@ Gather these five items before starting so you can complete your entire workspac
 
 ---
 
-## Step 3 — Unlock Your Required Feature Plans or Value Bundle
+## Step 3 - Unlock Your Required Feature Plans or Value Bundle
 
 1. Click **Plans & Wallet** (`/billing`) in the left sidebar.
 2. Compare **Value Bundles** at the top (if you need multiple tools at a discounted rate) or scroll to **Individual Modular Plans** (such as **Tally Prime Sync & Reminders**, **WhatsApp Business Messaging**, **Unified Customer Inbox**, **Meta Ads & Social**, or **Google Reviews**).
 3. Click **Activate Plan** (or **Request Bundle Activation**) on the card you want:
    - Choose your **Billing Cycle** (`Monthly`, `Quarterly`, or `Yearly`) in the popup modal.
    - Review the **Taxable Subtotal**, **18% GST**, and **Total Payable (₹)** shown in the summary box.
-   - Scan the **Dynamic UPI QR Code** using Google Pay / PhonePe / Paytm — or transfer the exact **Total Payable** to the displayed **Bank Account Number & IFSC Code** via IMPS/NEFT.
+   - Scan the **Dynamic UPI QR Code** using Google Pay / PhonePe / Paytm - or transfer the exact **Total Payable** to the displayed **Bank Account Number & IFSC Code** via IMPS/NEFT.
    - Copy the **12-digit UTR / UPI Transaction ID** from your payment app receipt screen and paste it into **UTR / Payment Reference Number**.
    - Add an optional note (such as `Paid via HDFC Corporate UPI`) and click **Submit Activation Request**.
 4. Your request status immediately changes to **Pending Verification**. As soon as our finance desk verifies the UTR, your feature unlocks automatically and your paid **Rule 46 GST Tax Invoice** becomes downloadable in **Plans & Wallet -> GST Tax Invoices**.
 
 ---
 
-## Step 4 — Fund Your Prepaid Message Wallet (`-₹200.00` Overdraft Included)
+## Step 4 - Fund Your Prepaid Message Wallet (`-₹200.00` Overdraft Included)
 
 1. Stay in **Plans & Wallet** (`/billing?tab=wallet`) and locate the **Recharge Prepaid Wallet** card.
    - **Important:** Monthly plans unlock software screens; the **Prepaid Wallet** pays per-message WhatsApp delivery rates and ₹1.00 Smart Review drafts. Even at `₹0.00`, RapidShift Labs gives every workspace an automatic **`-₹200.00` overdraft buffer** so urgent Tally GST invoices never stop mid-day.
@@ -68,7 +68,7 @@ Gather these five items before starting so you can complete your entire workspac
 
 ---
 
-## Step 5 — Connect WhatsApp Cloud API & Load Starter Templates
+## Step 5 - Connect WhatsApp Cloud API & Load Starter Templates
 
 1. Click **Connected Channels** (`/connections`) in the left sidebar.
 2. Select **WhatsApp Cloud API**, follow all 6 on-screen Meta whitelisting steps (or read [Connecting WhatsApp, Instagram, Facebook & Google](/guides/connecting-channels-whatsapp-meta-google) for every Meta console click), paste your **15-Digit Phone Number ID**, **WABA ID**, and **Permanent System User Token**, keep **Run live API check immediately after saving** ticked, and click **Connect WhatsApp Cloud API**.
@@ -78,7 +78,7 @@ Gather these five items before starting so you can complete your entire workspac
 
 ---
 
-## Step 6 — Connect Tally Prime & Invite Your Team
+## Step 6 - Connect Tally Prime & Invite Your Team
 
 1. Click **Tally Prime & Bills** (`/tally?tab=connect`) in the left sidebar:
    - Click **Run Live Endpoint Check** to verify your `<your-slug>.tally.rapidshiftlabs.in` webhook handshake.

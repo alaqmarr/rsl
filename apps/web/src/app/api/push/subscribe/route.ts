@@ -65,7 +65,7 @@ export async function PATCH() {
   const res = await sendWorkspaceWebPushNotification({
     workspaceId: session.workspace.id,
     payload: {
-      title: `${session.workspace.name} — Live Push Active`,
+      title: `${session.workspace.name} - Live Push Active`,
       body: "Instant alerts for WhatsApp chats, Tally payments, Google reviews & vendor bills are enabled!",
       url: "/settings/profile",
       tag: "rsl-test-push",

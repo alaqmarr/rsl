@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { CheckCircle2 } from "lucide-react";
 import { INDIA_GST_STATES } from "@rsl/billing";
 import { getPlatformCloudflareTurnstileConfig } from "@rsl/tenancy";
-import { BrandLogo } from "@rsl/ui";
+import { BrandLogo, ThemeToggleButton } from "@rsl/ui";
 import { WebRegisterForm } from "@/components/auth-forms";
 import { FlashBanner } from "@/components/flash-banner";
 import { ActionLink } from "@/components/ios-feedback";
@@ -26,33 +26,26 @@ export default async function RegisterPage({
   const sp = await searchParams;
 
   return (
-    <div
-      className="flex min-h-screen items-center justify-center bg-[#F1F5F9] px-4 py-10"
-      style={{
-        backgroundImage:
-          "radial-gradient(50% 420px at 20% 0%, rgba(67, 56, 202, 0.08) 0%, transparent 70%), radial-gradient(50% 420px at 80% 0%, rgba(4, 120, 87, 0.08) 0%, transparent 70%)",
-      }}
-    >
+    <div className="rsl-ambient-canvas flex min-h-screen items-center justify-center px-4 py-10">
       <div className="w-full max-w-lg">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <Link href="/">
             <BrandLogo variant="long" size="sm" subtitle="Accounting, Messaging & Growth Suite" />
           </Link>
-          <ActionLink
-            href="/login"
-            spinnerSize="xs"
-            className="text-xs font-semibold text-indigo-700 hover:underline"
-          >
-            Already have a workspace? Sign in
-          </ActionLink>
+          <div className="flex items-center gap-2.5">
+            <ActionLink
+              href="/login"
+              spinnerSize="xs"
+              className="text-xs font-semibold text-emerald-800 hover:underline"
+            >
+              Already have a workspace? Sign in
+            </ActionLink>
+            <ThemeToggleButton compact />
+          </div>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-slate-200/95 bg-white shadow-[0_22px_50px_-16px_rgba(15,23,42,0.14)]">
-          <div className="grid h-1.5 w-full grid-cols-12">
-            <div className="col-span-6 bg-[#0B1220]" />
-            <div className="col-span-3 bg-[#4338CA]" />
-            <div className="col-span-3 bg-[#047857]" />
-          </div>
+        <div className="rsl-frost-card overflow-hidden rounded-2xl">
+          <div className="rsl-top-seam h-1.5 w-full" />
 
           <div className="p-7 sm:p-8">
             <div className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-900">

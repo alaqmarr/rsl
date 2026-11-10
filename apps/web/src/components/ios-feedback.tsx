@@ -123,8 +123,7 @@ export function ActionLink({
         {children}
         {isPending && (
           <span
-            style={{ width: 20, height: 20 }}
-            className="pointer-events-none absolute top-3 right-3 inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/95 text-emerald-600 shadow-xs ring-1 ring-zinc-200"
+            className="pointer-events-none absolute top-3 right-3 inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/95 text-emerald-700 shadow-xs ring-1 ring-zinc-200"
           >
             <IosSpinner size="xs" />
           </span>

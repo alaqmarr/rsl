@@ -156,6 +156,7 @@ REDIS_URL=redis://127.0.0.1:4579
 # Auto-Generated 32-Byte Cryptographic Keys
 BETTER_AUTH_SECRET=$(openssl rand -base64 32)
 ADMIN_AUTH_SECRET=$(openssl rand -base64 32)
+INTERNAL_SERVICE_SECRET=$(openssl rand -base64 32)
 KMS_MASTER_KEY=$(openssl rand -base64 32)
 KMS_KEY_VERSION=1
 BACKUP_SIGNING_KEY=$(openssl rand -base64 32)

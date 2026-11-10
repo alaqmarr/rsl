@@ -74,7 +74,7 @@ export default async function InventoryStockPage({
     return (
       <FeaturePlanGate
         pageTitle="Live Tally Inventory, Godowns & Reorder Intelligence"
-        pageSubtitle="Sync Tally Prime Stock Items, Godowns, Batch Expiry balances, and Party Credit Limits automatically — every bill updates your live closing stock."
+        pageSubtitle="Sync Tally Prime Stock Items, Godowns, Batch Expiry balances, and Party Credit Limits automatically - every bill updates your live closing stock."
         plans={plans}
         returnPath="/inventory"
         notice={sp.notice}
@@ -203,7 +203,7 @@ export default async function InventoryStockPage({
           />
         }
         title="Inventory, Godowns & Reorder Register"
-        subtitle="Real-time Tally Prime stock valuation, warehouse & batch expiry tracking, 30/60/90-day dead-stock alerts, and 1-click WhatsApp item quotes — automatically updated on every bill."
+        subtitle="Real-time Tally Prime stock valuation, warehouse & batch expiry tracking, 30/60/90-day dead-stock alerts, and 1-click WhatsApp item quotes - automatically updated on every bill."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <ActionLink href="/tally" spinnerSize="xs" className="rsl-btn-secondary">
@@ -440,7 +440,7 @@ export default async function InventoryStockPage({
                 description={
                   localPortProbe?.reachable && canManageTally
                     ? `Tally Prime is reachable on Port ${localPortProbe.port}. Click 'Sync Tally Port ${localPortProbe.port}' above or upload a Tally StockItem XML / CSV export to populate your live inventory register.`
-                    : "Pair Windows Connector v2.4, upload a Tally Prime Masters XML / CSV file, or add your first SKU manually — every Sales or Purchase bill automatically updates stock."
+                    : "Pair Windows Connector v2.4, upload a Tally Prime Masters XML / CSV file, or add your first SKU manually - every Sales or Purchase bill automatically updates stock."
                 }
                 actionLabel={canManageTally ? "Add / Import Stock Items" : "Go to Tally Bills"}
                 actionHref={canManageTally ? "/inventory?tab=manage" : "/tally"}
@@ -517,13 +517,13 @@ export default async function InventoryStockPage({
                           )}
                         </td>
                         <td className="px-4 py-3.5 text-right tabular-nums text-zinc-600">
-                          {costRate > 0 ? formatInr(costRate, { showDecimals: true }) : "—"}
+                          {costRate > 0 ? formatInr(costRate, { showDecimals: true }) : "-"}
                         </td>
                         <td className="px-4 py-3.5 text-right tabular-nums">
                           <div className="font-semibold text-slate-900">
                             {item.sellingPricePaise > 0
                               ? formatInr(item.sellingPricePaise, { showDecimals: true })
-                              : "—"}
+                              : "-"}
                           </div>
                           {item.estimatedMarginBps > 0 && (
                             <div className="text-[10px] font-medium text-emerald-700">
@@ -775,7 +775,7 @@ export default async function InventoryStockPage({
             >
               {inv.inactiveStockItems.length === 0 ? (
                 <div className="p-8 text-center text-xs text-zinc-500">
-                  Zero 30+ day dead stock — all stocked SKUs are moving briskly.
+                  Zero 30+ day dead stock - all stocked SKUs are moving briskly.
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -864,7 +864,7 @@ export default async function InventoryStockPage({
                           )}
                         </td>
                         <td className="px-4 py-3 text-zinc-600">
-                          <div>{p.phoneE164 || "—"}</div>
+                          <div>{p.phoneE164 || "-"}</div>
                           {p.email && <div className="text-[11px] text-zinc-500">{p.email}</div>}
                         </td>
                         <td className="px-4 py-3 text-right tabular-nums text-zinc-700">
@@ -1036,7 +1036,7 @@ export default async function InventoryStockPage({
           <SectionCard
             title={
               editingItem
-                ? `Edit Stock Item — ${editingItem.name}`
+                ? `Edit Stock Item - ${editingItem.name}`
                 : "Add or Update a Stock Item (SKU)"
             }
             subtitle="Sets opening balance, godown/batch location, HSN/GST rate, selling price, and reorder level"
@@ -1282,43 +1282,20 @@ export default async function InventoryStockPage({
                   />
                 </div>
 
-                <SubmitButton pendingText="Importing Inventory..." className="rsl-btn-primary">
-                  Import Stock Items &amp; Masters
-                </SubmitButton>
-              </form>
-            </SectionCard>
-
-            <SectionCard
-              title="Automatic Live Sync with Tally Prime"
-              subtitle="Zero manual entry once your Tally PC is paired"
-            >
-              <div className="space-y-3 text-xs leading-relaxed text-zinc-600">
-                <div className="flex items-start gap-2.5 rounded-xl border border-zinc-200/80 bg-zinc-50/70 p-3.5">
-                  <RefreshCw className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                  <div>
-                    <div className="font-semibold text-slate-900">
-                      Windows Connector v2.4 Syncs Both Masters &amp; Vouchers Every 30s
-                    </div>
-                    <p className="mt-1">
-                      When <code className="font-mono text-slate-900">rsl-tally-connector.mjs</code>{" "}
-                      runs on your Tally PC, it automatically pulls{" "}
-                      <strong>Stock Items, Godowns, Batch Expiry dates, and Party Credit Limits</strong>{" "}
-                      alongside every Sales, Purchase, Receipt, and Credit Note voucher — recalculating
-                      closing stock without ever overwriting previous bills.
-                    </p>
-                  </div>
-                </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  <SubmitButton pendingText="Importing Inventory..." className="rsl-btn-primary">
+                    Import Stock Items &amp; Masters
+                  </SubmitButton>
                   <ActionLink
                     href="/tally?tab=connect"
                     spinnerSize="xs"
                     className="rsl-btn-secondary text-xs"
                   >
                     <Layers className="mr-1.5 inline h-3.5 w-3.5" />
-                    Configure Tally Connector &amp; .tdl v2.6
+                    Configure Live Tally Connector
                   </ActionLink>
                 </div>
-              </div>
+              </form>
             </SectionCard>
           </div>
         </div>

@@ -10,7 +10,7 @@ import {
   resolveWorkspaceChannelCredentials,
   resolveWorkspaceMetaAdsCredentials,
 } from "@rsl/connections";
-import { formatInr, hashPiiIdentifier, newId, RslError, rupeesToPaise } from "@rsl/core";
+import { fetchWithRetry, formatInr, hashPiiIdentifier, newId, RslError, rupeesToPaise } from "@rsl/core";
 import { tenantDataSchema } from "@rsl/database";
 import {
   mutateGoogleAdCampaignStatusInternal,
@@ -201,7 +201,7 @@ export const createAdCampaign = defineAction({
             ageMax: input.ageMax ?? 55,
             syncStatus: "local_draft",
             lastSyncMessage:
-              creds.error || "Saved locally — connect Meta Ads on Connected Channels to push live.",
+              creds.error || "Saved locally - connect Meta Ads on Connected Channels to push live.",
             startDate: startTs,
             createdAt: now,
             updatedAt: now,
@@ -299,7 +299,7 @@ export const createAdCampaign = defineAction({
         };
 
         const adsetPayload: Record<string, unknown> = {
-          name: `${input.name.trim()} — Ad Set`,
+          name: `${input.name.trim()} - Ad Set`,
           campaign_id: externalCampaignId,
           daily_budget: String(Math.max(10_000, dailyBudgetPaise)), // Min ₹100/day in Meta INR minor units
           billing_event: "IMPRESSIONS",
@@ -351,7 +351,7 @@ export const createAdCampaign = defineAction({
           const linkData: Record<string, unknown> = {
             message:
               input.primaryText?.trim() ||
-              `${input.name.trim()} — Tap below to connect with us directly.`,
+              `${input.name.trim()} - Tap below to connect with us directly.`,
             link: resolvedFinalUrl,
             name: input.headline?.trim() || input.name.trim(),
             call_to_action: {
@@ -377,7 +377,7 @@ export const createAdCampaign = defineAction({
               method: "POST",
               headers,
               body: JSON.stringify({
-                name: `${input.name.trim()} — Creative`,
+                name: `${input.name.trim()} - Creative`,
                 object_story_spec: objectStorySpec,
               }),
               signal: AbortSignal.timeout(12_000),
@@ -396,7 +396,7 @@ export const createAdCampaign = defineAction({
                 method: "POST",
                 headers,
                 body: JSON.stringify({
-                  name: `${input.name.trim()} — Live Ad`,
+                  name: `${input.name.trim()} - Live Ad`,
                   adset_id: externalAdsetId,
                   creative: { creative_id: externalCreativeId },
                   status: "ACTIVE",
@@ -534,7 +534,7 @@ export const toggleCampaignStatus = defineAction({
             `Meta Marketing API rejected status update (HTTP ${resp.status}): ${errBody.error?.message || "Unknown error"}`
           );
         }
-        syncMessage = `Meta Ads status set to ${metaStatus} (${new Date().toLocaleTimeString("en-IN")})`;
+        syncMessage = `Meta Ads status set to ${metaStatus} (${new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" })})`;
       }
     }
 
@@ -1590,7 +1590,7 @@ export async function ingestWebsitePixelEventForWorkspace(params: {
       }
 
       try {
-        const resp = await fetch(
+        const resp = await fetchWithRetry(
           `https://graph.facebook.com/${pixelCreds.graphVersion}/${pixelId}/events`,
           {
             method: "POST",
@@ -1599,7 +1599,8 @@ export async function ingestWebsitePixelEventForWorkspace(params: {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({ data: [capiEvent] }),
-            signal: AbortSignal.timeout(8000),
+            timeoutMs: 8000,
+            maxRetries: 2,
           }
         );
         const body = (await resp.json().catch(() => ({}))) as {

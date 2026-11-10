@@ -659,6 +659,12 @@ export const settings = sqliteTable("settings", {
   updatedAt: integer("updated_at").notNull(),
 });
 
+export const analyticsRollups = sqliteTable("analytics_rollups", {
+  key: text("key").primaryKey(),
+  payloadJson: text("payload_json").notNull(),
+  computedAt: integer("computed_at").notNull(),
+});
+
 export const schemaMeta = sqliteTable("schema_meta", {
   version: integer("version").primaryKey(),
   appliedAt: integer("applied_at").notNull(),

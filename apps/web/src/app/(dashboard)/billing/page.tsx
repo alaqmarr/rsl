@@ -225,7 +225,7 @@ export default async function BillingAndWalletPage({
           sublabel={
             walletBalancePaise < 0
               ? isOverdraftExhausted
-                ? "Overdraft limit (-₹200.00) reached — recharge to resume metered sends"
+                ? "Overdraft limit (-₹200.00) reached - recharge to resume metered sends"
                 : `Using ₹200 overdraft • ${formatInr(walletAvailableSpendPaise, { showDecimals: true })} left down to -₹200.00`
               : pendingRechargeCount > 0
                 ? `${pendingRechargeCount} top-up(s) awaiting verification`
@@ -240,7 +240,7 @@ export default async function BillingAndWalletPage({
           sublabel={
             adVault.netAllocatedToCampaignsPaise > 0
               ? `${formatInr(adVault.netAllocatedToCampaignsPaise, { showDecimals: true })} reserved in active campaigns`
-              : "Optional — Direct Client Ad Accounts need ₹0 deposit"
+              : "Optional - Direct Client Ad Accounts need ₹0 deposit"
           }
           accent="sky"
           icon={<Megaphone className="h-4 w-4" />}
@@ -425,7 +425,7 @@ export default async function BillingAndWalletPage({
           {availableBundles.length > 0 && (
             <SectionCard
               title="Value Bundles & Complete All-in-One Software Package"
-              subtitle="Save on dependent tools that work together — or unlock the entire 15-tool RSL Marketing platform on Monthly, Quarterly, or Yearly billing."
+              subtitle="Save on dependent tools that work together - or unlock the entire 15-tool RSL Marketing platform on Monthly, Quarterly, or Yearly billing."
               action={<StatusPill label="Monthly • Quarterly • Yearly Cycles" tone="emerald" />}
             >
               <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
@@ -599,8 +599,8 @@ export default async function BillingAndWalletPage({
             }
             subtitle={
               allToolsUnlocked
-                ? "Every RSL Marketing tool is unlocked on your business account — jump directly into any workspace tool below."
-                : "Pick individual tools a la carte on Monthly, Quarterly, or Yearly billing — click Request Activation to open your UPI QR code."
+                ? "Every RSL Marketing tool is unlocked on your business account - jump directly into any workspace tool below."
+                : "Pick individual tools a la carte on Monthly, Quarterly, or Yearly billing - click Request Activation to open your UPI QR code."
             }
             action={
               !allToolsUnlocked && filterOptions.length > 2 ? (
@@ -836,7 +836,7 @@ export default async function BillingAndWalletPage({
                                     )}
                                     {svc.pendingRequest.customerPaymentRef
                                       ? ` • Ref: ${svc.pendingRequest.customerPaymentRef}`
-                                      : " — awaiting payment verification"}
+                                      : " - awaiting payment verification"}
                                   </span>
                                 </div>
                               )}
@@ -919,7 +919,7 @@ export default async function BillingAndWalletPage({
 
             {!canManageBilling ? (
               <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-4 text-xs text-zinc-600">
-                Read-only billing view — your current role ({formatRoleLabel(session.roleSlug)}) can inspect wallet passbook entries and download statements. Ask the Business Owner or Accounts &amp; Billing manager to submit a wallet recharge.
+                Read-only billing view - your current role ({formatRoleLabel(session.roleSlug)}) can inspect wallet passbook entries and download statements. Ask the Business Owner or Accounts &amp; Billing manager to submit a wallet recharge.
               </div>
             ) : (
             <>
@@ -1051,7 +1051,7 @@ export default async function BillingAndWalletPage({
 
           <SectionCard
             title="Wallet Passbook"
-            subtitle="Permanent record of wallet credits and message charges — past entries cannot be edited or deleted"
+            subtitle="Permanent record of wallet credits and message charges - past entries cannot be edited or deleted"
             action={
               ledger.length > 0 ? (
                 <a href="/api/pdf/wallet-statement" className="rsl-btn-secondary text-xs">
@@ -1079,7 +1079,7 @@ export default async function BillingAndWalletPage({
                         <td className="px-5 py-3 sm:px-6">
                           <div className="font-medium text-slate-900">{entry.description}</div>
                           <div className="text-xs text-zinc-500 tabular-nums">
-                            {new Date(entry.createdAt).toLocaleString("en-IN")}
+                            {new Date(entry.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
                           </div>
                         </td>
                         <td className="px-4 py-3 capitalize text-zinc-600">
@@ -1102,10 +1102,10 @@ export default async function BillingAndWalletPage({
           </SectionCard>
         </div>
 
-        {/* Managed Ad Spend Vault (0-Overdraft) — Meta & Google Ads */}
+        {/* Managed Ad Spend Vault (0-Overdraft) - Meta & Google Ads */}
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.15fr_1.35fr]">
           <SectionCard
-            title="Managed Ad Spend Vault (0-Overdraft — Meta & Google Ads)"
+            title="Managed Ad Spend Vault (0-Overdraft - Meta & Google Ads)"
             subtitle="Optional prepaid ad budget vault for businesses running Meta or Google Ads through RapidShift's Managed Ad Account / MCC. If you connect your own Meta Ad Account or Google Ads Customer ID (Direct Client Mode), ₹0 vault deposit is required."
           >
             <div className="mb-4 rounded-xl border border-sky-200/90 bg-sky-50/70 p-3.5 text-xs text-sky-950">
@@ -1127,7 +1127,7 @@ export default async function BillingAndWalletPage({
 
             {!canManageBilling ? (
               <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-4 text-xs text-zinc-600">
-                Read-only billing view — ask the Business Owner or Accounts &amp; Billing manager to deposit Managed Ad Spend funds.
+                Read-only billing view - ask the Business Owner or Accounts &amp; Billing manager to deposit Managed Ad Spend funds.
               </div>
             ) : (
               <>
@@ -1179,7 +1179,7 @@ export default async function BillingAndWalletPage({
 
                   <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-3.5">
                     <span className="text-xs text-zinc-500">
-                      Isolated from your WhatsApp wallet — 100% earmarked for Managed Meta &amp; Google Ad budgets.
+                      Isolated from your WhatsApp wallet - 100% earmarked for Managed Meta &amp; Google Ad budgets.
                     </span>
                     <SubmitButton pendingText="Submitting..." className="rsl-btn-primary">
                       Submit Ad Vault UTR
@@ -1243,7 +1243,7 @@ export default async function BillingAndWalletPage({
                         <td className="px-5 py-3 sm:px-6">
                           <div className="font-medium text-slate-900">{entry.description}</div>
                           <div className="text-xs text-zinc-500 tabular-nums">
-                            {new Date(entry.createdAt).toLocaleString("en-IN")}
+                            {new Date(entry.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
                             {entry.provider && entry.provider !== "vault"
                               ? ` • ${entry.provider.replace(/_/g, " ").toUpperCase()}`
                               : ""}
@@ -1317,7 +1317,7 @@ export default async function BillingAndWalletPage({
                               {inv.invoiceNumber}
                             </ActionLink>
                             <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500 tabular-nums">
-                              <span>{new Date(inv.issuedAt).toLocaleDateString("en-IN")}</span>
+                              <span>{new Date(inv.issuedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}</span>
                               <StatusPill
                                 label={
                                   inv.docType === "advance_receipt"

@@ -1,19 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { authenticatePublicApiKey } from "@rsl/api-keys";
+import { authenticatePublicApiKey, withApiIdempotency } from "@rsl/api-keys";
 import { RslError } from "@rsl/core";
 import { ingestWebsitePixelEventForWorkspace } from "@rsl/meta";
 
+const CONTACTS_WRITE_PIXEL_SUNSET_MS = Date.UTC(2027, 0, 1, 0, 0, 0);
+const CONTACTS_WRITE_PIXEL_SUNSET_HTTP = "Thu, 31 Dec 2026 23:59:59 GMT";
+
 const pixelPayloadSchema = z.object({
-  eventId: z.string().min(4).max(120),
+  eventId: z.string().trim().min(4).max(120),
   eventName: z.enum(["Purchase", "Lead", "AddToCart", "ViewContent"]),
-  valueRupees: z.coerce.number().min(0).default(0),
-  currency: z.string().max(6).optional(),
-  customerEmail: z.string().max(160).optional(),
-  customerPhone: z.string().max(32).optional(),
-  customerIdentifier: z.string().max(160).optional(),
-  sourceUrl: z.string().max(500).optional(),
-  orderRef: z.string().max(120).optional(),
+  valueRupees: z
+    .number()
+    .finite()
+    .min(0)
+    .max(100_000_000)
+    .default(0),
+  currency: z.string().trim().max(6).optional(),
+  customerEmail: z.string().trim().max(160).optional(),
+  customerPhone: z.string().trim().max(32).optional(),
+  customerIdentifier: z.string().trim().max(160).optional(),
+  sourceUrl: z.string().trim().max(500).optional(),
+  orderRef: z.string().trim().max(120).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -22,6 +30,7 @@ export async function POST(req: NextRequest) {
     const clientIp = req.headers.get("x-forwarded-for");
 
     let auth;
+    let usedDeprecatedContactsScope = false;
     try {
       auth = await authenticatePublicApiKey({
         authorizationHeader: authHeader,
@@ -29,19 +38,30 @@ export async function POST(req: NextRequest) {
         clientIp,
       });
     } catch (err) {
-      // Also accept keys provisioned with contacts:write prior to pixel:write scope introduction
-      if (err instanceof RslError && err.code === "RSL-API-1002") {
+      if (
+        err instanceof RslError &&
+        err.code === "RSL-API-1002" &&
+        Date.now() < CONTACTS_WRITE_PIXEL_SUNSET_MS
+      ) {
         auth = await authenticatePublicApiKey({
           authorizationHeader: authHeader,
           requiredScope: "contacts:write",
           clientIp,
         });
+        usedDeprecatedContactsScope = true;
       } else {
         throw err;
       }
     }
 
-    const rawBody = await req.json();
+    const rawText = await req.text();
+    let rawBody: unknown;
+    try {
+      rawBody = JSON.parse(rawText);
+    } catch {
+      throw new RslError("RSL-VAL-1001", "Request body must be valid JSON.");
+    }
+
     const parsed = pixelPayloadSchema.safeParse(rawBody);
     if (!parsed.success) {
       throw new RslError(
@@ -50,32 +70,55 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await ingestWebsitePixelEventForWorkspace({
+    const idemResult = await withApiIdempotency({
       workspaceId: auth.workspaceId,
-      eventId: parsed.data.eventId,
-      eventName: parsed.data.eventName,
-      valueRupees: parsed.data.valueRupees,
-      currency: parsed.data.currency,
-      customerEmail: parsed.data.customerEmail,
-      customerPhone: parsed.data.customerPhone,
-      customerIdentifier: parsed.data.customerIdentifier,
-      sourceUrl: parsed.data.sourceUrl,
-      orderRef: parsed.data.orderRef,
-      clientIp,
-      userAgent: req.headers.get("user-agent"),
+      idempotencyKey: req.headers.get("idempotency-key"),
+      method: "POST",
+      path: "/api/v1/pixel/events",
+      rawRequestBody: rawText,
+      execute: async () => {
+        const result = await ingestWebsitePixelEventForWorkspace({
+          workspaceId: auth.workspaceId,
+          eventId: parsed.data.eventId,
+          eventName: parsed.data.eventName,
+          valueRupees: parsed.data.valueRupees,
+          currency: parsed.data.currency,
+          customerEmail: parsed.data.customerEmail,
+          customerPhone: parsed.data.customerPhone,
+          customerIdentifier: parsed.data.customerIdentifier,
+          sourceUrl: parsed.data.sourceUrl,
+          orderRef: parsed.data.orderRef,
+          clientIp,
+          userAgent: req.headers.get("user-agent"),
+        });
+
+        return {
+          statusCode: result.deduplicated ? 200 : 201,
+          body: {
+            ok: true,
+            apiVersion: "v1",
+            workspaceId: auth.workspaceId,
+            ...result,
+          },
+        };
+      },
     });
 
-    return NextResponse.json(
-      {
-        ok: true,
-        workspaceId: auth.workspaceId,
-        ...result,
-      },
-      {
-        status: result.deduplicated ? 200 : 201,
-        headers: { "X-RateLimit-Remaining": String(auth.rateLimitRemaining) },
-      }
-    );
+    const responseHeaders: Record<string, string> = {
+      "X-RateLimit-Remaining": String(auth.rateLimitRemaining),
+      ...(idemResult.replayed ? { "X-Idempotent-Replayed": "true" } : {}),
+    };
+    if (usedDeprecatedContactsScope) {
+      responseHeaders.Deprecation = "true";
+      responseHeaders.Sunset = CONTACTS_WRITE_PIXEL_SUNSET_HTTP;
+      responseHeaders.Warning =
+        '299 - "API key scope contacts:write for /api/v1/pixel/events is deprecated; provision pixel:write before 2026-12-31."';
+    }
+
+    return NextResponse.json(idemResult.body, {
+      status: idemResult.statusCode,
+      headers: responseHeaders,
+    });
   } catch (err) {
     const mapped = err instanceof RslError ? err : new RslError("RSL-SYS-1001");
     return NextResponse.json(

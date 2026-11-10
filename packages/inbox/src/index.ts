@@ -34,7 +34,7 @@ async function dispatchOutboundConversationMessageLive(params: {
         mode: "disconnected",
         externalMessageId: null,
         deliveryStatus: "sent",
-        error: "Connect your WhatsApp Business Account under Connected Channels first — ₹0.00 deducted.",
+        error: "Connect your WhatsApp Business Account under Connected Channels first.",
       };
     }
 
@@ -60,8 +60,8 @@ async function dispatchOutboundConversationMessageLive(params: {
           externalMessageId: null,
           deliveryStatus: "sent",
           error: tmplRow
-            ? `Template '${tmplRow.name}' is currently '${tmplRow.approvalStatus}'. Only Meta-approved ('APPROVED') templates can be sent — ₹0.00 deducted.`
-            : `Template '${params.templateName}' was not found or is not approved — ₹0.00 deducted.`,
+            ? `Template '${tmplRow.name}' is currently '${tmplRow.approvalStatus}'. Only Meta-approved ('APPROVED') templates can be sent.`
+            : `Template '${params.templateName}' was not found or is not approved.`,
         };
       }
 
@@ -71,7 +71,7 @@ async function dispatchOutboundConversationMessageLive(params: {
           mode: "live",
           externalMessageId: null,
           deliveryStatus: "sent",
-          error: `Template '${tmplRow.name}' has not been verified on Meta WhatsApp Manager yet — ₹0.00 deducted.`,
+          error: `Template '${tmplRow.name}' has not been verified on Meta WhatsApp Manager yet.`,
         };
       }
     }
@@ -94,7 +94,7 @@ async function dispatchOutboundConversationMessageLive(params: {
         mode: "live",
         externalMessageId: null,
         deliveryStatus: "sent",
-        error: "Contact does not have a valid WhatsApp phone number (+91...) — ₹0.00 deducted.",
+        error: "Contact does not have a valid WhatsApp phone number (+91...).",
       };
     }
 
@@ -121,7 +121,7 @@ async function dispatchOutboundConversationMessageLive(params: {
         mode: "live",
         externalMessageId: null,
         deliveryStatus: "sent",
-        error: "WhatsApp Phone Number ID is missing on Connected Channels — ₹0.00 deducted.",
+        error: "WhatsApp Phone Number ID is missing on Connected Channels.",
       };
     }
 
@@ -209,16 +209,28 @@ async function dispatchOutboundConversationMessageLive(params: {
 
       const resBody = (await resp.json().catch(() => ({}))) as {
         messages?: Array<{ id?: string }>;
-        error?: { message?: string; error_user_msg?: string };
+        error?: { code?: number; message?: string; error_user_msg?: string };
       };
 
       if (!resp.ok) {
+        if (resp.status === 401 || resBody.error?.code === 190) {
+          controlDb()
+            .update(controlSchema.connections)
+            .set({ status: "needs_reauth", updatedAt: Date.now() })
+            .where(
+              and(
+                eq(controlSchema.connections.workspaceId, params.workspaceId),
+                eq(controlSchema.connections.provider, "whatsapp")
+              )
+            )
+            .run();
+        }
         return {
           ok: false,
           mode: "live",
           externalMessageId: null,
           deliveryStatus: "sent",
-          error: `WhatsApp Cloud API rejected message (HTTP ${resp.status}): ${resBody.error?.error_user_msg || resBody.error?.message || "Verify 24h window or template status."} — ₹0.00 deducted.`,
+          error: `WhatsApp Cloud API rejected message (HTTP ${resp.status}): ${resBody.error?.error_user_msg || resBody.error?.message || "Verify 24h window or template status."}`,
         };
       }
 
@@ -229,7 +241,7 @@ async function dispatchOutboundConversationMessageLive(params: {
           mode: "live",
           externalMessageId: null,
           deliveryStatus: "sent",
-          error: "WhatsApp Cloud API did not return a confirmed message ID (wamid) — ₹0.00 deducted.",
+          error: "WhatsApp Cloud API did not return a confirmed message ID (wamid).",
         };
       }
 
@@ -245,7 +257,7 @@ async function dispatchOutboundConversationMessageLive(params: {
         mode: "live",
         externalMessageId: null,
         deliveryStatus: "sent",
-        error: `${err instanceof Error ? err.message : "Network error reaching WhatsApp Cloud API."} — ₹0.00 deducted.`,
+        error: err instanceof Error ? err.message : "Network error reaching WhatsApp Cloud API.",
       };
     }
   }
@@ -361,22 +373,49 @@ async function dispatchOutboundConversationMessageLive(params: {
   };
 }
 
-export function listContacts(workspaceId: string, limit = 200) {
+export function listContacts(
+  workspaceId: string,
+  limitOrOpts: number | { limit?: number; offset?: number } = 200,
+  offset = 0
+) {
+  const resolvedLimit = typeof limitOrOpts === "number" ? limitOrOpts : (limitOrOpts.limit ?? 200);
+  const resolvedOffset = typeof limitOrOpts === "number" ? offset : (limitOrOpts.offset ?? 0);
   return tenantDataDb({ workspaceId })
     .select()
     .from(tenantDataSchema.contacts)
     .orderBy(desc(tenantDataSchema.contacts.createdAt))
-    .limit(limit)
+    .limit(Math.max(1, Math.min(500, resolvedLimit)))
+    .offset(Math.max(0, resolvedOffset))
     .all();
+}
+
+export function countContacts(workspaceId: string): number {
+  const row = tenantDataDb({ workspaceId }).$client
+    .prepare(`SELECT COUNT(*) AS cnt FROM contacts`)
+    .get() as { cnt: number } | undefined;
+  return Number(row?.cnt ?? 0);
 }
 
 export function listConversationsWithContacts(
   workspaceId: string,
   statusFilter?: string,
-  assignedUserIdFilter?: string
+  assignedUserIdFilter?: string,
+  pagination?: { page?: number; pageSize?: number }
 ) {
   const db = tenantDataDb({ workspaceId });
-  const rows = db
+  const pageSize = Math.max(1, Math.min(200, pagination?.pageSize ?? 50));
+  const page = Math.max(1, pagination?.page ?? 1);
+  const offset = (page - 1) * pageSize;
+
+  const conditions = [];
+  if (statusFilter && statusFilter !== "all") {
+    conditions.push(eq(tenantDataSchema.conversations.status, statusFilter));
+  }
+  if (assignedUserIdFilter && assignedUserIdFilter !== "unassigned") {
+    conditions.push(eq(tenantDataSchema.conversations.assignedUserId, assignedUserIdFilter));
+  }
+
+  const query = db
     .select({
       conversation: tenantDataSchema.conversations,
       contact: tenantDataSchema.contacts,
@@ -385,23 +424,45 @@ export function listConversationsWithContacts(
     .innerJoin(
       tenantDataSchema.contacts,
       eq(tenantDataSchema.conversations.contactId, tenantDataSchema.contacts.id)
-    )
+    );
+
+  const rows = (conditions.length > 0 ? query.where(and(...conditions)) : query)
     .orderBy(desc(tenantDataSchema.conversations.lastActivityAt))
-    .limit(100)
+    .limit(assignedUserIdFilter === "unassigned" ? 200 : pageSize)
+    .offset(assignedUserIdFilter === "unassigned" ? 0 : offset)
     .all();
 
-  return rows.filter((r) => {
-    if (statusFilter && statusFilter !== "all" && r.conversation.status !== statusFilter) {
-      return false;
-    }
-    if (assignedUserIdFilter) {
-      if (assignedUserIdFilter === "unassigned") {
-        return !r.conversation.assignedUserId;
-      }
-      return r.conversation.assignedUserId === assignedUserIdFilter;
-    }
-    return true;
-  });
+  if (assignedUserIdFilter === "unassigned") {
+    return rows
+      .filter((r) => !r.conversation.assignedUserId)
+      .slice(offset, offset + pageSize);
+  }
+  return rows;
+}
+
+export function countConversationsWithContacts(
+  workspaceId: string,
+  statusFilter?: string,
+  assignedUserIdFilter?: string
+): number {
+  const raw = tenantDataDb({ workspaceId }).$client;
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  if (statusFilter && statusFilter !== "all") {
+    clauses.push("status = ?");
+    params.push(statusFilter);
+  }
+  if (assignedUserIdFilter === "unassigned") {
+    clauses.push("(assigned_user_id IS NULL OR assigned_user_id = '')");
+  } else if (assignedUserIdFilter) {
+    clauses.push("assigned_user_id = ?");
+    params.push(assignedUserIdFilter);
+  }
+  const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+  const row = raw
+    .prepare(`SELECT COUNT(*) AS cnt FROM conversations ${whereSql}`)
+    .get(...params) as { cnt: number } | undefined;
+  return Number(row?.cnt ?? 0);
 }
 
 export function getConversationThread(workspaceId: string, conversationId: string) {
@@ -658,7 +719,7 @@ export const replyToConversation = defineAction({
 
     const now = Date.now();
 
-    // Enforce WhatsApp 24-hour free-form reply window & unsubscribed check (Section 16)
+    // Enforce WhatsApp 24-hour free-form reply window and opt-out suppression check
     if (conv.channel === "whatsapp") {
       if (contact?.phoneE164) {
         const suppressed = logsDb
@@ -1024,3 +1085,5 @@ export const assignConversationToMember = defineAction({
     return { assignedUserId: cleanUser };
   },
 });
+
+export * from "./webhook-processors";

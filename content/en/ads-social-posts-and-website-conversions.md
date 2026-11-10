@@ -8,7 +8,7 @@ order: 8
 lastReviewed: 2026-11-03
 ---
 
-## Overview — Real Rupee ROAS Instead of Vanity Likes
+## Overview - Real Rupee ROAS Instead of Vanity Likes
 
 Open **Ads & Social Posts** (`/campaigns`) in your left sidebar to manage three connected growth workflows in one screen:
 
@@ -18,23 +18,23 @@ Open **Ads & Social Posts** (`/campaigns`) in your left sidebar to manage three 
 
 ---
 
-## Part 1 — Creating Ad Campaigns & Tracking Return per ₹1 Spent (ROAS)
+## Part 1 - Creating Ad Campaigns & Tracking Return per ₹1 Spent (ROAS)
 
 1. Open **Ads & Social Posts** (`/campaigns`). *(Requires **Meta Ads & Campaign Attribution** unlocked in **Plans & Wallet**.)*
 2. Locate the **Create Ad Campaign** card:
-   - **Campaign Name**: Enter a clear title (for example `Diwali Wholesale Dealers Lead Ad — Gujarat`).
+   - **Campaign Name**: Enter a clear title (for example `Diwali Wholesale Dealers Lead Ad - Gujarat`).
    - **Channel / Platform**: Select `Meta (Facebook & Instagram)` or `Google`.
    - **Objective**: Select `Leads / WhatsApp Inquiries`, `Website Sales`, or `Catalog Traffic`.
    - **Daily Budget (₹)**: Enter your daily rupee spend limit (e.g. `1500`).
    - Click **Create Campaign**.
 3. **Logging Spend & Linked Sales to Compute Exact ROAS**:
    - In the **Active Campaigns** table (or **Record Campaign Performance** form), select your campaign, enter **Ad Spend (₹)**, **Impressions / Clicks / Leads**, and **Attributed Sales Revenue (₹)**, then click **Record Metrics**.
-   - RapidShift automatically calculates **Return on Ad Spend (ROAS)** — e.g. `4.2x` (`₹4.20` collected for every `₹1.00` spent) — and feeds it directly into **Detailed Analytics** (`/analytics`).
+   - RapidShift automatically calculates **Return on Ad Spend (ROAS)** - e.g. `4.2x` (`₹4.20` collected for every `₹1.00` spent) - and feeds it directly into **Detailed Analytics** (`/analytics`).
 4. **Pausing or Completing a Campaign**: Use the status action on any campaign row to switch between `Active` and `Paused` as budgets change.
 
 ---
 
-## Part 2 — Scheduling Facebook Page & Instagram Business Posts
+## Part 2 - Scheduling Facebook Page & Instagram Business Posts
 
 *(Requires **Social Media Post Scheduler** unlocked and your Facebook Page / Instagram Business account connected in **Connected Channels**.)*
 
@@ -42,7 +42,7 @@ Open **Ads & Social Posts** (`/campaigns`) in your left sidebar to manage three 
 2. **Select Destination Channel(s)**: Choose your connected **Facebook Page** or **Instagram Business** profile.
 3. **Post Caption**: Write your post copy including hashtags, offer details, or WhatsApp contact CTA.
 4. **Media Attachment URL**:
-   - For **Instagram Business**, Meta's Graph API requires a publicly reachable HTTPS image/video URL (JPEG/PNG/MP4) — paste your product image URL in **Media URL**.
+   - For **Instagram Business**, Meta's Graph API requires a publicly reachable HTTPS image/video URL (JPEG/PNG/MP4) - paste your product image URL in **Media URL**.
    - For **Facebook Pages**, you can publish either text posts or image/link posts.
 5. **Publish Timing**:
    - Pick the exact **Scheduled Date & Time (IST)** in the date-time picker (or set the current time to queue immediate publishing).
@@ -52,7 +52,7 @@ Open **Ads & Social Posts** (`/campaigns`) in your left sidebar to manage three 
 
 ---
 
-## Part 3 — Recording Website Checkout / Pixel Sales Without Double Counting
+## Part 3 - Recording Website Checkout / Pixel Sales Without Double Counting
 
 When a customer buys on your website (Shopify, WooCommerce, or custom checkout), both browser pixels and server webhooks can fire for the same order. RapidShift prevents duplicate revenue counting using unique **Event / Order IDs**:
 

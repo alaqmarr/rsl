@@ -12,6 +12,7 @@
     "@rsl/core": "workspace:*",
     "@rsl/database": "workspace:*",
     "@rsl/logging": "workspace:*",
+    "@rsl/queue": "workspace:*",
     "@rsl/rbac": "workspace:*",
     "@rsl/tenancy": "workspace:*",
     "drizzle-orm": "0.45.4",

@@ -7,7 +7,7 @@ order: 10
 lastReviewed: 2026-11-03
 ---
 
-## Zero Sample Numbers — Where Every Figure Comes From
+## Zero Sample Numbers - Where Every Figure Comes From
 
 Every metric on **Business Overview** (`/`) and **Detailed Analytics** (`/analytics`) is computed live from your workspace's actual database records:
 
@@ -18,19 +18,19 @@ Every metric on **Business Overview** (`/`) and **Detailed Analytics** (`/analyt
 
 ---
 
-## Step 1 — Choosing Your Comparison Time Window (`/analytics`)
+## Step 1 - Choosing Your Comparison Time Window (`/analytics`)
 
 1. Open **Detailed Analytics** (`/analytics`) in the left sidebar.
 2. In the top-right period selector, click the window you want to inspect:
-   - **`7d`** — Weekly operational pulse (collections & team reply speed this week).
-   - **`30d`** — Monthly cashflow & marketing ROAS review (default).
-   - **`90d`** — Quarterly GST & seasonal comparison.
-   - **`365d` / `All`** — Full financial year overview.
+   - **`7d`** - Weekly operational pulse (collections & team reply speed this week).
+   - **`30d`** - Monthly cashflow & marketing ROAS review (default).
+   - **`90d`** - Quarterly GST & seasonal comparison.
+   - **`365d` / `All`** - Full financial year overview.
 3. All KPI cards, daily trend bars, channel breakdowns, and export links immediately update to match your selected window.
 
 ---
 
-## Step 2 — Acting on Tally Prime Receivable Aging Buckets
+## Step 2 - Acting on Tally Prime Receivable Aging Buckets
 
 Scroll to **Pending Tally Receivables Aging** on `/analytics` (or `/` **Business Overview**):
 
@@ -38,19 +38,19 @@ Scroll to **Pending Tally Receivables Aging** on `/analytics` (or `/` **Business
    - **`0 – 30 Days` (Current)**: Newly issued bills within normal credit period.
    - **`31 – 60 Days` (Follow-Up Needed)**: Send a polite 1st WhatsApp payment reminder.
    - **`61 – 90 Days` (Escalated)**: Call the party's accounts team and attach the exact Tally PDF invoice on WhatsApp.
-   - **`90+ Days` (Critical Overdue)**: High-priority recovery — review party credit limit in Tally Prime before dispatching new credit orders.
+   - **`90+ Days` (Critical Overdue)**: High-priority recovery - review party credit limit in Tally Prime before dispatching new credit orders.
 2. To send instant reminders on overdue bills: click **Tally Prime & Bills** (`/tally`) or use the **1-Click Send WhatsApp Reminder** action directly in the Overdue Bills list on **Business Overview** (`/`).
 
 ---
 
-## Step 3 — Reading the Customer Funnel & Channel ROI Table
+## Step 3 - Reading the Customer Funnel & Channel ROI Table
 
 1. **Customer Conversion Funnel**: Shows how contacts progress from **Total Contacts -> Opted-In Audience -> Engaged Conversations -> Billed Customers -> Collected Receipts**, highlighting where leads drop off.
 2. **Channel-by-Channel Breakdown**: Compares message volume, ad spend (`₹`), linked sales (`₹`), and **Return per ₹1 Spent (`ROAS`)** across WhatsApp, Meta (Facebook/Instagram), Google, and Direct/Tally so you invest marketing budget only where real collections happen.
 
 ---
 
-## Step 4 — Downloading Excel CSV & Printable Management PDF Reports
+## Step 4 - Downloading Excel CSV & Printable Management PDF Reports
 
 At the top right of **Detailed Analytics** (`/analytics`):
 

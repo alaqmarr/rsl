@@ -5,7 +5,7 @@ import { IosSpinner } from "@/components/ios-feedback";
 
 const ENDPOINT_PRESETS = [
   {
-    label: "POST /api/v1/tally/bill-event — Push Tally Bill & Send Automated WhatsApp",
+    label: "POST /api/v1/tally/bill-event - Push Tally Bill & Send Automated WhatsApp",
     method: "POST",
     path: "/api/v1/tally/bill-event",
     sampleBody: JSON.stringify(
@@ -23,7 +23,7 @@ const ENDPOINT_PRESETS = [
     ),
   },
   {
-    label: "POST /api/v1/whatsapp/send-template — Send WhatsApp Template Message",
+    label: "POST /api/v1/whatsapp/send-template - Send WhatsApp Template Message",
     method: "POST",
     path: "/api/v1/whatsapp/send-template",
     sampleBody: JSON.stringify(
@@ -43,25 +43,25 @@ const ENDPOINT_PRESETS = [
     ),
   },
   {
-    label: "GET /api/v1/whatsapp/templates — List Saved WhatsApp Templates",
+    label: "GET /api/v1/whatsapp/templates - List Saved WhatsApp Templates",
     method: "GET",
     path: "/api/v1/whatsapp/templates",
     sampleBody: "",
   },
   {
-    label: "GET /api/v1/vouchers — List Synced Tally Bills & Totals",
+    label: "GET /api/v1/vouchers - List Synced Tally Bills & Totals",
     method: "GET",
     path: "/api/v1/vouchers",
     sampleBody: "",
   },
   {
-    label: "GET /api/v1/analytics — Business Cashflow, Messages & Receivables KPIs",
+    label: "GET /api/v1/analytics - Business Cashflow, Messages & Receivables KPIs",
     method: "GET",
     path: "/api/v1/analytics?range=30d",
     sampleBody: "",
   },
   {
-    label: "GET /api/v1/contacts — List Customer Contacts",
+    label: "GET /api/v1/contacts - List Customer Contacts",
     method: "GET",
     path: "/api/v1/contacts",
     sampleBody: "",

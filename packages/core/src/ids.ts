@@ -69,6 +69,8 @@ export type EntityTypePrefix =
   | "pk"    // WebAuthn User Passkey
   | "psh"   // Web Push Subscription
   | "sid"   // Supplier Inbound Email Bill Draft
+  | "idp"   // API / Webhook Idempotency Record
+  | "wdv"   // Outbound Webhook Delivery Attempt
   | "req"   // Request / Correlation ID
   | "anc";  // Log Hash Anchor
 
@@ -153,7 +155,7 @@ export function newEntityId(
 }
 
 /**
- * Default ID helper — automatically uses active client context tag if available.
+ * Default ID helper - automatically uses active client context tag if available.
  */
 export function newId(
   dataType: EntityTypePrefix = "req",

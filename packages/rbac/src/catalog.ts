@@ -274,8 +274,18 @@ export const VIEW_ONLY_PERMISSIONS = ALL_PERMISSIONS.filter((p) =>
   p.endsWith(":view")
 ) as Permission[];
 
+export type SystemRoleSlug =
+  | "owner"
+  | "admin"
+  | "manager"
+  | "accountant"
+  | "marketing"
+  | "agent"
+  | "analyst"
+  | "billing";
+
 export interface SystemRoleDefinition {
-  slug: "owner" | "admin" | "manager" | "agent" | "analyst" | "billing";
+  slug: SystemRoleSlug;
   name: string;
   description: string;
   permissions: Permission[];
@@ -286,7 +296,7 @@ export const SYSTEM_ROLES: SystemRoleDefinition[] = [
     slug: "owner",
     name: "Business Owner",
     description:
-      "Full control over everything including billing, wallet, team, and backup restores.",
+      "Full control over everything including billing, wallet, team, confidentiality policies, and backup restores.",
     permissions: ALL_PERMISSIONS,
   },
   {
@@ -298,9 +308,9 @@ export const SYSTEM_ROLES: SystemRoleDefinition[] = [
   },
   {
     slug: "manager",
-    name: "Marketing & Operations Manager",
+    name: "Operations Manager",
     description:
-      "Manages messages, reviews, social posts, ad campaigns, WhatsApp sends, and views Tally bills.",
+      "Manages messages, reviews, social posts, ad campaigns, WhatsApp sends, and views Tally bills without security or billing changes.",
     permissions: [
       "inbox:view",
       "inbox:reply",
@@ -327,10 +337,50 @@ export const SYSTEM_ROLES: SystemRoleDefinition[] = [
     ],
   },
   {
+    slug: "accountant",
+    name: "Accountant & Tally Executive",
+    description:
+      "Strictly isolated to Tally Prime sync, bills, client/supplier ledgers, inventory, GST invoices, and backups. Zero access to ad campaigns, social posts, or customer chat.",
+    permissions: [
+      "tally:view",
+      "tally:sync.manage",
+      "tally:invoice.send",
+      "billing:view",
+      "backup:view",
+      "backup:manage",
+      "logs:view",
+      "audit:view",
+    ],
+  },
+  {
+    slug: "marketing",
+    name: "Marketing & Campaigns Team",
+    description:
+      "Strictly isolated to Meta & Google Ads, social publishing, website conversion pixel, Google reviews, and WhatsApp broadcasts. Zero access to Tally bills, party ledgers, inventory, or billing.",
+    permissions: [
+      "ads:view",
+      "ads:create",
+      "ads:budget.edit",
+      "ads:pause",
+      "posts:view",
+      "posts:create",
+      "posts:publish",
+      "posts:schedule",
+      "pixel:view",
+      "pixel:manage",
+      "reviews:view",
+      "reviews:reply",
+      "reviews:autoreply.manage",
+      "whatsapp:view",
+      "whatsapp:template.manage",
+      "whatsapp:broadcast",
+    ],
+  },
+  {
     slug: "agent",
     name: "Support Executive",
     description:
-      "Replies to customer messages, leaves team notes, and responds to Google reviews.",
+      "Replies to customer messages, leaves team notes, and responds to Google reviews. Zero access to Tally, billing, or ad budgets.",
     permissions: ["inbox:view", "inbox:reply", "inbox:note", "reviews:view", "reviews:reply"],
   },
   {
@@ -349,8 +399,24 @@ export const SYSTEM_ROLES: SystemRoleDefinition[] = [
   },
 ];
 
+const ROLE_SLUG_ALIASES: Record<string, SystemRoleSlug> = {
+  marketer: "marketing",
+  marketing_team: "marketing",
+  accounts: "accountant",
+  ca: "accountant",
+  viewer: "analyst",
+  support: "agent",
+  support_agent: "agent",
+};
+
+export function normalizeSystemRoleSlug(roleSlug: string): string {
+  const clean = (roleSlug || "").trim().toLowerCase();
+  return ROLE_SLUG_ALIASES[clean] ?? clean;
+}
+
 export function formatRoleLabel(roleSlug: string): string {
-  const sys = SYSTEM_ROLES.find((r) => r.slug === roleSlug);
+  const normalized = normalizeSystemRoleSlug(roleSlug);
+  const sys = SYSTEM_ROLES.find((r) => r.slug === normalized);
   if (sys) return sys.name;
   return roleSlug
     .replace(/[_-]+/g, " ")
@@ -486,7 +552,7 @@ export function canPermissionsAccessWebRoute(
 }
 
 /* ============================================================================
- * Staff Console (`apps/admin`) RBAC — Super Admin, Finance & Support
+ * Staff Console (`apps/admin`) RBAC - Super Admin, Finance & Support
  * ============================================================================ */
 
 export type StaffRoleSlug = "super_admin" | "finance" | "support";

@@ -446,7 +446,7 @@ async function exportNativeVoucherPdfsForBlocks(
         }
       }
     } catch {
-      // Isolate single-voucher PDF errors so one bad voucher never halts sync (P0-02)
+      // Isolate single-voucher PDF errors so one bad voucher never halts sync
     }
   }
 
@@ -666,11 +666,11 @@ export function buildCloudflareTunnelSetupGuide(
     "======================================================================",
     "  Cloudflare Zero-Trust Outbound Tunnel Guide (Enterprise LAN Tally)",
     "======================================================================",
-    `  1. Standard Mode (Default — Recommended for 99% of Offices):`,
+    `  1. Standard Mode (Default - Recommended for 99% of Offices):`,
     `     rsl-tally-connector makes 100% outbound HTTPS calls to ${serverUrl}`,
     `     and reads Tally XML locally on http://${tallyHost}:${tallyPort} (0 open firewall ports).`,
     "",
-    "  2. Optional Cloudflare Tunnel (`cloudflared` — 100% Free Forever):",
+    "  2. Optional Cloudflare Tunnel (`cloudflared` - 100% Free Forever):",
     "     If Tally runs on a segregated Windows Server VLAN and your connector runs remotely:",
     "       winget install --id Cloudflare.cloudflared -e",
     `       cloudflared tunnel --url http://${tallyHost}:${tallyPort}`,
@@ -734,7 +734,7 @@ async function main() {
 
   if (!state) {
     console.log("======================================================================");
-    console.log("  RapidShift Labs Tally Sync — First-Time Office PC Setup");
+    console.log("  RapidShift Labs Tally Sync - First-Time Office PC Setup");
     console.log("======================================================================");
     console.log("  Easiest Option (No Commands Needed):");
     console.log("    1. Sign in to RapidShift Labs -> Tally Prime -> Connect Tally");
@@ -792,7 +792,7 @@ async function main() {
       const allBlocks = probe.xml.match(/<VOUCHER(?:\s[^>]*)?>[\s\S]*?<\/VOUCHER>/gi) ?? [];
       const hasVouchers = allBlocks.length > 0;
       if (!hasVouchers) {
-        // Circuit Breaker (P0-01): Never send fullSnapshot:true on 0 vouchers,
+        // Circuit Breaker: Never send fullSnapshot:true on 0 vouchers,
         // BUT still sync Stock Items, Godowns & Party Ledgers for 0-voucher companies!
         if (fullReconcilePass) {
           const mastersOnlyXml = await fetchTallyStockItemsXml(
@@ -879,7 +879,7 @@ async function main() {
           }
         }
       } else {
-        // Process all vouchers in safe chunks of 20 without dropping vouchers 13+ (P0-02)
+        // Process all vouchers in safe chunks of 20 without dropping vouchers 13+
         for (let offset = 0; offset < allBlocks.length; offset += VOUCHER_CHUNK_SIZE) {
           const chunkBlocks = allBlocks.slice(offset, offset + VOUCHER_CHUNK_SIZE);
           const chunkPdfs = await exportNativeVoucherPdfsForBlocks(

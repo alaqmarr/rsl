@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import dns from "node:dns";
 import net from "node:net";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, lte } from "drizzle-orm";
 import Redis from "ioredis";
 import { RateLimiterMemory, RateLimiterRedis, type RateLimiterAbstract } from "rate-limiter-flexible";
 import { z } from "zod";
@@ -9,6 +9,13 @@ import { requireEntitlement } from "@rsl/billing";
 import { getEnv, hashApiKey, newEntityId, RslError, sanitizeClientTag } from "@rsl/core";
 import { controlSchema } from "@rsl/database";
 import { defineAction } from "@rsl/logging";
+import {
+  enqueueJob,
+  isRedisConfigured,
+  processDueSqliteOutboxForTenant,
+  QUEUE_REGISTRY,
+  registerJobProcessor,
+} from "@rsl/queue";
 import { controlDb, type TenantContext } from "@rsl/tenancy";
 
 export const API_SCOPES = [
@@ -51,22 +58,80 @@ function getRateLimiter(pointsPerMin: number): RateLimiterAbstract {
       : null;
   }
 
+  const instanceDivisor = Math.max(
+    1,
+    Number(process.env.PM2_INSTANCES || process.env.WEB_CONCURRENCY || 1)
+  );
+  const perProcessInsurancePoints = Math.max(1, Math.ceil(rpm / instanceDivisor));
+
   const limiter = sharedRedisClient
     ? new RateLimiterRedis({
         storeClient: sharedRedisClient,
         keyPrefix: `rsl:apikey:${rpm}`,
         points: rpm,
         duration: 60,
-        insuranceLimiter: new RateLimiterMemory({ points: rpm, duration: 60 }),
+        insuranceLimiter: new RateLimiterMemory({
+          points: perProcessInsurancePoints,
+          duration: 60,
+        }),
       })
     : new RateLimiterMemory({
         keyPrefix: `rsl:apikey:${rpm}`,
-        points: rpm,
+        points: perProcessInsurancePoints,
         duration: 60,
       });
 
   limiterByRpm.set(rpm, limiter);
   return limiter;
+}
+
+interface BufferedApiKeyUsage {
+  lastUsedAt: number;
+  lastUsedIp: string | null;
+}
+
+const pendingApiKeyUsage = new Map<string, BufferedApiKeyUsage>();
+let usageFlushTimer: ReturnType<typeof setInterval> | null = null;
+const API_KEY_USAGE_FLUSH_MS = 45_000;
+
+export function flushApiKeyUsageStats(): number {
+  if (pendingApiKeyUsage.size === 0) return 0;
+  const entries = Array.from(pendingApiKeyUsage.entries());
+  pendingApiKeyUsage.clear();
+
+  try {
+    const raw = controlDb().$client;
+    const stmt = raw.prepare(
+      `UPDATE api_keys
+       SET last_used_at = CASE WHEN last_used_at IS NULL OR ? > last_used_at THEN ? ELSE last_used_at END,
+           last_used_ip = COALESCE(?, last_used_ip)
+       WHERE id = ?`
+    );
+    const tx = raw.transaction(() => {
+      for (const [id, item] of entries) {
+        stmt.run(item.lastUsedAt, item.lastUsedAt, item.lastUsedIp, id);
+      }
+    });
+    tx.immediate();
+    return entries.length;
+  } catch {
+    for (const [id, item] of entries) {
+      if (!pendingApiKeyUsage.has(id)) {
+        pendingApiKeyUsage.set(id, item);
+      }
+    }
+    return 0;
+  }
+}
+
+function scheduleApiKeyUsageFlush(keyId: string, lastUsedAt: number, lastUsedIp: string | null): void {
+  pendingApiKeyUsage.set(keyId, { lastUsedAt, lastUsedIp });
+  if (!usageFlushTimer) {
+    usageFlushTimer = setInterval(() => {
+      flushApiKeyUsageStats();
+    }, API_KEY_USAGE_FLUSH_MS);
+    usageFlushTimer.unref?.();
+  }
 }
 
 export function listWorkspaceApiKeys(workspaceId: string) {
@@ -76,25 +141,35 @@ export function listWorkspaceApiKeys(workspaceId: string) {
     .where(eq(controlSchema.apiKeys.workspaceId, workspaceId))
     .orderBy(desc(controlSchema.apiKeys.createdAt))
     .all()
-    .map((row) => ({
-      id: row.id,
-      name: row.name,
-      mode: row.mode as "live" | "test",
-      maskedKey: `rsl_${row.mode}_${row.prefix}_••••••••••••••••••••`,
-      prefix: row.prefix,
-      scopes: JSON.parse(row.scopesJson) as string[],
-      rateLimitPerMin: row.rateLimitPerMin,
-      lastUsedAt: row.lastUsedAt,
-      lastUsedIp: row.lastUsedIp,
-      expiresAt: row.expiresAt,
-      revokedAt: row.revokedAt,
-      createdAt: row.createdAt,
-      status: row.revokedAt
-        ? "revoked"
-        : row.expiresAt && row.expiresAt < Date.now()
-          ? "expired"
-          : "active",
-    }));
+    .map((row) => {
+      const buffered = pendingApiKeyUsage.get(row.id);
+      const effectiveLastUsedAt =
+        buffered && (!row.lastUsedAt || buffered.lastUsedAt > row.lastUsedAt)
+          ? buffered.lastUsedAt
+          : row.lastUsedAt;
+      const effectiveLastUsedIp =
+        buffered && buffered.lastUsedIp ? buffered.lastUsedIp : row.lastUsedIp;
+
+      return {
+        id: row.id,
+        name: row.name,
+        mode: row.mode as "live" | "test",
+        maskedKey: `rsl_${row.mode}_${row.prefix}_••••••••••••••••••••`,
+        prefix: row.prefix,
+        scopes: JSON.parse(row.scopesJson) as string[],
+        rateLimitPerMin: row.rateLimitPerMin,
+        lastUsedAt: effectiveLastUsedAt,
+        lastUsedIp: effectiveLastUsedIp,
+        expiresAt: row.expiresAt,
+        revokedAt: row.revokedAt,
+        createdAt: row.createdAt,
+        status: row.revokedAt
+          ? "revoked"
+          : row.expiresAt && row.expiresAt < Date.now()
+            ? "expired"
+            : "active",
+      };
+    });
 }
 
 export const issueApiKey = defineAction({
@@ -102,11 +177,15 @@ export const issueApiKey = defineAction({
   permission: "apikeys:manage",
   service: "api.access",
   input: z.object({
-    name: z.string().trim().min(2, "Enter a descriptive key name (e.g. Website Checkout or ERP Bridge)").max(80),
+    name: z
+      .string()
+      .trim()
+      .min(2, "Enter a descriptive key name (e.g. Website Checkout or ERP Bridge)")
+      .max(80),
     mode: z.enum(["live", "test"]).default("live"),
     scopes: z.array(z.string()).min(1, "Select at least one permission scope for this API key"),
     rateLimitPerMin: z.coerce.number().int().min(10).max(1200).default(120),
-    expiresInDays: z.coerce.number().int().min(0).max(1095).default(0), // 0 = no expiry
+    expiresInDays: z.coerce.number().int().min(0).max(1095).default(0),
   }),
   summarize: (input) => `Issued ${input.mode.toUpperCase()} developer API key "${input.name}"`,
   handler: (ctx, input) => {
@@ -141,7 +220,7 @@ export const issueApiKey = defineAction({
       name: input.name,
       mode: input.mode,
       prefix,
-      rawKey, // Returned ONCE at creation time — never stored in plaintext
+      rawKey,
       scopes: input.scopes,
       expiresAt,
     };
@@ -160,7 +239,12 @@ export const revokeApiKey = defineAction({
     const existing = db
       .select()
       .from(controlSchema.apiKeys)
-      .where(and(eq(controlSchema.apiKeys.id, input.keyId), eq(controlSchema.apiKeys.workspaceId, ctx.workspaceId)))
+      .where(
+        and(
+          eq(controlSchema.apiKeys.id, input.keyId),
+          eq(controlSchema.apiKeys.workspaceId, ctx.workspaceId)
+        )
+      )
       .get();
 
     if (!existing) {
@@ -172,6 +256,8 @@ export const revokeApiKey = defineAction({
       .set({ revokedAt })
       .where(eq(controlSchema.apiKeys.id, existing.id))
       .run();
+
+    apiKeyLookupCache.delete(existing.prefix);
 
     return { id: existing.id, revokedAt };
   },
@@ -236,6 +322,7 @@ export const rotateApiKey = defineAction({
         .run();
     });
     tx.immediate();
+    apiKeyLookupCache.delete(existing.prefix);
 
     return {
       revokedKeyId: existing.id,
@@ -257,9 +344,15 @@ export interface AuthenticatedApiKeyResult {
   ctx: TenantContext;
 }
 
+const apiKeyLookupCache = new Map<
+  string,
+  { expiresAt: number; row: typeof controlSchema.apiKeys.$inferSelect }
+>();
+
 /**
  * Verifies an inbound `Authorization: Bearer rsl_live_<prefix>_<secret>` header
- * using constant-time HMAC comparison, checks plan status & scope, and enforces per-key rate limits.
+ * using constant-time HMAC comparison, checks plan status & scope, enforces per-key
+ * rate limits, and batches usage timestamps off the hot write path.
  */
 export async function authenticatePublicApiKey(params: {
   authorizationHeader: string | null;
@@ -278,15 +371,24 @@ export async function authenticatePublicApiKey(params: {
 
   const mode = match[1] as "live" | "test";
   const prefix = match[2]!;
-  const db = controlDb();
+  const now = Date.now();
 
-  const candidate = db
-    .select()
-    .from(controlSchema.apiKeys)
-    .where(and(eq(controlSchema.apiKeys.prefix, prefix), isNull(controlSchema.apiKeys.revokedAt)))
-    .get();
+  let candidate: typeof controlSchema.apiKeys.$inferSelect | undefined;
+  const cached = apiKeyLookupCache.get(prefix);
+  if (cached && cached.expiresAt > now) {
+    candidate = cached.row;
+  } else {
+    candidate = controlDb()
+      .select()
+      .from(controlSchema.apiKeys)
+      .where(and(eq(controlSchema.apiKeys.prefix, prefix), isNull(controlSchema.apiKeys.revokedAt)))
+      .get();
+    if (candidate) {
+      apiKeyLookupCache.set(prefix, { expiresAt: now + 3_000, row: candidate });
+    }
+  }
 
-  if (!candidate) {
+  if (!candidate || candidate.revokedAt) {
     throw new RslError("RSL-API-1001");
   }
 
@@ -296,8 +398,11 @@ export async function authenticatePublicApiKey(params: {
     throw new RslError("RSL-API-1001");
   }
 
-  if (candidate.expiresAt && candidate.expiresAt < Date.now()) {
-    throw new RslError("RSL-API-1001", "This API key has expired. Generate a fresh key in Developer API settings.");
+  if (candidate.expiresAt && candidate.expiresAt < now) {
+    throw new RslError(
+      "RSL-API-1001",
+      "This API key has expired. Generate a fresh key in Developer API settings."
+    );
   }
 
   requireEntitlement(candidate.workspaceId, "api.access");
@@ -319,14 +424,7 @@ export async function authenticatePublicApiKey(params: {
     throw new RslError("RSL-API-1003");
   }
 
-  const now = Date.now();
-  db.update(controlSchema.apiKeys)
-    .set({
-      lastUsedAt: now,
-      lastUsedIp: params.clientIp ?? null,
-    })
-    .where(eq(controlSchema.apiKeys.id, candidate.id))
-    .run();
+  scheduleApiKeyUsageFlush(candidate.id, now, params.clientIp ?? null);
 
   const requestId = newEntityId("req", candidate.workspaceId, now);
   return {
@@ -339,7 +437,7 @@ export async function authenticatePublicApiKey(params: {
       workspaceId: candidate.workspaceId,
       actorType: "api_key",
       actorId: candidate.id,
-      roleSlug: "owner",
+      apiKeyScopes: scopes,
       assetScope: null,
       impersonatorId: null,
       correlationId: requestId,
@@ -348,11 +446,107 @@ export async function authenticatePublicApiKey(params: {
   };
 }
 
+let lastIdempotencyPurgeAt = 0;
+
+export async function withApiIdempotency<T>(params: {
+  workspaceId: string;
+  idempotencyKey: string | null | undefined;
+  method: string;
+  path: string;
+  rawRequestBody: string;
+  ttlMs?: number;
+  execute: () => Promise<{ statusCode: number; body: T }>;
+}): Promise<{ statusCode: number; body: T; replayed: boolean }> {
+  const cleanKey = params.idempotencyKey?.trim() ?? "";
+  if (!cleanKey) {
+    const fresh = await params.execute();
+    return { ...fresh, replayed: false };
+  }
+  if (cleanKey.length > 128) {
+    throw new RslError("RSL-VAL-1001", "Idempotency-Key must be at most 128 characters.");
+  }
+
+  const db = controlDb();
+  const now = Date.now();
+  if (now - lastIdempotencyPurgeAt > 60_000) {
+    lastIdempotencyPurgeAt = now;
+    db.delete(controlSchema.idempotencyRecords)
+      .where(lte(controlSchema.idempotencyRecords.expiresAt, now))
+      .run();
+  }
+
+  const requestHash = crypto
+    .createHash("sha256")
+    .update(`${params.method.toUpperCase()}:${params.path}:${params.rawRequestBody}`)
+    .digest("hex");
+
+  const existing = db
+    .select()
+    .from(controlSchema.idempotencyRecords)
+    .where(
+      and(
+        eq(controlSchema.idempotencyRecords.workspaceId, params.workspaceId),
+        eq(controlSchema.idempotencyRecords.idempotencyKey, cleanKey)
+      )
+    )
+    .get();
+
+  if (existing && existing.expiresAt > now) {
+    if (existing.requestHash !== requestHash) {
+      throw new RslError(
+        "RSL-VAL-1001",
+        "Idempotency-Key has already been used with a different request payload."
+      );
+    }
+    return {
+      statusCode: existing.statusCode,
+      body: JSON.parse(existing.responseJson) as T,
+      replayed: true,
+    };
+  }
+
+  const result = await params.execute();
+  if (result.statusCode < 500) {
+    const ttlMs = params.ttlMs ?? 24 * 60 * 60_000;
+    db.insert(controlSchema.idempotencyRecords)
+      .values({
+        id: newEntityId("req", params.workspaceId, now),
+        workspaceId: params.workspaceId,
+        idempotencyKey: cleanKey,
+        method: params.method.toUpperCase(),
+        path: params.path,
+        requestHash,
+        statusCode: result.statusCode,
+        responseJson: JSON.stringify(result.body),
+        createdAt: now,
+        expiresAt: now + ttlMs,
+      })
+      .onConflictDoUpdate({
+        target: [
+          controlSchema.idempotencyRecords.workspaceId,
+          controlSchema.idempotencyRecords.idempotencyKey,
+        ],
+        set: {
+          requestHash,
+          statusCode: result.statusCode,
+          responseJson: JSON.stringify(result.body),
+          createdAt: now,
+          expiresAt: now + ttlMs,
+        },
+      })
+      .run();
+  }
+
+  return { ...result, replayed: false };
+}
+
 export const WEBHOOK_EVENTS = [
   { key: "tally.bill.created", label: "New Tally sales bill synced" },
+  { key: "tally.bill.cancelled", label: "Tally sales bill cancelled" },
   { key: "tally.payment.received", label: "Tally payment receipt recorded" },
   { key: "whatsapp.message.received", label: "Inbound customer WhatsApp message" },
   { key: "whatsapp.broadcast.completed", label: "WhatsApp broadcast campaign finished" },
+  { key: "pixel.event.recorded", label: "Website conversion pixel event recorded" },
   { key: "review.created", label: "New Google Business review received" },
 ] as const;
 
@@ -388,6 +582,16 @@ export function listOutboundWebhookEndpoints(workspaceId: string) {
     }));
 }
 
+export function listWorkspaceWebhookDeliveries(workspaceId: string, limit = 50) {
+  return controlDb()
+    .select()
+    .from(controlSchema.outboundWebhookDeliveries)
+    .where(eq(controlSchema.outboundWebhookDeliveries.workspaceId, workspaceId))
+    .orderBy(desc(controlSchema.outboundWebhookDeliveries.createdAt))
+    .limit(Math.max(1, Math.min(200, limit)))
+    .all();
+}
+
 export function isPrivateOrReservedIp(
   rawIp: string,
   options?: { allowLoopback?: boolean }
@@ -400,7 +604,6 @@ export function isPrivateOrReservedIp(
     if (net.isIPv4(mappedV4)) {
       return isPrivateOrReservedIp(mappedV4, options);
     }
-    // Hex-encoded IPv4-mapped IPv6 e.g. ::ffff:a9fe:a9fe
     const hexParts = mappedV4.split(":");
     if (hexParts.length === 2) {
       const hi = parseInt(hexParts[0]!, 16);
@@ -415,19 +618,13 @@ export function isPrivateOrReservedIp(
   if (net.isIPv4(ip)) {
     const parts = ip.split(".").map((p) => Number(p));
     const [a = 0, b = 0] = parts;
-    // Loopback 127.0.0.0/8
     if (a === 127) return !allowLoopback;
-    // Unspecified 0.0.0.0/8
     if (a === 0) return true;
-    // Private RFC 1918: 10/8, 172.16/12, 192.168/16
     if (a === 10) return true;
     if (a === 172 && b >= 16 && b <= 31) return true;
     if (a === 192 && b === 168) return true;
-    // Link-local & AWS/GCP/Azure Cloud Metadata: 169.254.0.0/16
     if (a === 169 && b === 254) return true;
-    // Alibaba Cloud metadata & CGNAT: 100.64.0.0/10
     if (a === 100 && b >= 64 && b <= 127) return true;
-    // Benchmarking 198.18.0.0/15, Documentation & Multicast/Reserved 224.0.0.0/3
     if (a === 198 && (b === 18 || b === 19)) return true;
     if (a >= 224) return true;
     return false;
@@ -436,11 +633,8 @@ export function isPrivateOrReservedIp(
   if (net.isIPv6(ip)) {
     if (ip === "::1" || ip === "0:0:0:0:0:0:0:1") return !allowLoopback;
     if (ip === "::" || ip === "0:0:0:0:0:0:0:0") return true;
-    // Unique local fc00::/7 (fc.. or fd..)
     if (ip.startsWith("fc") || ip.startsWith("fd")) return true;
-    // Link-local fe80::/10 (fe8, fe9, fea, feb)
     if (/^fe[89ab]/i.test(ip)) return true;
-    // Multicast ff00::/8
     if (ip.startsWith("ff")) return true;
     return false;
   }
@@ -466,7 +660,10 @@ export async function assertSafeOutboundWebhookTarget(
   const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   const isLoopbackHost = host === "localhost" || host === "127.0.0.1" || host === "::1";
 
-  if (parsed.protocol !== "https:" && !(allowLoopback && parsed.protocol === "http:" && isLoopbackHost)) {
+  if (
+    parsed.protocol !== "https:" &&
+    !(allowLoopback && parsed.protocol === "http:" && isLoopbackHost)
+  ) {
     throw new RslError(
       "RSL-VAL-1001",
       "Outbound webhook URLs must use https:// (http://localhost is permitted only for local non-production testing)."
@@ -502,7 +699,10 @@ export async function assertSafeOutboundWebhookTarget(
   try {
     const resolved = await dns.promises.lookup(host, { all: true, verbatim: true });
     if (resolved.length === 0 && options?.requireDnsResolution) {
-      throw new RslError("RSL-VAL-1001", `Webhook hostname '${host}' did not resolve to any IP address.`);
+      throw new RslError(
+        "RSL-VAL-1001",
+        `Webhook hostname '${host}' did not resolve to any IP address.`
+      );
     }
     for (const entry of resolved) {
       if (isPrivateOrReservedIp(entry.address, { allowLoopback })) {
@@ -617,8 +817,9 @@ export const testOutboundWebhookEndpoint = defineAction({
     }
 
     const now = Date.now();
+    const deliveryId = newEntityId("req", ctx.workspaceId, now);
     const payloadObj = {
-      id: newEntityId("req", ctx.workspaceId, now),
+      id: deliveryId,
       event: "webhook.ping",
       workspaceId: ctx.workspaceId,
       createdAt: new Date(now).toISOString(),
@@ -630,7 +831,12 @@ export const testOutboundWebhookEndpoint = defineAction({
     const rawBody = JSON.stringify(payloadObj);
     const signatureHeader = computeOutboundWebhookSignature(endpoint.signingSecret, now, rawBody);
 
-    let deliveryStatus = "delivered (200)";
+    let deliveryStatus = "HTTP 200 OK";
+    let httpStatus: number | null = null;
+    let responseSnippet: string | null = null;
+    let lastError: string | null = null;
+    let ok = false;
+
     try {
       await assertSafeOutboundWebhookTarget(endpoint.targetUrl, { requireDnsResolution: true });
       const resp = await fetch(endpoint.targetUrl, {
@@ -641,15 +847,41 @@ export const testOutboundWebhookEndpoint = defineAction({
           "User-Agent": "RSL-Marketing-Webhooks/1.0",
           "X-RSL-Signature": signatureHeader,
           "X-RSL-Event": "webhook.ping",
+          "X-RSL-Delivery": deliveryId,
         },
         body: rawBody,
         signal: AbortSignal.timeout(4000),
       });
+      httpStatus = resp.status;
+      responseSnippet = (await resp.text().catch(() => "")).slice(0, 240) || null;
+      ok = resp.ok;
       deliveryStatus = resp.ok ? `HTTP ${resp.status} OK` : `HTTP ${resp.status}`;
+      if (!resp.ok) {
+        lastError = `Endpoint returned HTTP ${resp.status}`;
+      }
     } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
       deliveryStatus =
         err instanceof RslError ? `Blocked: ${err.message}` : "Unreachable (signed payload prepared)";
     }
+
+    db.insert(controlSchema.outboundWebhookDeliveries)
+      .values({
+        id: deliveryId,
+        endpointId: endpoint.id,
+        workspaceId: ctx.workspaceId,
+        eventType: "webhook.ping",
+        payloadJson: rawBody,
+        status: ok ? "delivered" : "dead",
+        attemptCount: 1,
+        httpStatus,
+        responseSnippet,
+        lastError,
+        nextRetryAt: null,
+        createdAt: now,
+        deliveredAt: ok ? Date.now() : null,
+      })
+      .run();
 
     db.update(controlSchema.outboundWebhookEndpoints)
       .set({
@@ -667,16 +899,160 @@ export const testOutboundWebhookEndpoint = defineAction({
   },
 });
 
+async function executeOutboundWebhookDeliveryAttempt(deliveryId: string): Promise<boolean> {
+  const db = controlDb();
+  const delivery = db
+    .select()
+    .from(controlSchema.outboundWebhookDeliveries)
+    .where(eq(controlSchema.outboundWebhookDeliveries.id, deliveryId))
+    .get();
+
+  if (!delivery || delivery.status === "delivered") {
+    return true;
+  }
+
+  const endpoint = db
+    .select()
+    .from(controlSchema.outboundWebhookEndpoints)
+    .where(eq(controlSchema.outboundWebhookEndpoints.id, delivery.endpointId))
+    .get();
+
+  if (!endpoint || !endpoint.active) {
+    db.update(controlSchema.outboundWebhookDeliveries)
+      .set({
+        status: "dead",
+        lastError: "Webhook endpoint was deleted or deactivated.",
+        nextRetryAt: null,
+      })
+      .where(eq(controlSchema.outboundWebhookDeliveries.id, deliveryId))
+      .run();
+    return false;
+  }
+
+  const now = Date.now();
+  const attempt = delivery.attemptCount + 1;
+  const maxAttempts = QUEUE_REGISTRY["webhooks.outbound"].maxAttempts;
+  const signatureHeader = computeOutboundWebhookSignature(
+    endpoint.signingSecret,
+    now,
+    delivery.payloadJson
+  );
+
+  let httpStatus: number | null = null;
+  let responseSnippet: string | null = null;
+
+  try {
+    await assertSafeOutboundWebhookTarget(endpoint.targetUrl, { requireDnsResolution: true });
+    const resp = await fetch(endpoint.targetUrl, {
+      method: "POST",
+      redirect: "error",
+      headers: {
+        "Content-Type": "application/json",
+        "User-Agent": "RSL-Marketing-Webhooks/1.0",
+        "X-RSL-Signature": signatureHeader,
+        "X-RSL-Event": delivery.eventType,
+        "X-RSL-Delivery": delivery.id,
+      },
+      body: delivery.payloadJson,
+      signal: AbortSignal.timeout(5000),
+    });
+
+    httpStatus = resp.status;
+    responseSnippet = (await resp.text().catch(() => "")).slice(0, 240) || null;
+
+    if (!resp.ok) {
+      throw new Error(`Endpoint responded with HTTP ${resp.status}`);
+    }
+
+    const statusLabel = `HTTP ${resp.status} OK`;
+    db.update(controlSchema.outboundWebhookDeliveries)
+      .set({
+        status: "delivered",
+        attemptCount: attempt,
+        httpStatus,
+        responseSnippet,
+        lastError: null,
+        nextRetryAt: null,
+        deliveredAt: Date.now(),
+      })
+      .where(eq(controlSchema.outboundWebhookDeliveries.id, delivery.id))
+      .run();
+
+    db.update(controlSchema.outboundWebhookEndpoints)
+      .set({
+        lastDeliveryStatus: statusLabel,
+        lastDeliveredAt: now,
+      })
+      .where(eq(controlSchema.outboundWebhookEndpoints.id, endpoint.id))
+      .run();
+
+    return true;
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const isPermanentBlock = err instanceof RslError;
+    const isDead = isPermanentBlock || attempt >= maxAttempts;
+    const backoffMs = Math.min(300_000, 2_000 * 2 ** Math.min(attempt - 1, 7));
+    const nextRetryAt = isDead ? null : Date.now() + backoffMs;
+    const endpointLabel = httpStatus
+      ? `HTTP ${httpStatus}${isDead ? " (dead-lettered)" : " (retrying)"}`
+      : isPermanentBlock
+        ? `Blocked: ${errMsg}`
+        : isDead
+          ? "Failed after max retries"
+          : "Unreachable (retry scheduled)";
+
+    db.update(controlSchema.outboundWebhookDeliveries)
+      .set({
+        status: isDead ? "dead" : "retrying",
+        attemptCount: attempt,
+        httpStatus,
+        responseSnippet,
+        lastError: errMsg,
+        nextRetryAt,
+      })
+      .where(eq(controlSchema.outboundWebhookDeliveries.id, delivery.id))
+      .run();
+
+    db.update(controlSchema.outboundWebhookEndpoints)
+      .set({
+        lastDeliveryStatus: endpointLabel,
+        lastDeliveredAt: now,
+      })
+      .where(eq(controlSchema.outboundWebhookEndpoints.id, endpoint.id))
+      .run();
+
+    if (isPermanentBlock) {
+      return false;
+    }
+    throw new Error(errMsg);
+  }
+}
+
+let outboundWebhookProcessorRegistered = false;
+
+export function ensureOutboundWebhookProcessorRegistered(): void {
+  if (outboundWebhookProcessorRegistered) return;
+  registerJobProcessor("webhooks.outbound.deliver", async (envelope) => {
+    const deliveryId = String(envelope.payload.deliveryId ?? "").trim();
+    if (!deliveryId) return;
+    await executeOutboundWebhookDeliveryAttempt(deliveryId);
+  });
+  outboundWebhookProcessorRegistered = true;
+}
+
+ensureOutboundWebhookProcessorRegistered();
+
 /**
- * Dispatches a live signed outbound webhook event to all active endpoints subscribed
- * to `eventType` (or `"*"`) for the given workspace. Updates `lastDeliveryStatus`
- * and `lastDeliveredAt` on each matching endpoint without throwing to the caller.
+ * Persists a durable delivery record per subscribed endpoint and enqueues `webhooks.outbound.deliver`
+ * with exponential backoff and dead-letter handling.
  */
 export async function dispatchWorkspaceWebhookEvent(
   workspaceId: string,
   eventType: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  options?: { asyncOnly?: boolean }
 ): Promise<number> {
+  ensureOutboundWebhookProcessorRegistered();
   const db = controlDb();
   const endpoints = db
     .select()
@@ -691,7 +1067,7 @@ export async function dispatchWorkspaceWebhookEvent(
 
   if (endpoints.length === 0) return 0;
 
-  let deliveredCount = 0;
+  const createdDeliveryIds: string[] = [];
   for (const endpoint of endpoints) {
     let subscribed: string[] = [];
     try {
@@ -704,46 +1080,69 @@ export async function dispatchWorkspaceWebhookEvent(
     }
 
     const now = Date.now();
+    const deliveryId = newEntityId("req", workspaceId, now);
     const payloadObj = {
-      id: newEntityId("req", workspaceId, now),
+      id: deliveryId,
       event: eventType,
       workspaceId,
       createdAt: new Date(now).toISOString(),
       data,
     };
     const rawBody = JSON.stringify(payloadObj);
-    const signatureHeader = computeOutboundWebhookSignature(endpoint.signingSecret, now, rawBody);
 
-    let deliveryStatus = "HTTP 200 OK";
-    try {
-      await assertSafeOutboundWebhookTarget(endpoint.targetUrl, { requireDnsResolution: true });
-      const resp = await fetch(endpoint.targetUrl, {
-        method: "POST",
-        redirect: "error",
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": "RSL-Marketing-Webhooks/1.0",
-          "X-RSL-Signature": signatureHeader,
-          "X-RSL-Event": eventType,
-        },
-        body: rawBody,
-        signal: AbortSignal.timeout(4000),
-      });
-      deliveryStatus = resp.ok ? `HTTP ${resp.status} OK` : `HTTP ${resp.status}`;
-      if (resp.ok) deliveredCount++;
-    } catch (err) {
-      deliveryStatus =
-        err instanceof RslError ? `Blocked: ${err.message}` : "Unreachable (signed payload prepared)";
-    }
-
-    db.update(controlSchema.outboundWebhookEndpoints)
-      .set({
-        lastDeliveryStatus: deliveryStatus,
-        lastDeliveredAt: now,
+    db.insert(controlSchema.outboundWebhookDeliveries)
+      .values({
+        id: deliveryId,
+        endpointId: endpoint.id,
+        workspaceId,
+        eventType,
+        payloadJson: rawBody,
+        status: "pending",
+        attemptCount: 0,
+        nextRetryAt: now,
+        createdAt: now,
       })
-      .where(eq(controlSchema.outboundWebhookEndpoints.id, endpoint.id))
       .run();
+
+    await enqueueJob({
+      queue: "webhooks.outbound",
+      jobType: "webhooks.outbound.deliver",
+      tenantId: workspaceId,
+      correlationId: deliveryId,
+      requestId: deliveryId,
+      actorType: "system",
+      actorId: "webhook_dispatcher",
+      idempotencyKey: `wh_out:${deliveryId}`,
+      payload: {
+        deliveryId,
+        endpointId: endpoint.id,
+        eventType,
+      },
+    });
+
+    createdDeliveryIds.push(deliveryId);
   }
 
+  if (createdDeliveryIds.length === 0) return 0;
+
+  if (options?.asyncOnly || isRedisConfigured()) {
+    return createdDeliveryIds.length;
+  }
+
+  await processDueSqliteOutboxForTenant(workspaceId, {
+    queueName: "webhooks.outbound",
+  });
+
+  let deliveredCount = 0;
+  for (const deliveryId of createdDeliveryIds) {
+    const row = db
+      .select({ status: controlSchema.outboundWebhookDeliveries.status })
+      .from(controlSchema.outboundWebhookDeliveries)
+      .where(eq(controlSchema.outboundWebhookDeliveries.id, deliveryId))
+      .get();
+    if (row?.status === "delivered") {
+      deliveredCount++;
+    }
+  }
   return deliveredCount;
 }

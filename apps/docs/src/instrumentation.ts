@@ -1,4 +1,9 @@
 export async function register() {
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    const { registerNodeGracefulShutdown } = await import("./instrumentation.node");
+    registerNodeGracefulShutdown();
+  }
+
   if (process.env.NODE_ENV !== "production" && process.env.SENTRY_ENABLE_DEV !== "true") {
     return;
   }

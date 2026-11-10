@@ -1,10 +1,10 @@
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { listWorkspaceConnections, refreshGoogleConnectionIfNeeded } from "@rsl/connections";
-import { formatInrFromPaise, newId, RslError } from "@rsl/core";
+import { fetchWithRetry, newId, RslError } from "@rsl/core";
 import { controlSchema, tenantDataSchema } from "@rsl/database";
 import { defineAction } from "@rsl/logging";
-import { controlDb, tenantDataDb } from "@rsl/tenancy";
+import { controlDb, isWorkspaceSandboxIntegrationMode, tenantDataDb } from "@rsl/tenancy";
 
 /* ============================================================================
  * 1. Live Google Sheets Multi-Tab Export for Chartered Accountants (CAs)
@@ -22,6 +22,7 @@ function rupeesNumber(paise: number | null | undefined): number {
 export interface CaGoogleSheetSyncResult {
   ok: boolean;
   mode: "live" | "sandbox";
+  isSandboxData?: boolean;
   spreadsheetId: string;
   spreadsheetUrl: string;
   salesRows: number;
@@ -210,7 +211,7 @@ export const syncWorkspaceCaGoogleSheet = defineAction({
       ]),
     ];
 
-    const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken);
+    const isSandbox = isWorkspaceSandboxIntegrationMode(ctx.workspaceId, accessToken);
     let spreadsheetId = sheetConn.metadata.caSpreadsheetId || "";
     let spreadsheetUrl = sheetConn.metadata.caSpreadsheetUrl || "";
 
@@ -218,9 +219,9 @@ export const syncWorkspaceCaGoogleSheet = defineAction({
       spreadsheetId = spreadsheetId || `sb_sheet_${newId("ast", ctx.workspaceId)}`;
       spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
     } else {
-      const sheetTitle = `RSL CA Pack — ${ws?.name || "Business"}`;
+      const sheetTitle = `RSL CA Pack - ${ws?.name || "Business"}`;
       if (!spreadsheetId) {
-        const createResp = await fetch("https://sheets.googleapis.com/v4/spreadsheets", {
+        const createResp = await fetchWithRetry("https://sheets.googleapis.com/v4/spreadsheets", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -235,7 +236,8 @@ export const syncWorkspaceCaGoogleSheet = defineAction({
               { properties: { title: "RSL GST Invoices" } },
             ],
           }),
-          signal: AbortSignal.timeout(12_000),
+          timeoutMs: 12_000,
+          maxRetries: 2,
         });
 
         if (!createResp.ok) {
@@ -256,7 +258,7 @@ export const syncWorkspaceCaGoogleSheet = defineAction({
           `https://docs.google.com/spreadsheets/d/${created.spreadsheetId}/edit`;
       }
 
-      const batchResp = await fetch(
+      const batchResp = await fetchWithRetry(
         `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchUpdate`,
         {
           method: "POST",
@@ -273,7 +275,8 @@ export const syncWorkspaceCaGoogleSheet = defineAction({
               { range: "'RSL GST Invoices'!A1", values: gstInvoicesValues },
             ],
           }),
-          signal: AbortSignal.timeout(12_000),
+          timeoutMs: 12_000,
+          maxRetries: 2,
         }
       );
 
@@ -318,11 +321,10 @@ export const syncWorkspaceCaGoogleSheet = defineAction({
         .run();
     }
 
-    void formatInrFromPaise(0); // ensure currency util imported cleanly
-
     return {
       ok: true,
       mode: isSandbox ? "sandbox" : "live",
+      isSandboxData: isSandbox,
       spreadsheetId,
       spreadsheetUrl,
       salesRows: salesVouchers.length,
@@ -347,6 +349,7 @@ export interface SearchConsoleQueryMetric {
 
 export interface SearchConsoleInsightsSummary {
   connected: boolean;
+  isSandboxData?: boolean;
   siteUrl: string | null;
   availableSites: string[];
   totalClicks28d: number;
@@ -389,23 +392,23 @@ export async function fetchWorkspaceGoogleSearchConsoleInsights(
       avgCtrPercent: 0,
       avgPosition: 0,
       topQueries: [],
-      statusMessage: "Google Search Console session expired — click Reconnect.",
+      statusMessage: "Google Search Console session expired - click Reconnect.",
     };
   }
 
-  if (/^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken)) {
+  if (isWorkspaceSandboxIntegrationMode(workspaceId, accessToken)) {
     return {
       connected: true,
-      siteUrl: gscConn.metadata.searchConsoleSiteUrl || "https://demo-store.in/",
-      availableSites: ["https://demo-store.in/"],
-      totalClicks28d: 428,
-      totalImpressions28d: 9640,
-      avgCtrPercent: 4.44,
-      avgPosition: 8.2,
-      topQueries: [
-        { query: "wholesale hardware dealer near me", clicks: 112, impressions: 1840, ctrPercent: 6.09, position: 4.1 },
-        { query: "industrial valves gst supplier", clicks: 76, impressions: 1420, ctrPercent: 5.35, position: 6.3 },
-      ],
+      isSandboxData: true,
+      siteUrl: gscConn.metadata.searchConsoleSiteUrl || null,
+      availableSites: gscConn.metadata.availableSearchConsoleSites ?? [],
+      totalClicks28d: 0,
+      totalImpressions28d: 0,
+      avgCtrPercent: 0,
+      avgPosition: 0,
+      topQueries: [],
+      statusMessage:
+        "Sandbox integration mode active - connect a live Google Search Console property in production mode to view verified organic search metrics.",
     };
   }
 
@@ -414,9 +417,10 @@ export async function fetchWorkspaceGoogleSearchConsoleInsights(
 
   if (!siteUrl) {
     try {
-      const sitesResp = await fetch("https://www.googleapis.com/webmasters/v3/sites", {
+      const sitesResp = await fetchWithRetry("https://www.googleapis.com/webmasters/v3/sites", {
         headers: { Authorization: `Bearer ${accessToken}` },
-        signal: AbortSignal.timeout(6000),
+        timeoutMs: 6000,
+        maxRetries: 2,
       });
       if (sitesResp.ok) {
         const j = (await sitesResp.json()) as { siteEntry?: Array<{ siteUrl?: string }> };
@@ -447,7 +451,7 @@ export async function fetchWorkspaceGoogleSearchConsoleInsights(
   const startDate = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
 
   try {
-    const queryResp = await fetch(
+    const queryResp = await fetchWithRetry(
       `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
       {
         method: "POST",
@@ -461,7 +465,8 @@ export async function fetchWorkspaceGoogleSearchConsoleInsights(
           dimensions: ["query"],
           rowLimit: 10,
         }),
-        signal: AbortSignal.timeout(8000),
+        timeoutMs: 8000,
+        maxRetries: 2,
       }
     );
 

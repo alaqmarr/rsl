@@ -5,7 +5,7 @@ import { getLegalDocumentBySlug } from "@/lib/legal-documents";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Terms & Conditions — RapidShift Labs",
+  title: "Terms & Conditions - RapidShift Labs",
   description:
     "Master SaaS Terms & Conditions governing the RapidShift Labs Marketing, Shared Inbox, Cloud Backup, and Tally Prime Automation Suite.",
   alternates: { canonical: "/terms" },

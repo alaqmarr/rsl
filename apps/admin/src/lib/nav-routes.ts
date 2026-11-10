@@ -42,7 +42,7 @@ export interface AdminPageGuide {
 
 export const ADMIN_NAV_SECTIONS_META: AdminNavSectionMeta[] = [
   {
-    heading: "Approvals & Revenue",
+    heading: "Revenue & Client Billing",
     items: [
       {
         href: "/",
@@ -51,13 +51,6 @@ export const ADMIN_NAV_SECTIONS_META: AdminNavSectionMeta[] = [
         summary: "Verify client payments, unlock requested plans, and approve wallet top-ups.",
         iconKey: "dashboard",
         showPendingBadge: true,
-      },
-      {
-        href: "/clients",
-        label: "Client Directory",
-        keywords: "clients businesses accounts onboard suspend custom price team password",
-        summary: "Search clients, onboard new businesses, pause accounts, or open full client controls.",
-        iconKey: "clients",
       },
       {
         href: "/invoices",
@@ -76,8 +69,15 @@ export const ADMIN_NAV_SECTIONS_META: AdminNavSectionMeta[] = [
     ],
   },
   {
-    heading: "Platform Operations",
+    heading: "Client & Channel Operations",
     items: [
+      {
+        href: "/clients",
+        label: "Client Directory",
+        keywords: "clients businesses accounts onboard suspend custom price team password",
+        summary: "Search clients, onboard new businesses, pause accounts, or open full client controls.",
+        iconKey: "clients",
+      },
       {
         href: "/templates",
         label: "WhatsApp & Tally",
@@ -92,27 +92,11 @@ export const ADMIN_NAV_SECTIONS_META: AdminNavSectionMeta[] = [
         summary: "Retry failed tasks, send client account notifications, and review sent emails.",
         iconKey: "queues",
       },
-      {
-        href: "/staff",
-        label: "Staff Team & Roles",
-        keywords: "staff admins roles finance support password access",
-        summary: "Add staff members, manage Super Admin / Finance / Support roles, and reset passwords.",
-        iconKey: "staff",
-      },
-      {
-        href: "/inspector",
-        label: "Support Check & Log",
-        keywords: "inspector support check audit log history",
-        summary: "Run read-only client record checks and search the permanent staff activity log.",
-        iconKey: "inspector",
-      },
-      {
-        href: "/runbooks",
-        label: "Server Health & Guides",
-        keywords: "runbooks health ports services guides",
-        summary: "Live port health checks and step-by-step operational guides.",
-        iconKey: "runbooks",
-      },
+    ],
+  },
+  {
+    heading: "Platform Vault & Infrastructure",
+    items: [
       {
         href: "/credentials",
         label: "OAuth & API Credentials",
@@ -127,6 +111,32 @@ export const ADMIN_NAV_SECTIONS_META: AdminNavSectionMeta[] = [
         summary: "Review server onboarding modules, subdomain SSL mode, and SMTP readiness.",
         iconKey: "setup",
       },
+      {
+        href: "/runbooks",
+        label: "Server Health & Guides",
+        keywords: "runbooks health ports services guides",
+        summary: "Live port health checks and step-by-step operational guides.",
+        iconKey: "runbooks",
+      },
+    ],
+  },
+  {
+    heading: "Security, Staff & Audit",
+    items: [
+      {
+        href: "/staff",
+        label: "Staff Team & Roles",
+        keywords: "staff admins roles finance support password access",
+        summary: "Add staff members, manage Super Admin / Finance / Support roles, and reset passwords.",
+        iconKey: "staff",
+      },
+      {
+        href: "/inspector",
+        label: "Support Check & Log",
+        keywords: "inspector support check audit log history",
+        summary: "Run read-only client record checks and search the permanent staff activity log.",
+        iconKey: "inspector",
+      },
     ],
   },
 ];
@@ -139,7 +149,7 @@ export const ADMIN_PAGE_GUIDES: AdminPageGuide[] = [
   {
     routePrefix: "/",
     exact: true,
-    title: "Staff SOP — Verifying Client UTR Payments, Unlocking Plans & Wallet Top-Ups",
+    title: "Staff SOP - Verifying Client UTR Payments, Unlocking Plans & Wallet Top-Ups",
     summary:
       "Verify incoming UPI / Bank UTR references against your bank statement, unlock requested plans or bundles, approve wallet top-ups, or open a 30-minute Support View.",
     roleNote: "Finance & Super Admin can approve/decline billing; Support has read-only overview.",
@@ -166,12 +176,12 @@ export const ADMIN_PAGE_GUIDES: AdminPageGuide[] = [
       },
     ],
     cautions: [
-      "Always enter the pre-GST Taxable Subtotal in 'Subtotal Paid (₹)' — the system adds 9%+9% CGST/SGST (State 27) or 18% IGST automatically!",
+      "Always enter the pre-GST Taxable Subtotal in 'Subtotal Paid (₹)' - the system adds 9%+9% CGST/SGST (State 27) or 18% IGST automatically!",
     ],
   },
   {
     routePrefix: "/clients/",
-    title: "Staff SOP — Deep Client Account Controls, Custom Pricing & Complimentary Access",
+    title: "Staff SOP - Deep Client Account Controls, Custom Pricing & Complimentary Access",
     summary:
       "Manage a single client's GST profile, custom Monthly/Quarterly/Yearly pricing, complimentary All-Tools trials, team passwords, wallet ledger, and GST invoices.",
     roleNote: "Super Admin & Finance manage pricing/plans; Support manages onboarding & diagnostics.",
@@ -179,7 +189,7 @@ export const ADMIN_PAGE_GUIDES: AdminPageGuide[] = [
       {
         title: "Grant Complimentary All-Tools Pilot Access Without Polluting GST Ledger",
         detail:
-          "Use 'Complimentary All-Tools Free Access' to grant e.g. 7 or 14 pilot days with an audit note — unlocks all 15 tools cleanly without generating ₹0 tax invoices.",
+          "Use 'Complimentary All-Tools Free Access' to grant e.g. 7 or 14 pilot days with an audit note - unlocks all 15 tools cleanly without generating ₹0 tax invoices.",
       },
       {
         title: "Configure Custom Negotiated Per-Client Plan Prices",
@@ -193,12 +203,12 @@ export const ADMIN_PAGE_GUIDES: AdminPageGuide[] = [
       },
     ],
     cautions: [
-      "Revoking an active paid plan locks that screen immediately — record a clear audit note before revoking.",
+      "Revoking an active paid plan locks that screen immediately - record a clear audit note before revoking.",
     ],
   },
   {
     routePrefix: "/clients",
-    title: "Staff SOP — Searching Client Accounts & Direct Business Onboarding",
+    title: "Staff SOP - Searching Client Accounts & Direct Business Onboarding",
     summary:
       "Search businesses by trade name, GSTIN, or workspace ID, or onboard a brand-new client workspace directly on a sales/onboarding call.",
     roleNote: "Accessible to Super Admin, Finance, and Support.",
@@ -218,7 +228,7 @@ export const ADMIN_PAGE_GUIDES: AdminPageGuide[] = [
   },
   {
     routePrefix: "/invoices/",
-    title: "Staff SOP — Printing or Auditing a Sequential Rule 46 GST Tax Invoice",
+    title: "Staff SOP - Printing or Auditing a Sequential Rule 46 GST Tax Invoice",
     summary:
       "Review statutory SAC 998314 tax invoice details and print/save a clean A4 PDF copy for the client or finance archive.",
     roleNote: "Finance & Super Admin.",
@@ -238,7 +248,7 @@ export const ADMIN_PAGE_GUIDES: AdminPageGuide[] = [
   },
   {
     routePrefix: "/invoices",
-    title: "Staff SOP — GST Invoice Ledger, Manual Invoices, Voiding & GSTR-1 CSV Export",
+    title: "Staff SOP - GST Invoice Ledger, Manual Invoices, Voiding & GSTR-1 CSV Export",
     summary:
       "Audit every sequential GST tax invoice (RSL/YY-YY/XXXX), issue custom manual invoices, settle unpaid invoices, or export CSV for CA filing.",
     roleNote: "Finance & Super Admin.",
@@ -260,12 +270,12 @@ export const ADMIN_PAGE_GUIDES: AdminPageGuide[] = [
       },
     ],
     cautions: [
-      "Marking an invoice Void cancels the tax document permanently — issue a fresh sequential invoice if needed afterward.",
+      "Marking an invoice Void cancels the tax document permanently - issue a fresh sequential invoice if needed afterward.",
     ],
   },
   {
     routePrefix: "/pricing",
-    title: "Staff SOP — Updating Catalog Plan Prices & Corporate Bank / UPI Receiving Info",
+    title: "Staff SOP - Updating Catalog Plan Prices & Corporate Bank / UPI Receiving Info",
     summary:
       "Manage default Monthly / Per-Unit catalog prices and the corporate Bank + UPI details rendered on all client payment QR modals and GST invoices.",
     roleNote: "Super Admin & Pricing Managers.",
@@ -282,12 +292,12 @@ export const ADMIN_PAGE_GUIDES: AdminPageGuide[] = [
       },
     ],
     cautions: [
-      "Double-check IFSC and Account Number character-by-character before saving — every client's UPI QR code uses these exact values!",
+      "Double-check IFSC and Account Number character-by-character before saving - every client's UPI QR code uses these exact values!",
     ],
   },
   {
     routePrefix: "/templates",
-    title: "Staff SOP — Approving Client WhatsApp Templates & Auditing Tally Links",
+    title: "Staff SOP - Approving Client WhatsApp Templates & Auditing Tally Links",
     summary:
       "Push ready-made Tally Prime starter templates to client workspaces, review template compliance, and inspect client Tally sync activity.",
     roleNote: "Support & Super Admin.",
@@ -312,7 +322,7 @@ export const ADMIN_PAGE_GUIDES: AdminPageGuide[] = [
   },
   {
     routePrefix: "/queues",
-    title: "Staff SOP — Retrying Failed Background Tasks & Sending Client Email Notices",
+    title: "Staff SOP - Retrying Failed Background Tasks & Sending Client Email Notices",
     summary:
       "Inspect queued/failed WhatsApp, Tally, and SSL jobs, retry resolved failures safely without double-charging, and email client owners.",
     roleNote: "Operations, Support & Super Admin.",
@@ -337,7 +347,7 @@ export const ADMIN_PAGE_GUIDES: AdminPageGuide[] = [
   },
   {
     routePrefix: "/staff",
-    title: "Staff SOP — Managing Internal Staff Accounts & Role-Based Console Access",
+    title: "Staff SOP - Managing Internal Staff Accounts & Role-Based Console Access",
     summary:
       "Create internal staff logins with least-privilege roles (Super Admin, Finance, Support), rotate passwords, or deactivate departing staff.",
     roleNote: "Super Admin only.",
@@ -357,7 +367,7 @@ export const ADMIN_PAGE_GUIDES: AdminPageGuide[] = [
   },
   {
     routePrefix: "/inspector",
-    title: "Staff SOP — Running Read-Only Client Support Checks & Searching Audit Logs",
+    title: "Staff SOP - Running Read-Only Client Support Checks & Searching Audit Logs",
     summary:
       "Execute safe, strictly read-only diagnostic queries on a client's tenant database with mandatory ticket logging, and audit every staff action.",
     roleNote: "Support & Super Admin.",
@@ -377,10 +387,10 @@ export const ADMIN_PAGE_GUIDES: AdminPageGuide[] = [
   },
   {
     routePrefix: "/credentials",
-    title: "Staff SOP — Google OAuth Consent Screen & Database-Controlled API Credentials",
+    title: "Staff SOP - Google OAuth Consent Screen & Database-Controlled API Credentials",
     summary:
-      "Configure the RapidShift Labs Google OAuth 2.0 Web Client (for 1-click customer Google Drive & Business Profile connections), SMTP email, Cloudflare R2, Meta App, and Razorpay — encrypted directly in control.db without SSH .env edits.",
-    roleNote: "Super Admin only — all secrets encrypted with AES-256-GCM envelope keys.",
+      "Configure the RapidShift Labs Google OAuth 2.0 Web Client (for 1-click customer Google Drive & Business Profile connections), SMTP email, Cloudflare R2, Meta App, and Razorpay - encrypted directly in control.db without SSH .env edits.",
+    roleNote: "Super Admin only - all secrets encrypted with AES-256-GCM envelope keys.",
     steps: [
       {
         title: "Create a Google 'Web Application' OAuth Client (NEVER a Service Account JSON!)",
@@ -405,7 +415,7 @@ export const ADMIN_PAGE_GUIDES: AdminPageGuide[] = [
   },
   {
     routePrefix: "/setup",
-    title: "Staff SOP — Platform Onboarding Modules, Wildcard SSL Mode & Server Readiness",
+    title: "Staff SOP - Platform Onboarding Modules, Wildcard SSL Mode & Server Readiness",
     summary:
       "Verify Super Admin bootstrap lock status, subdomain HTTPS configuration (*.tally & *.api), SSL_PROVIDER_MODE, and SMTP readiness.",
     roleNote: "Super Admin readiness hub (also served on setup.rapidshiftlabs.in).",

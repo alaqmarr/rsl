@@ -3,8 +3,8 @@ import { Queue } from "bullmq";
 import IORedis from "ioredis";
 import { z } from "zod";
 import { getEnv, hashPiiIdentifier, newId, type ActorType } from "@rsl/core";
-import { controlSchema, tenantDataSchema, tenantLogsSchema } from "@rsl/database";
-import { controlDb, tenantDataDb, tenantLogsDb } from "@rsl/tenancy";
+import { controlSchema, ingressSchema, tenantDataSchema, tenantLogsSchema } from "@rsl/database";
+import { controlDb, ingressDb, tenantDataDb, tenantLogsDb } from "@rsl/tenancy";
 
 export type WorkerLane = "realtime" | "bulk" | "maintenance";
 
@@ -21,6 +21,7 @@ export const QUEUE_REGISTRY = {
   "webhooks.whatsapp": { name: "webhooks.whatsapp", lane: "realtime", concurrency: 20, maxAttempts: 8, description: "Inbound WhatsApp messages & delivery receipts" },
   "webhooks.google": { name: "webhooks.google", lane: "realtime", concurrency: 10, maxAttempts: 8, description: "Google Business review notifications" },
   "webhooks.razorpay": { name: "webhooks.razorpay", lane: "realtime", concurrency: 10, maxAttempts: 8, description: "Razorpay payment confirmations" },
+  "webhooks.outbound": { name: "webhooks.outbound", lane: "realtime", concurrency: 10, maxAttempts: 5, description: "Signed customer webhook deliveries" },
   "outbound.whatsapp": { name: "outbound.whatsapp", lane: "realtime", concurrency: 10, maxAttempts: 5, description: "1-to-1 WhatsApp replies & templates" },
   "outbound.meta": { name: "outbound.meta", lane: "realtime", concurrency: 10, maxAttempts: 5, description: "Facebook & Instagram outbound replies" },
   "outbound.google": { name: "outbound.google", lane: "realtime", concurrency: 5, maxAttempts: 5, description: "Google review public replies" },
@@ -75,13 +76,13 @@ export function getRedisConnection(): IORedis | null {
       enableReadyCheck: false,
     });
     redisClient.on("error", () => {
-      // Handled per-operation / retried automatically by IORedis; prevent unhandled EventEmitter crash
+      // Handled per-operation and retried automatically by IORedis
     });
   }
   return redisClient;
 }
 
-function getBullQueue(queueName: QueueName): Queue | null {
+export function getBullQueue(queueName: QueueName): Queue | null {
   const conn = getRedisConnection();
   if (!conn) return null;
   let q = bullQueues.get(queueName);
@@ -92,8 +93,19 @@ function getBullQueue(queueName: QueueName): Queue | null {
   return q;
 }
 
+export async function closeQueueConnectionsForShutdown(): Promise<void> {
+  const queues = Array.from(bullQueues.values());
+  bullQueues.clear();
+  await Promise.allSettled(queues.map((q) => q.close()));
+  if (redisClient) {
+    const client = redisClient;
+    redisClient = null;
+    await client.quit().catch(() => client.disconnect());
+  }
+}
+
 /**
- * SendGuard (Section 14.5): Non-restorable duplicate-send protection in logs/current.db
+ * Non-restorable duplicate-send protection stored in logs/current.db.
  */
 export function reserveSendGuard(params: {
   workspaceId: string;
@@ -117,7 +129,6 @@ export function reserveSendGuard(params: {
       if (existing.state === "sent" || existing.state === "confirmed") {
         return { allowed: false, existingState: existing.state };
       }
-      // Reclaim failed locks after retry cooldown (>= 1s) so BullMQ/Outbox retries are never permanently deadlocked (P1-09)
       if (existing.state === "failed" && now - existing.updatedAt >= 1_000) {
         logsDb
           .update(tenantLogsSchema.sendGuards)
@@ -131,7 +142,6 @@ export function reserveSendGuard(params: {
           .run();
         return { allowed: true };
       }
-      // Uncertain if reserved > 2 minutes ago (do not auto-resend per Section 14.5)
       if (existing.state === "reserved" && now - existing.reservedAt > 120_000) {
         logsDb
           .update(tenantLogsSchema.sendGuards)
@@ -178,10 +188,61 @@ export function markSendGuardOutcome(params: {
     .run();
 }
 
+function noteTenantOutboxScheduled(tenantId: string, scheduledAt: number): void {
+  try {
+    controlDb()
+      .$client.prepare(
+        `UPDATE tenant_registry
+         SET next_outbox_at = CASE
+           WHEN next_outbox_at IS NULL OR ? < next_outbox_at THEN ?
+           ELSE next_outbox_at
+         END
+         WHERE tenant_id = ?`
+      )
+      .run(scheduledAt, scheduledAt, tenantId);
+  } catch {
+    // Non-fatal if tenant_registry row is being initialized
+  }
+}
+
+export function syncTenantNextOutboxAt(tenantId: string): number | null {
+  const dataDb = tenantDataDb({ workspaceId: tenantId });
+  const row = dataDb.$client
+    .prepare(
+      `SELECT MIN(next_run_at) AS minNext
+       FROM outbox
+       WHERE status IN ('pending', 'enqueued', 'processing')`
+    )
+    .get() as { minNext: number | null } | undefined;
+  const minNext = typeof row?.minNext === "number" ? row.minNext : null;
+  try {
+    controlDb()
+      .$client.prepare(`UPDATE tenant_registry SET next_outbox_at = ? WHERE tenant_id = ?`)
+      .run(minNext, tenantId);
+  } catch {
+    // Ignore control DB update errors during teardown
+  }
+  return minNext;
+}
+
+export function listDueOutboxTenantIds(now = Date.now(), limit = 100): string[] {
+  const rows = controlDb()
+    .$client.prepare(
+      `SELECT tenant_id AS tenantId
+       FROM tenant_registry
+       WHERE status = 'active'
+         AND next_outbox_at IS NOT NULL
+         AND next_outbox_at <= ?
+       ORDER BY next_outbox_at ASC
+       LIMIT ?`
+    )
+    .all(now, Math.max(1, Math.min(500, limit))) as Array<{ tenantId: string }>;
+  return rows.map((r) => r.tenantId);
+}
+
 /**
- * Transactional Outbox Enqueue (Section 14.4):
- * Commits durable outbox row to SQLite first, then dispatches to BullMQ if REDIS_URL is configured
- * (or leaves ready for the local SQLite outbox processor when running without Redis).
+ * Commits a durable outbox row to the tenant SQLite database first, updates the indexed
+ * control-plane `next_outbox_at` pointer, and dispatches to BullMQ when `REDIS_URL` is configured.
  */
 export async function enqueueJob(params: {
   queue: QueueName;
@@ -209,9 +270,10 @@ export async function enqueueJob(params: {
 
   const dataDb = tenantDataDb({ workspaceId: params.tenantId });
   const now = Date.now();
+  const scheduledAt = now + Math.max(0, params.delayMs ?? 0);
   const outboxId = newId();
 
-  dataDb
+  const inserted = dataDb
     .insert(tenantDataSchema.outbox)
     .values({
       id: outboxId,
@@ -221,12 +283,16 @@ export async function enqueueJob(params: {
       envelopeJson: JSON.stringify(envelope),
       status: "pending",
       attempts: 0,
-      nextRunAt: now + (params.delayMs ?? 0),
+      nextRunAt: scheduledAt,
       createdAt: now,
       updatedAt: now,
     })
     .onConflictDoNothing()
     .run();
+
+  if (inserted.changes > 0) {
+    noteTenantOutboxScheduled(params.tenantId, scheduledAt);
+  }
 
   const bullQueue = getBullQueue(params.queue);
   if (bullQueue) {
@@ -258,144 +324,231 @@ export function registerJobProcessor(jobType: string, handler: JobProcessor): vo
   registeredProcessors.set(jobType, handler);
 }
 
-/**
- * Processes pending outbox items directly from SQLite (used automatically in local dev without Redis,
- * and as the sweeper/fallback on Oracle Ubuntu).
- */
-export async function processDueSqliteOutboxForTenant(tenantId: string): Promise<number> {
-  const dataDb = tenantDataDb({ workspaceId: tenantId });
-  const logsDb = tenantLogsDb({ workspaceId: tenantId });
-  const raw = dataDb.$client;
-  const now = Date.now();
-  const workerLockId = `wrk_${process.pid}_${newId().slice(-8)}`;
-  const staleProcessingCutoff = now - 5 * 60_000;
+export function hasRegisteredJobProcessor(jobType: string): boolean {
+  return registeredProcessors.has(jobType);
+}
 
-  // Atomically claim pending (or stale orphaned processing) rows inside BEGIN IMMEDIATE (P0-04)
-  const claimTx = raw.transaction(() => {
-    raw
-      .prepare(
-        `UPDATE outbox
-         SET status = 'pending', locked_at = NULL, locked_by = NULL, updated_at = ?
-         WHERE status = 'processing' AND (locked_at IS NULL OR locked_at < ?)`
-      )
-      .run(now, staleProcessingCutoff);
+export function listRegisteredJobProcessors(): string[] {
+  return Array.from(registeredProcessors.keys());
+}
 
-    const candidateRows = dataDb
-      .select()
-      .from(tenantDataSchema.outbox)
-      .where(
-        and(
-          inArray(tenantDataSchema.outbox.status, ["pending"]),
-          lte(tenantDataSchema.outbox.nextRunAt, now)
-        )
-      )
-      .limit(25)
-      .all();
-
-    if (candidateRows.length === 0) return [];
-
-    const claimedIds: string[] = [];
-    const claimStmt = raw.prepare(
-      `UPDATE outbox
-       SET status = 'processing', locked_at = ?, locked_by = ?, updated_at = ?
-       WHERE id = ? AND status = 'pending'`
+export function assertRegisteredJobTypes(requiredJobTypes: readonly string[]): void {
+  const missing = requiredJobTypes.filter((jobType) => !registeredProcessors.has(jobType));
+  if (missing.length > 0) {
+    throw new Error(
+      `Worker boot check failed: missing job processor(s) for [${missing.join(", ")}].`
     );
-    for (const candidate of candidateRows) {
-      const res = claimStmt.run(now, workerLockId, now, candidate.id);
-      if (res.changes === 1) {
-        claimedIds.push(candidate.id);
-      }
-    }
+  }
+}
 
-    return candidateRows.filter((r) => claimedIds.includes(r.id));
+export interface ProcessOutboxOptions {
+  queueName?: QueueName;
+  lanes?: Iterable<WorkerLane>;
+  idempotencyKey?: string;
+  limit?: number;
+}
+
+const inFlightTenantDrains = new Map<string, Promise<void>>();
+
+async function withTenantOutboxLock<T>(tenantId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = inFlightTenantDrains.get(tenantId) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
   });
+  const chained = prev.then(() => gate);
+  inFlightTenantDrains.set(tenantId, chained);
 
-  const dueRows = claimTx.immediate();
-
-  let processed = 0;
-
-  for (const row of dueRows) {
-    const started = Date.now();
-    const envelope = JSON.parse(row.envelopeJson) as JobEnvelope;
-    const processor = registeredProcessors.get(row.jobType);
-    const attempt = row.attempts + 1;
-
-    try {
-      if (processor) {
-        await processor(envelope);
-      }
-
-      dataDb
-        .update(tenantDataSchema.outbox)
-        .set({
-          status: "completed",
-          attempts: attempt,
-          lockedAt: null,
-          lockedBy: null,
-          updatedAt: Date.now(),
-        })
-        .where(eq(tenantDataSchema.outbox.id, row.id))
-        .run();
-
-      logsDb
-        .insert(tenantLogsSchema.jobRuns)
-        .values({
-          id: newId(),
-          ts: Date.now(),
-          queue: row.queueName,
-          jobType: row.jobType,
-          status: "completed",
-          attempt,
-          durationMs: Date.now() - started,
-          idempotencyKey: row.idempotencyKey,
-          correlationId: envelope.correlationId,
-        })
-        .run();
-
-      processed++;
-    } catch (error) {
-      const def = QUEUE_REGISTRY[row.queueName as QueueName];
-      const maxAttempts = def?.maxAttempts ?? 3;
-      const errMsg = error instanceof Error ? error.message : String(error);
-      const isDead = attempt >= maxAttempts;
-
-      dataDb
-        .update(tenantDataSchema.outbox)
-        .set({
-          status: isDead ? "failed" : "pending",
-          attempts: attempt,
-          nextRunAt: Date.now() + attempt * 5000,
-          lockedAt: null,
-          lockedBy: null,
-          lastError: errMsg,
-          updatedAt: Date.now(),
-        })
-        .where(eq(tenantDataSchema.outbox.id, row.id))
-        .run();
-
-      logsDb
-        .insert(tenantLogsSchema.jobRuns)
-        .values({
-          id: newId(),
-          ts: Date.now(),
-          queue: row.queueName,
-          jobType: row.jobType,
-          status: isDead ? "dead" : "retrying",
-          attempt,
-          durationMs: Date.now() - started,
-          errorMessage: errMsg,
-          idempotencyKey: row.idempotencyKey,
-          correlationId: envelope.correlationId,
-        })
-        .run();
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (inFlightTenantDrains.get(tenantId) === chained) {
+      inFlightTenantDrains.delete(tenantId);
     }
   }
+}
 
-  return processed;
+function resolveAllowedQueues(options?: ProcessOutboxOptions): string[] | null {
+  if (options?.queueName) {
+    return [options.queueName];
+  }
+  if (options?.lanes) {
+    const laneSet = new Set(options.lanes);
+    if (laneSet.size === 3) return null;
+    return Object.values(QUEUE_REGISTRY)
+      .filter((q) => laneSet.has(q.lane))
+      .map((q) => q.name);
+  }
+  return null;
 }
 
 /**
- * Rehydrates Redis queues from durable SQLite outbox rows after Redis restart/loss (Section 14.11).
+ * Processes due outbox items from the tenant SQLite database with single-flight per-tenant
+ * serialization, lane/queue scoping, and strict error propagation when a processor is missing.
+ */
+export async function processDueSqliteOutboxForTenant(
+  tenantId: string,
+  options?: ProcessOutboxOptions
+): Promise<number> {
+  return withTenantOutboxLock(tenantId, async () => {
+    const dataDb = tenantDataDb({ workspaceId: tenantId });
+    const logsDb = tenantLogsDb({ workspaceId: tenantId });
+    const raw = dataDb.$client;
+    const now = Date.now();
+    const workerLockId = `wrk_${process.pid}_${newId().slice(-8)}`;
+    const staleProcessingCutoff = now - 5 * 60_000;
+    const allowedQueues = resolveAllowedQueues(options);
+    if (allowedQueues !== null && allowedQueues.length === 0) {
+      return 0;
+    }
+
+    const claimableStatuses =
+      options?.idempotencyKey || options?.queueName
+        ? (["pending", "enqueued"] as const)
+        : (["pending"] as const);
+    const batchLimit = Math.max(1, Math.min(50, options?.limit ?? 25));
+
+    const claimTx = raw.transaction(() => {
+      raw
+        .prepare(
+          `UPDATE outbox
+           SET status = 'pending', locked_at = NULL, locked_by = NULL, updated_at = ?
+           WHERE status = 'processing' AND (locked_at IS NULL OR locked_at < ?)`
+        )
+        .run(now, staleProcessingCutoff);
+
+      const conditions = [
+        inArray(tenantDataSchema.outbox.status, [...claimableStatuses]),
+        lte(tenantDataSchema.outbox.nextRunAt, now),
+      ];
+      if (options?.idempotencyKey) {
+        conditions.push(eq(tenantDataSchema.outbox.idempotencyKey, options.idempotencyKey));
+      }
+      if (allowedQueues !== null) {
+        conditions.push(inArray(tenantDataSchema.outbox.queueName, allowedQueues));
+      }
+
+      const candidateRows = dataDb
+        .select()
+        .from(tenantDataSchema.outbox)
+        .where(and(...conditions))
+        .limit(batchLimit)
+        .all();
+
+      if (candidateRows.length === 0) return [];
+
+      const claimedIds: string[] = [];
+      const claimStmt = raw.prepare(
+        `UPDATE outbox
+         SET status = 'processing', locked_at = ?, locked_by = ?, updated_at = ?
+         WHERE id = ? AND status IN ('pending', 'enqueued')`
+      );
+      for (const candidate of candidateRows) {
+        const res = claimStmt.run(now, workerLockId, now, candidate.id);
+        if (res.changes === 1) {
+          claimedIds.push(candidate.id);
+        }
+      }
+
+      return candidateRows.filter((r) => claimedIds.includes(r.id));
+    });
+
+    const dueRows = claimTx.immediate();
+    let processed = 0;
+
+    for (const row of dueRows) {
+      const started = Date.now();
+      const envelope = JSON.parse(row.envelopeJson) as JobEnvelope;
+      const processor = registeredProcessors.get(row.jobType);
+      const attempt = row.attempts + 1;
+
+      try {
+        if (!processor) {
+          throw new Error(
+            `No job processor registered for jobType '${row.jobType}' on queue '${row.queueName}'.`
+          );
+        }
+
+        await processor(envelope);
+
+        dataDb
+          .update(tenantDataSchema.outbox)
+          .set({
+            status: "completed",
+            attempts: attempt,
+            lockedAt: null,
+            lockedBy: null,
+            lastError: null,
+            updatedAt: Date.now(),
+          })
+          .where(eq(tenantDataSchema.outbox.id, row.id))
+          .run();
+
+        logsDb
+          .insert(tenantLogsSchema.jobRuns)
+          .values({
+            id: newId(),
+            ts: Date.now(),
+            queue: row.queueName,
+            jobType: row.jobType,
+            status: "completed",
+            attempt,
+            durationMs: Date.now() - started,
+            idempotencyKey: row.idempotencyKey,
+            correlationId: envelope.correlationId,
+          })
+          .run();
+
+        processed++;
+      } catch (error) {
+        const def = QUEUE_REGISTRY[row.queueName as QueueName];
+        const maxAttempts = def?.maxAttempts ?? 3;
+        const errMsg = error instanceof Error ? error.message : String(error);
+        const isDead = attempt >= maxAttempts;
+        const backoffMs = Math.min(300_000, 2_000 * 2 ** Math.min(attempt - 1, 7));
+        const retryAt = Date.now() + backoffMs;
+
+        dataDb
+          .update(tenantDataSchema.outbox)
+          .set({
+            status: isDead ? "failed" : "pending",
+            attempts: attempt,
+            nextRunAt: retryAt,
+            lockedAt: null,
+            lockedBy: null,
+            lastError: errMsg,
+            updatedAt: Date.now(),
+          })
+          .where(eq(tenantDataSchema.outbox.id, row.id))
+          .run();
+
+        logsDb
+          .insert(tenantLogsSchema.jobRuns)
+          .values({
+            id: newId(),
+            ts: Date.now(),
+            queue: row.queueName,
+            jobType: row.jobType,
+            status: isDead ? "dead" : "retrying",
+            attempt,
+            durationMs: Date.now() - started,
+            errorMessage: errMsg,
+            idempotencyKey: row.idempotencyKey,
+            correlationId: envelope.correlationId,
+          })
+          .run();
+      }
+    }
+
+    syncTenantNextOutboxAt(tenantId);
+    return processed;
+  });
+}
+
+/**
+ * Rehydrates Redis queues from durable SQLite outbox rows after Redis restart.
  */
 export async function rehydrateFromSqlite(): Promise<{ scannedTenants: number; reEnqueued: number }> {
   const tenants = controlDb()
@@ -413,6 +566,11 @@ export async function rehydrateFromSqlite(): Promise<{ scannedTenants: number; r
       .where(inArray(tenantDataSchema.outbox.status, ["pending", "enqueued"]))
       .all();
 
+    if (pending.length === 0) {
+      syncTenantNextOutboxAt(t.tenantId);
+      continue;
+    }
+
     for (const row of pending) {
       const env = JSON.parse(row.envelopeJson) as JobEnvelope;
       const q = getBullQueue(row.queueName as QueueName);
@@ -421,17 +579,105 @@ export async function rehydrateFromSqlite(): Promise<{ scannedTenants: number; r
           jobId: row.idempotencyKey.replace(/:/g, "_"),
         });
         reEnqueued++;
-      } else {
-        await processDueSqliteOutboxForTenant(t.tenantId);
+      } else if (registeredProcessors.has(row.jobType)) {
+        await processDueSqliteOutboxForTenant(t.tenantId, {
+          idempotencyKey: row.idempotencyKey,
+        });
         reEnqueued++;
       }
     }
+    syncTenantNextOutboxAt(t.tenantId);
   }
 
   return { scannedTenants: tenants.length, reEnqueued };
 }
 
-export function getPlatformQueueOverview() {
+export interface PlatformQueueSummarySnapshot {
+  mode: "bullmq" | "sqlite_durable";
+  tenantsWithPendingOutbox: number;
+  pendingInboundWebhooks: number;
+  deadInboundWebhooks: number;
+  pendingOutboundWebhooks: number;
+  deadOutboundWebhooks: number;
+  refreshedAt: number;
+}
+
+let cachedSummary: PlatformQueueSummarySnapshot | null = null;
+
+export function refreshPlatformQueueSummaryCache(): PlatformQueueSummarySnapshot {
+  const ctrlRaw = controlDb().$client;
+  const outboxTenantsRow = ctrlRaw
+    .prepare(
+      `SELECT COUNT(*) AS cnt
+       FROM tenant_registry
+       WHERE status = 'active' AND next_outbox_at IS NOT NULL`
+    )
+    .get() as { cnt: number } | undefined;
+
+  const outboundCounts = ctrlRaw
+    .prepare(
+      `SELECT
+         SUM(CASE WHEN status IN ('pending', 'retrying') THEN 1 ELSE 0 END) AS pendingCnt,
+         SUM(CASE WHEN status = 'dead' THEN 1 ELSE 0 END) AS deadCnt
+       FROM webhook_deliveries`
+    )
+    .get() as { pendingCnt: number | null; deadCnt: number | null } | undefined;
+
+  const ingressCounts = ingressDb().$client
+    .prepare(
+      `SELECT
+         SUM(CASE WHEN status IN ('received', 'enqueued') THEN 1 ELSE 0 END) AS pendingCnt,
+         SUM(CASE WHEN status = 'dead' THEN 1 ELSE 0 END) AS deadCnt
+       FROM webhook_inbox`
+    )
+    .get() as { pendingCnt: number | null; deadCnt: number | null } | undefined;
+
+  void ingressSchema;
+
+  cachedSummary = {
+    mode: isRedisConfigured() ? "bullmq" : "sqlite_durable",
+    tenantsWithPendingOutbox: Number(outboxTenantsRow?.cnt ?? 0),
+    pendingInboundWebhooks: Number(ingressCounts?.pendingCnt ?? 0),
+    deadInboundWebhooks: Number(ingressCounts?.deadCnt ?? 0),
+    pendingOutboundWebhooks: Number(outboundCounts?.pendingCnt ?? 0),
+    deadOutboundWebhooks: Number(outboundCounts?.deadCnt ?? 0),
+    refreshedAt: Date.now(),
+  };
+  return cachedSummary;
+}
+
+export function getCachedPlatformQueueSummary(maxAgeMs = 15_000): PlatformQueueSummarySnapshot {
+  if (cachedSummary && Date.now() - cachedSummary.refreshedAt <= maxAgeMs) {
+    return cachedSummary;
+  }
+  return refreshPlatformQueueSummaryCache();
+}
+
+let cachedOverview: {
+  expiresAt: number;
+  data: {
+    mode: string;
+    queues: QueueDefinition[];
+    pendingCount: number;
+    failedCount: number;
+    completedCount: number;
+    deadLetters: Array<{
+      tenantId: string;
+      outboxId: string;
+      queueName: string;
+      jobType: string;
+      attempts: number;
+      lastError: string | null;
+      updatedAt: number;
+    }>;
+  };
+} | null = null;
+
+export function getPlatformQueueOverview(options?: { bypassCache?: boolean }) {
+  if (!options?.bypassCache && cachedOverview && cachedOverview.expiresAt > Date.now()) {
+    return cachedOverview.data;
+  }
+
   const tenants = controlDb()
     .select()
     .from(controlSchema.tenantRegistry)
@@ -477,25 +723,42 @@ export function getPlatformQueueOverview() {
     }
   }
 
-  return {
-    mode: isRedisConfigured() ? "BullMQ + Redis (Durable SQLite Outbox)" : "SQLite Durable Queue (Local Mode)",
+  const data = {
+    mode: isRedisConfigured()
+      ? "BullMQ + Redis (Durable SQLite Outbox)"
+      : "SQLite Durable Queue (Local Mode)",
     queues: Object.values(QUEUE_REGISTRY),
     pendingCount,
     failedCount,
     completedCount,
     deadLetters,
   };
+  cachedOverview = { expiresAt: Date.now() + 5_000, data };
+  return data;
 }
 
 export async function replayDeadLetterJob(tenantId: string, outboxId: string): Promise<void> {
   const dataDb = tenantDataDb({ workspaceId: tenantId });
+  const now = Date.now();
+  const row = dataDb
+    .select()
+    .from(tenantDataSchema.outbox)
+    .where(eq(tenantDataSchema.outbox.id, outboxId))
+    .get();
+
   dataDb
     .update(tenantDataSchema.outbox)
-    .set({ status: "pending", attempts: 0, nextRunAt: Date.now(), updatedAt: Date.now() })
+    .set({ status: "pending", attempts: 0, nextRunAt: now, lastError: null, updatedAt: now })
     .where(eq(tenantDataSchema.outbox.id, outboxId))
     .run();
 
-  await processDueSqliteOutboxForTenant(tenantId);
+  noteTenantOutboxScheduled(tenantId, now);
+
+  if (row && registeredProcessors.has(row.jobType)) {
+    await processDueSqliteOutboxForTenant(tenantId, {
+      idempotencyKey: row.idempotencyKey,
+    });
+  }
 }
 
 export * from "./ssl";

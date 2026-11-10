@@ -1,173 +1,165 @@
 ---
-title: Connecting WhatsApp Cloud API, Instagram, Facebook, Meta Pixel & Google
-summary: Complete minute-by-minute instructions for Meta App Dashboard, Meta Business Settings System Users, Permanent Tokens, Webhook Verify Tokens, Instagram DM controls, Google Business Profile APIs, and Google Drive backups.
+title: Connecting WhatsApp Cloud API, Meta (Instagram, Facebook, Ads) & Google (2026 Guide)
+summary: Up-to-date 2026 reference for 1-Click Google Auth Platform, Google Cloud Console Ads API Access Levels (Test, Explorer & Standard without Developer Tokens), Meta Developer Console Use Cases, Facebook Login for Business Configurations, and WhatsApp Embedded Signup.
 section: Getting Started
 audience: customer
 order: 2
-lastReviewed: 2026-11-03
+lastReviewed: 2026-11-10
 ---
 
-## Overview & Golden Rule Against Expired Tokens
+## 1. Customer 1-Click Connections vs. Platform Setup
 
-Every external channel connection is managed in **Connected Channels** (`/connections`). Before pasting any token from Meta or Google, keep one critical rule in mind:
+In RapidShift Labs (`/connections`), business owners connect every channel in **1 click** using official OAuth 2.0 popups:
 
-> **Never Paste Meta's 24-Hour Temporary Token:** The token shown inside `developers.facebook.com -> WhatsApp -> API Setup` expires automatically after **24 hours** (`OAuthException Code 190`). Always generate a **Permanent System User Token** (`Expiration: Never`) inside `business.facebook.com/settings` using the exact steps below.
+- **Google 1-Click Sign-In**: Connects **Google Drive Off-Site Backups** (`drive.file`), **Google Business Profile** (`business.manage`), **Google Sheets**, **Google Search Console**, and **Google Ads** (`adwords`) without creating any GCP project or Service Account JSON key.
+- **Meta 1-Click Login for Business & WhatsApp Embedded Signup**: Connects **WhatsApp Business Cloud API**, **Instagram Business**, **Facebook Pages**, and **Meta Ads & Conversions API Pixels** directly from your Meta Business Portfolio.
 
----
-
-## Part 1 — Connecting Official WhatsApp Business Cloud API (Every Meta Click)
-
-### A. Create & Configure Your Meta Business App
-
-1. Sign in to `https://developers.facebook.com/apps` using your Facebook account that owns your Meta Business Portfolio.
-2. Click **Create App** (top right):
-   - Select **Other** -> click **Next**.
-   - Select app type **Business** -> click **Next**.
-   - Enter **App Name** (for example `Shree Traders WhatsApp Suite`), enter your **App Contact Email**, select your **Business Portfolio** from the dropdown, and click **Create App**.
-3. On the **Add products to your app** screen, scroll to **WhatsApp** and click **Set up**.
-4. In the left sidebar of Meta App Dashboard, click **App Settings -> Basic**:
-   - Under **App Domains**, type `rapidshiftlabs.in` and `app.rapidshiftlabs.in`.
-   - Under **Privacy Policy URL**, enter your company's HTTPS privacy policy URL (for example `https://rapidshiftlabs.in/privacy`) and under **Terms of Service URL** enter your terms URL.
-   - Choose **Category: Business and Pages**, then click **Save changes** at the bottom right.
-
-### B. Copy Your 15-Digit Phone Number ID & WABA ID
-
-1. In Meta App Dashboard left sidebar, click **WhatsApp -> API Setup** (or **WhatsApp -> Quickstart -> API Setup**).
-2. Under **Step 1: Select phone numbers**, choose your registered business phone number in the **From** dropdown (to add a real SIM/landline number instead of Meta's test number, scroll down and click **Add phone number**, verify your display name, and enter the 6-digit SMS/Voice OTP).
-3. Directly below the **From** dropdown, copy two numbers carefully:
-   - **Phone number ID** (a 15-digit number like `109283746519283` — **do NOT enter your `+91...` 10-digit mobile number here.**).
-   - **WhatsApp Business Account ID (WABA ID)** (a 15-to-16-digit number right next to it, like `118293049581726`).
-4. **If testing while Meta App is still in Development Mode:** Under the **To** field, click **Manage phone number list -> Add phone number**, enter up to 5 test mobile numbers with country code `+91`, and verify via OTP. (This prevents Meta Error `#131030: Recipient phone number not in allowed list`.)
-
-### C. Generate a Permanent Never-Expiring System User Token
-
-1. Open `https://business.facebook.com/settings` (Meta Business Settings) in a new browser tab.
-2. In the left menu under **Users**, click **System users** -> click the blue **Add** button:
-   - If prompted, accept Meta's Non-Discrimination Policy.
-   - Enter **System user name**: `RSL Marketing Server`.
-   - Select **System user role**: **Admin** (must be Admin, not Employee).
-   - Click **Create system user**.
-3. Select `RSL Marketing Server` in the list and click **Assign assets**:
-   - Click **Apps** in the left column -> tick your Meta App -> toggle ON **Manage app (Full control)**.
-   - Click **WhatsApp accounts** in the left column -> tick your WhatsApp Business Account -> toggle ON **Manage WhatsApp account (Full control)**.
-   - Click **Save changes** -> **Done**.
-4. Click **Generate new token** (top right of the System User panel):
-   - **Select app**: pick your Meta App from the dropdown.
-   - **Set token expiration**: select **Never** (critical).
-   - Scroll through **Permissions** and tick all three checkboxes:
-     - `whatsapp_business_messaging`
-     - `whatsapp_business_management`
-     - `business_management`
-   - Click **Generate token**, copy the entire `EAA...` string immediately, and keep it ready.
-
-### D. Attach a Billing Card in Meta & Switch App to Live Mode
-
-1. Still inside `business.facebook.com/settings`, click **Billing & payments** (or **Accounts -> WhatsApp accounts -> Settings -> Payment Settings**) and attach a valid Visa/Mastercard with international/recurring transactions enabled. (Without a card attached on Meta's side, Meta blocks outbound template messages with Error `#131042: Business eligibility payment issue`.)
-2. Return to `developers.facebook.com/apps`, open your app, and flip the top header switch from **App Mode: Development** to **Live**.
-
-### E. Paste Credentials in RapidShift Labs & Verify Meta Webhook
-
-1. Open `https://app.rapidshiftlabs.in/connections` (**Connected Channels**) and select the **WhatsApp Cloud API** tab.
-2. Copy the two values shown in the **Inbound Webhook Verification** box on the left:
-   - **WhatsApp Callback URL**: `https://app.rapidshiftlabs.in/api/webhooks/whatsapp`
-   - **Webhook Verify Token**: `rsl_verify_...` (click **Copy**).
-3. In Meta App Dashboard, go to **WhatsApp -> Configuration** -> under **Webhook**, click **Edit**:
-   - Paste **Callback URL** (`https://app.rapidshiftlabs.in/api/webhooks/whatsapp`).
-   - Paste **Verify token** (`rsl_verify_...`).
-   - Click **Verify and save** (Meta immediately sends a `GET` challenge to RapidShift Labs and turns green).
-4. Still under **Webhook**, click **Manage** (or **Webhook fields**) and click **Subscribe** next to both:
-   - `messages` (delivers incoming customer WhatsApp replies & `STOP` opt-outs to your Shared Inbox)
-   - `message_template_status_update` (updates template approval status automatically)
-5. Back in RapidShift Labs **Connected Channels**, fill in the right-hand form:
-   - **Connection Label**: e.g. `Main Billing WhatsApp (+91 98200 XXXXX)`
-   - **Phone Number ID**: paste your 15-digit Phone Number ID
-   - **WABA ID**: paste your 15-digit WhatsApp Business Account ID
-   - **Permanent Access Token**: paste your `EAA...` System User token
-   - Keep **Run live API check immediately after saving** checked and click **Connect WhatsApp Cloud API**.
-6. Confirm the connection card appears below with a green **Healthy** pill.
+If you are configuring your own dedicated Google Cloud Project or Meta Business App (or managing the RapidShift Labs Super Admin Vault at `/credentials`), follow the updated **2026 Google Cloud Console** and **2026 Meta Developer Console** instructions below.
 
 ---
 
-## Part 2 — Connecting Instagram Business (DMs, Comments & Scheduled Posts)
+## 2. Google Cloud Console Setup (2026 Google Auth Platform)
 
-1. **Convert to Professional Account & Link Facebook Page**:
-   - On your phone's Instagram app, open **Profile -> Edit profile -> Switch to professional account -> Business**.
-   - Link it to your company's Facebook Page (`Edit profile -> Page -> Connect or create`).
-2. **Turn ON "Allow Access to Messages" on Mobile (Most Skipped Step)**:
-   - Open the **Instagram mobile app** on your phone (this setting does NOT exist on desktop).
-   - Tap the top-right **Menu (☰) -> Settings and activity -> Messages and story replies -> Message controls -> Connected tools**.
-   - Toggle **Allow access to messages** to **ON**. *(If left OFF, Meta silently drops 100% of Instagram DM webhooks)*
-3. **Assign Assets & Generate Permanent Token**:
-   - In `business.facebook.com/settings -> Users -> System users`, select `RSL Marketing Server` -> **Assign assets**.
-   - Under **Pages**, select your linked Facebook Page -> toggle **Full control**.
-   - Under **Instagram accounts**, select your Instagram account -> toggle **Full control** -> click **Save changes**.
-   - Click **Generate new token** (`Expiration: Never`) with permissions: `instagram_basic`, `instagram_manage_messages`, `instagram_manage_comments`, `instagram_content_publish`, `pages_show_list`, `pages_read_engagement`, `pages_manage_metadata`.
-4. **Find Your Numeric 17-Digit Instagram Business Account ID**:
-   - Open `https://developers.facebook.com/tools/explorer`, paste your token, and run `GET /v21.0/me/accounts?fields=name,instagram_business_account`.
-   - Copy the numeric `instagram_business_account.id` (looks like `17841405822304914` — **never enter `@yourhandle`**).
-5. **Verify Meta Webhook & Save in RapidShift Labs**:
-   - In Meta App Dashboard -> **Webhooks**, choose **Instagram** from the top dropdown, click **Subscribe to this object**, paste **Meta Callback URL** (`https://app.rapidshiftlabs.in/api/webhooks/meta`) and your **Webhook Verify Token**, and subscribe to `messages`, `messaging_postbacks`, and `comments`.
-   - In RapidShift Labs `/connections` -> **Instagram Business**, enter a **Connection Label**, **17-Digit IG Business Account ID**, linked **Facebook Page ID**, and **Permanent Access Token**, then click **Connect Instagram Business**.
+Google replaced the legacy "OAuth consent screen" menu with **Google Auth Platform** (`Overview`, `Branding`, `Audience`, `Data Access`, and `Clients`) and moved **Google Ads API access levels** directly into **Google Cloud Console** (retiring legacy Developer Tokens).
 
----
+### Step A: Enable Required APIs in Google Cloud Console
 
-## Part 3 — Connecting Facebook Page & Messenger
+1. Sign in to `https://console.cloud.google.com` with `app@rapidshiftlabs.in` and select your project (**RapidShift Labs**).
+2. Open **APIs & Services -> Library** and enable:
+   - **Google Drive API** (for encrypted `.rslbackup` vault uploads via `drive.file`)
+   - **Google Sheets API** (for live financial & campaign sheet exports)
+   - **Google Search Console API** (for verified domain search analytics)
+   - **My Business Account Management API** and **My Business Business Information API** (for Google Business Profile locations & review replies)
+   - **Google Ads API** (for live Google Ads campaign sync and ROAS attribution)
 
-1. Open your Facebook Page -> **About -> Page transparency** and copy your numeric **Page ID**.
-2. In `business.facebook.com/settings -> System users -> Assign assets -> Pages`, ensure `RSL Marketing Server` has **Full control** on that Page.
-3. Generate a System User token (`Expiration: Never`) with `pages_show_list`, `pages_messaging`, `pages_manage_posts`, `pages_read_engagement`, and `pages_manage_metadata`, then call `GET /v21.0/me/accounts` in Graph API Explorer and copy the **Page-specific `access_token`** returned inside `data[]` for your Page.
-4. On your Facebook Page -> **Settings -> New Pages Experience -> Advanced Messaging -> Handover Protocol**, set your Meta App as **Primary Receiver**.
-5. In Meta App Dashboard -> **Webhooks -> Page**, verify `https://app.rapidshiftlabs.in/api/webhooks/meta` with your **Verify Token** and subscribe to `messages`, `messaging_postbacks`, and `feed`.
-6. Paste the **Page ID** and **Page Access Token** under `/connections -> Facebook Page` and click **Connect Facebook Page**.
+### Step B: Configure Google Auth Platform -> Branding & Audience
 
----
+1. In the left navigation of Google Cloud Console, open **Google Auth Platform -> Branding**:
+   - **App name**: `RapidShift Labs`
+   - **User support email**: `app@rapidshiftlabs.in`
+   - **App logo**: Upload the official RapidShift Labs square mark (120x120 px PNG).
+   - **Application home page**: `https://app.rapidshiftlabs.in`
+   - **Application privacy policy link**: `https://app.rapidshiftlabs.in/privacy`
+   - **Application terms of service link**: `https://app.rapidshiftlabs.in/terms`
+   - **Authorized domains**: Add `rapidshiftlabs.in`
+   - **Developer contact information**: `app@rapidshiftlabs.in`
+   - Click **Save**.
+2. Open **Google Auth Platform -> Audience**:
+   - Set **User type** to **External**.
+   - Click **Publish App** so **Publishing status** changes from `Testing` to **`In production`**. *(Leaving an app in `Testing` causes Google to expire refresh tokens every 7 days.)*
 
-## Part 4 — Connecting Meta Ads & Conversions API Pixel
+### Step C: Configure Google Auth Platform -> Data Access (Scopes)
 
-1. In `business.facebook.com/settings -> System users -> Assign assets`:
-   - Under **Ad accounts**, select your Ad Account -> enable **Manage campaigns**.
-   - Under **Datasets / Pixels**, select your Website Pixel -> enable **Manage events**.
-2. Generate a System User token (`Expiration: Never`) with `ads_read`, `ads_management`, and `business_management`.
-3. Copy your **Ad Account ID** and ensure it starts with `act_` (for example `act_293847561029384`), plus your 15-to-16-digit **Dataset / Pixel ID**.
-4. In `/connections -> Meta Ads & Pixel`, paste your `act_...` Ad Account ID, Pixel ID, and token, then click **Connect Meta Ads & Pixel**.
+1. Open **Google Auth Platform -> Data Access** and click **Add or remove scopes**.
+2. Add the following scopes and click **Update -> Save**:
+   - `openid`, `email`, `profile`
+   - `https://www.googleapis.com/auth/drive.file` *(Non-sensitive per-file scope; accesses only the `RapidShift Labs Backups` folder created by the app and requires zero CASA security audit)*
+   - `https://www.googleapis.com/auth/spreadsheets`
+   - `https://www.googleapis.com/auth/webmasters.readonly`
+   - `https://www.googleapis.com/auth/business.manage`
+   - `https://www.googleapis.com/auth/adwords`
 
----
+### Step D: Create Web Application Client in Google Auth Platform -> Clients
 
-## Part 5 — Connecting Google Business Profile (1-Click Google Sign-In)
-
-> **No Google Cloud Console or Service Account JSON Needed.** RapidShift Labs provides a direct **"Sign in with Google"** consent screen so you never have to create GCP projects, Service Account JSON keys, or manual OAuth tokens.
-
-1. Open `https://app.rapidshiftlabs.in/connections` (**Connected Channels**) and click the **Google Business** tab at the top.
-2. Click the **Connect Google Business Profile** button.
-3. On Google's official sign-in screen (`accounts.google.com`), pick the Google account that owns or manages your verified **Google Business Profile** store listing.
-4. Review the **RapidShift Labs** permission prompt (`business.manage` — to read customer reviews and publish owner replies) and click **Continue / Allow**.
-5. You are redirected straight back to RapidShift Labs with a green **Healthy** connection card, auto-renewing refresh token, and your primary Storefront Location ID linked automatically.
-   - *Managing multiple store branches?* Click **Rotate Token / Edit** on the connected card below if you want to specify a particular `locations/...` branch ID.
+1. Open **Google Auth Platform -> Clients** and click **+ Create Client**.
+2. Select **Application type**: **`Web application`** *(Never select Service Account; Service Accounts have 0 GB Drive quota and cannot render 1-Click Sign in with Google)*.
+3. Enter **Name**: `RapidShift Labs Web OAuth Client`.
+4. Under **Authorized JavaScript origins**, add:
+   - `https://app.rapidshiftlabs.in`
+5. Under **Authorized redirect URIs**, add:
+   - `https://app.rapidshiftlabs.in/api/oauth/google/callback`
+6. Click **Create**, download the `client_secret_*.json` file, and upload it in **Admin Console -> Credentials -> Section 1 (Google Cloud OAuth 2.0)**.
 
 ---
 
-## Part 6 — Connecting Google Drive Off-Site Backup Vault (1-Click Google Sign-In)
+## 3. Google Ads API Access in Google Cloud Console (No Developer Token Required)
 
-1. Open either **Backups & Storage** (`/backups`) or **Connected Channels** (`/connections`) — the **Connect to Google Drive** button is right at the top of both pages.
-2. Click **Connect to Google Drive** (do **not** create or upload any Google Service Account JSON file).
-3. Sign in with the Gmail or Google Workspace account where you want encrypted off-site backups stored and click **Allow** on the **RapidShift Labs** consent screen:
-   - RapidShift Labs requests **only** Google's privacy-safe `https://www.googleapis.com/auth/drive.file` permission. It can **only** access the backup folder it creates and can **never** see, list, or read any other personal or company files in your Google Drive.
-4. RapidShift Labs **automatically creates a `RapidShift Labs Backups` folder** inside your Google Drive (no manual Folder ID copying required).
-5. Every time you click **Create Backup Now** (or **Backup & Upload to Google Drive Now**) on `/backups`, your encrypted `.rslbackup` snapshot is both downloadable in your browser and **uploaded automatically into your Google Drive folder**.
+In 2025/2026, Google Ads API retired Developer Tokens for new integrations:
 
----
+- **Developer tokens are no longer required** for calling the Google Ads API.
+- **API access levels are managed exclusively in the Google Cloud Console** (`APIs & Services -> Google Ads API`).
 
-## Rotating or Testing Tokens Later
+### Understanding Google Cloud Console Access Levels
 
-- You can test any connected channel at any time by clicking **Test Live API** on its card in `/connections` or inside **All API Tokens** (`/settings/tokens`).
-- If you rotate your **Webhook Verify Token**, remember to update the matching Verify Token inside Meta App Dashboard -> **Webhooks** immediately afterward.
-
----
-
-## Troubleshooting Google Sign-In & Re-Authentication (`Needs Re-Auth`)
-
-| Symptom | Cause | Exact Resolution |
+| Access Level | Daily Quota & Scope | When to Use |
 | --- | --- | --- |
-| **Connection badge shows `Needs Re-Auth`** | Google Drive or Google Business permission was revoked in `myaccount.google.com/permissions` or your Workspace password policy reset OAuth sessions | Click **Connect to Google Drive** (on `/backups` or `/connections`) or **Connect Google Business Profile** and approve the Google prompt once to issue a fresh refresh token |
-| **`Connect to Google Drive` button shows `Setup Pending`** | Platform Google OAuth client keys have not been enabled on this server instance yet | Use **Cloudflare R2 / Amazon S3** or browser `.rslbackup` downloads immediately while platform administrators enable Google OAuth |
-| **Wrong Gmail account selected during sign-in** | Browser auto-selected a personal Gmail tab instead of your company Google account | Click **Connect to Google Drive** again — RapidShift Labs passes `prompt=consent` so you can pick the exact Google account where `RapidShift Labs Backups` should live |
+| **Test** *(Default on enablement)* | **15,000 daily API operations** on Google Ads **Test Accounts**, developer sandboxing, and test environment access | Immediate integration testing against a Google Ads Test Manager account before production approval |
+| **Explorer** *(Next upgrade level)* | **2,880 daily API operations** on **Production Google Ads accounts** | Suitable for developing, testing, and operating live production Google Ads accounts |
+| **Standard** | **Unlimited daily API operations** on Production Google Ads accounts | High-volume multi-client production agencies and SaaS platforms |
+
+### How to Upgrade from Test to Explorer Access (And Fix "Not Approved" Notices)
+
+If you open **Google Cloud Console -> APIs & Services -> Google Ads API** and see **Current access level: Test** or the banner **"Your application for explorer-level access was not approved"**, complete all four checks below before clicking **Apply for access** under **Upgrade access level -> Next access level: Explorer**:
+
+1. **Verify Your Corporate Contact Email in Google Ads API Center**:
+   - Even though access levels moved to Google Cloud Console, open your Google Ads Manager (MCC) account -> **Tools -> API Center** and ensure the **API contact email** is set to your corporate workspace email (`app@rapidshiftlabs.in`, never a personal `@gmail.com` address) and verify any confirmation link sent by Google.
+2. **Link an Active Google Cloud Billing Account**:
+   - In Google Cloud Console -> **Billing**, verify that your project is linked to an active, valid Billing Account. Google's automated compliance check rejects Explorer applications on unbilled Cloud projects.
+3. **Complete Live Branding & Legal URLs in Google Auth Platform**:
+   - Confirm that `https://app.rapidshiftlabs.in`, `https://app.rapidshiftlabs.in/privacy`, and `https://app.rapidshiftlabs.in/terms` return HTTP `200 OK` publicly and match the **Authorized domain** (`rapidshiftlabs.in`) in **Google Auth Platform -> Branding**.
+4. **Provide Specific Production Use-Case Details on Re-Application**:
+   - When clicking **Apply for access** for **Explorer**, clearly describe the integration: *"RapidShift Labs is a multi-tenant business marketing and accounting platform (rapidshiftlabs.in) used by verified Indian SMBs to authenticate their own Google Ads accounts via OAuth 2.0, view daily campaign spend/clicks/conversions, and manage campaign budgets."*
+
+---
+
+## 4. Meta Developer Console Setup (2026 Use Cases & Login for Business)
+
+Meta's 2026 App Dashboard replaces the legacy "Add Product" grid with **Use Cases**, **Facebook Login for Business Configurations**, and **WhatsApp Embedded Signup**.
+
+### Step A: Create Your Meta App with Use Cases
+
+1. Sign in to `https://developers.facebook.com/apps` and click **Create App**.
+2. Select your verified **Meta Business Portfolio** (Business Manager).
+3. On the **Use cases** step, select **Authenticate and request data from users with Facebook Login** (or **Other -> Business**) and name the app **`RapidShift Labs`**, with contact email `app@rapidshiftlabs.in`.
+4. In the left sidebar, click **Use cases -> Add use cases** and attach:
+   - **Facebook Login for Business** (OAuth 2.0 onboarding & System User token issuance)
+   - **WhatsApp** (Official WhatsApp Business Cloud API & Embedded Signup)
+   - **Marketing API** (Meta Ads, Ad Accounts `act_...`, and Conversions API Pixels)
+   - **Manage messaging & content on Instagram** (Instagram Business DMs, comments, and scheduled Reels/posts)
+   - **Manage everything on your Page** (Facebook Page posts, Messenger inbox, and Lead Ads `leadgen`)
+
+### Step B: Configure App Settings -> Basic & OAuth Redirect URIs
+
+1. Open **App Settings -> Basic**:
+   - **App Domains**: `rapidshiftlabs.in` and `app.rapidshiftlabs.in`
+   - **Contact Email**: `app@rapidshiftlabs.in`
+   - **Privacy Policy URL**: `https://app.rapidshiftlabs.in/privacy`
+   - **Terms of Service URL**: `https://app.rapidshiftlabs.in/terms`
+   - **User Data Deletion**: `https://app.rapidshiftlabs.in/data-deletion`
+   - Click **Save changes**.
+2. Open **Use cases -> Facebook Login for Business -> Settings**:
+   - Toggle ON **Client OAuth login**, **Web OAuth login**, **Enforce HTTPS**, and **Embedded Browser OAuth Login**.
+   - Under **Valid OAuth Redirect URIs**, add:
+     - `https://app.rapidshiftlabs.in/api/oauth/meta/callback`
+   - Under **Allowed Domains for the JavaScript SDK**, add:
+     - `https://app.rapidshiftlabs.in`
+   - Click **Save changes**.
+
+### Step C: Create Facebook Login for Business Configurations (`config_id`)
+
+1. Open **Facebook Login for Business -> Configurations** and click **+ Create configuration**:
+   - **Configuration 1 (Full Business Suite OAuth)**:
+     - **Name**: `RapidShift Labs Business Suite`
+     - **Login variation**: `General`
+     - **Access token**: `System-user access token` (Never expires)
+     - **Assets & Permissions**: Select `public_profile`, `business_management`, `ads_management`, `ads_read`, `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `pages_manage_ads`, `pages_messaging`, `leads_retrieval`, `instagram_basic`, `instagram_content_publish`, `instagram_manage_messages`, `whatsapp_business_management`, `whatsapp_business_messaging`.
+   - **Configuration 2 (WhatsApp Embedded Signup)**:
+     - **Name**: `RapidShift Labs WhatsApp Embedded Signup`
+     - **Login variation**: `WhatsApp Embedded Signup`
+     - **Permissions**: `whatsapp_business_management`, `whatsapp_business_messaging`, `business_management`.
+2. Copy the generated numeric **Configuration IDs** and paste them into **Admin Console -> Credentials -> Section 4 (Meta & WhatsApp App)**.
+
+### Step D: Subscribe Meta & WhatsApp Webhooks
+
+1. **Meta Pages, Instagram & Lead Ads Webhook**:
+   - Callback URL: `https://app.rapidshiftlabs.in/api/webhooks/meta`
+   - Verify Token: Your workspace or global Verify Token (`rsl_verify_...`)
+   - Subscribed fields:
+     - **Page**: `messages`, `messaging_postbacks`, `feed`, `leadgen`
+     - **Instagram**: `messages`, `messaging_postbacks`, `comments`
+2. **WhatsApp Business Account Webhook**:
+   - Callback URL: `https://app.rapidshiftlabs.in/api/webhooks/whatsapp`
+   - Verify Token: `rsl_verify_...`
+   - Subscribed fields: `messages`, `message_template_status_update`, `account_update`
+3. **Instagram Mobile Message Control Check**:
+   - In the Instagram mobile app on your phone, open **Settings and activity -> Messages and story replies -> Message controls -> Connected tools** and toggle **Allow access to messages** to **ON** so Instagram DM webhooks are delivered.

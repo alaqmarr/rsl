@@ -229,7 +229,7 @@ export const createGoogleAdCampaign = defineAction({
           adGroupOperation: {
             create: {
               resourceName: adGroupTempResource,
-              name: `${input.name.trim().slice(0, 80)} — Search Ad Group`,
+              name: `${input.name.trim().slice(0, 80)} - Search Ad Group`,
               campaign: campaignTempResource,
               status: "ENABLED",
               type: "SEARCH_STANDARD",
@@ -276,13 +276,13 @@ export const createGoogleAdCampaign = defineAction({
           "Contact Us Now"
         );
         const d1 = sanitizeRsaAssetText(
-          input.primaryText || `${input.name.trim()} — Connect with us for fast pricing and verified service.`,
+          input.primaryText || `${input.name.trim()} - Connect with us for fast pricing and verified service.`,
           90,
           "Connect with our team today for fast pricing, verified quality, and prompt delivery."
         );
         const d2 = sanitizeRsaAssetText(
           input.callToAction
-            ? `${input.callToAction.replace(/_/g, " ")} — Direct support & transparent GST billing.`
+            ? `${input.callToAction.replace(/_/g, " ")} - Direct support & transparent GST billing.`
             : "Fast response on enquiries with transparent pricing and verified delivery.",
           90,
           "Fast response on enquiries with transparent pricing and verified delivery."

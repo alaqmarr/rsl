@@ -1,11 +1,13 @@
 import Form from "next/form";
 import {
   ACTION_CATALOG,
+  countActionLogs,
   getCorrelationTimeline,
   listRecentActionLogs,
   verifyTenantHashChain,
 } from "@rsl/logging";
 import { canRoleAccessWebRoute, canRolePerform, formatRoleLabel } from "@rsl/rbac";
+import { listCustomerVisibleStaffAccessLogs } from "@rsl/tenancy";
 import { AccessRestrictedState, MetricCard, PageHeader, SectionCard, StatusPill } from "@rsl/ui";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
 import { formatCustomerAuditSummary } from "@/lib/plain-text";
@@ -44,20 +46,34 @@ export default async function ActivityHistoryPage({
     new Set(Object.values(ACTION_CATALOG).map((entry) => entry.category))
   ).sort();
 
+  const ACTIVITY_PAGE_SIZE = 50;
   const chain = verifyTenantHashChain(session.workspace.id);
-  const logs = listRecentActionLogs(session.workspace.id, 100, {
+  const totalFilteredLogs = countActionLogs(session.workspace.id, {
     outcome: outcomeFilter,
     category: categoryFilter,
   });
+  const totalLogPages = Math.max(1, Math.ceil(totalFilteredLogs / ACTIVITY_PAGE_SIZE));
+  const rawLogPage = Math.max(1, Number.parseInt(sp.page || "1", 10) || 1);
+  const currentLogPage = Math.min(rawLogPage, totalLogPages);
+
+  const logs = listRecentActionLogs(session.workspace.id, ACTIVITY_PAGE_SIZE, {
+    outcome: outcomeFilter,
+    category: categoryFilter,
+    offset: (currentLogPage - 1) * ACTIVITY_PAGE_SIZE,
+  });
+  const staffAccessLogs = listCustomerVisibleStaffAccessLogs(session.workspace.id, 50);
   const traceId = sp.trace?.trim() || "";
   const timeline = traceId ? getCorrelationTimeline(session.workspace.id, traceId) : [];
+  const baseFilterHref = `/activity?outcome=${encodeURIComponent(outcomeFilter)}&category=${encodeURIComponent(categoryFilter)}${
+    traceId ? `&trace=${encodeURIComponent(traceId)}` : ""
+  }`;
 
   return (
     <div className="w-full space-y-6">
       <PageHeader
         eyebrow="Settings & Account"
         title="Business Activity History"
-        subtitle="Complete timeline of actions taken across your business — past entries are permanent and cannot be edited or deleted."
+        subtitle="Complete timeline of actions taken across your business - past entries are permanent and cannot be edited or deleted."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {chain.rowCount > 0 && canExportLogs && (
@@ -146,7 +162,7 @@ export default async function ActivityHistoryPage({
       )}
 
       <SectionCard
-        title={`Recent Actions (${logs.length})`}
+        title={`Recent Actions (${totalFilteredLogs.toLocaleString("en-IN")})`}
         action={
           <Form action="/activity" className="flex flex-wrap items-center gap-2 text-xs">
             {traceId && <input type="hidden" name="trace" value={traceId} />}
@@ -154,8 +170,7 @@ export default async function ActivityHistoryPage({
               name="outcome"
               defaultValue={outcomeFilter}
               aria-label="Filter by Outcome"
-              style={{ width: "auto" }}
-              className="rsl-input min-w-[144px] py-1.5 pr-8 text-xs"
+              className="rsl-input !w-auto min-w-[144px] py-1.5 pr-8 text-xs"
             >
               <option value="all">All Outcomes</option>
               <option value="success">Completed</option>
@@ -166,8 +181,7 @@ export default async function ActivityHistoryPage({
               name="category"
               defaultValue={categoryFilter}
               aria-label="Filter by Category"
-              style={{ width: "auto" }}
-              className="rsl-input min-w-[164px] py-1.5 pr-8 text-xs"
+              className="rsl-input !w-auto min-w-[164px] py-1.5 pr-8 text-xs"
             >
               <option value="all">All Categories</option>
               {categories.map((cat) => (
@@ -190,13 +204,26 @@ export default async function ActivityHistoryPage({
       >
         <div className="overflow-x-auto">
           <table className="w-full text-left text-[13px]">
-            <thead className="border-b border-zinc-200/80 bg-zinc-50/75 text-[11px] tracking-wider text-zinc-500 uppercase">
+            <caption className="sr-only">
+              Immutable hash-chained workspace activity log entries
+            </caption>
+            <thead className="border-b border-zinc-200/80 bg-zinc-50/75 text-xs tracking-wider text-zinc-500 uppercase">
               <tr>
-                <th className="px-5 py-3 font-semibold sm:px-6">Action Summary</th>
-                <th className="px-4 py-3 font-semibold">Category</th>
-                <th className="px-4 py-3 font-semibold">Date &amp; Time</th>
-                <th className="px-4 py-3 font-semibold">Outcome</th>
-                <th className="px-5 py-3 text-right font-semibold sm:px-6">Details</th>
+                <th scope="col" className="px-5 py-3 font-semibold sm:px-6">
+                  Action Summary
+                </th>
+                <th scope="col" className="px-4 py-3 font-semibold">
+                  Category
+                </th>
+                <th scope="col" className="px-4 py-3 font-semibold">
+                  Date &amp; Time (IST)
+                </th>
+                <th scope="col" className="px-4 py-3 font-semibold">
+                  Outcome
+                </th>
+                <th scope="col" className="px-5 py-3 text-right font-semibold sm:px-6">
+                  Details
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
@@ -216,7 +243,7 @@ export default async function ActivityHistoryPage({
                     </td>
                     <td className="px-4 py-3.5 text-zinc-600">{row.category}</td>
                     <td className="px-4 py-3.5 text-zinc-600 whitespace-nowrap tabular-nums">
-                      {new Date(row.ts).toLocaleString("en-IN")}
+                      {new Date(row.ts).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
                     </td>
                     <td className="px-4 py-3.5">
                       <StatusPill
@@ -243,7 +270,114 @@ export default async function ActivityHistoryPage({
               )}
             </tbody>
           </table>
+          {totalLogPages > 1 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200/80 bg-zinc-50/60 px-6 py-3 text-xs text-zinc-600">
+              <span className="tabular-nums">
+                Showing {(currentLogPage - 1) * ACTIVITY_PAGE_SIZE + 1}–
+                {Math.min(currentLogPage * ACTIVITY_PAGE_SIZE, totalFilteredLogs)} of{" "}
+                {totalFilteredLogs.toLocaleString("en-IN")} entries (Page {currentLogPage} of{" "}
+                {totalLogPages})
+              </span>
+              <div className="flex items-center gap-2">
+                {currentLogPage > 1 ? (
+                  <ActionLink
+                    href={`${baseFilterHref}&page=${currentLogPage - 1}`}
+                    spinnerSize="xs"
+                    className="rsl-btn-secondary py-1 text-xs"
+                  >
+                    ← Previous
+                  </ActionLink>
+                ) : (
+                  <span className="rounded-lg border border-zinc-200 px-3 py-1 text-zinc-400">
+                    ← Previous
+                  </span>
+                )}
+                {currentLogPage < totalLogPages ? (
+                  <ActionLink
+                    href={`${baseFilterHref}&page=${currentLogPage + 1}`}
+                    spinnerSize="xs"
+                    className="rsl-btn-secondary py-1 text-xs"
+                  >
+                    Next →
+                  </ActionLink>
+                ) : (
+                  <span className="rounded-lg border border-zinc-200 px-3 py-1 text-zinc-400">
+                    Next →
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
+      </SectionCard>
+
+      <SectionCard
+        title={`Platform Support & Staff Access Trail (${staffAccessLogs.length})`}
+        subtitle="Full transparency log of any temporary support assistance, read-only diagnostics, or billing actions performed by RapidShift Labs staff on your workspace"
+        noPadding
+      >
+        {staffAccessLogs.length === 0 ? (
+          <div className="p-6 text-xs text-zinc-500">
+            Zero platform support or staff access sessions have occurred on your workspace.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <caption className="sr-only">
+                Customer-visible trail of platform staff support sessions and actions
+              </caption>
+              <thead className="border-b border-zinc-200/80 bg-zinc-50/75 text-xs tracking-wider text-zinc-500 uppercase">
+                <tr>
+                  <th scope="col" className="px-5 py-3 font-semibold sm:px-6">
+                    Support Summary &amp; Ticket
+                  </th>
+                  <th scope="col" className="px-4 py-3 font-semibold">
+                    Staff Engineer
+                  </th>
+                  <th scope="col" className="px-4 py-3 font-semibold">
+                    Access Type
+                  </th>
+                  <th scope="col" className="px-5 py-3 text-right font-semibold sm:px-6">
+                    Date &amp; Time (IST)
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100 bg-white">
+                {staffAccessLogs.map((entry) => (
+                  <tr key={entry.id}>
+                    <td className="px-5 py-3 sm:px-6">
+                      <div className="font-medium text-slate-900">{entry.summary}</div>
+                      {entry.ticketReference && (
+                        <div className="mt-0.5 font-mono text-xs text-zinc-500">
+                          Ticket: {entry.ticketReference}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-zinc-700">
+                      {entry.staffName}{" "}
+                      <span className="text-zinc-400">({entry.staffRole})</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusPill
+                        label={
+                          entry.kind === "impersonation"
+                            ? "Support Session"
+                            : entry.kind === "inspection"
+                              ? "Read-Only Diagnostic"
+                              : "Admin Action"
+                        }
+                        tone={entry.kind === "impersonation" ? "amber" : "sky"}
+                      />
+                    </td>
+                    <td className="px-5 py-3 text-right text-zinc-600 whitespace-nowrap tabular-nums sm:px-6">
+                      {new Date(entry.ts).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </SectionCard>
     </div>
   );

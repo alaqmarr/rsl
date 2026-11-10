@@ -140,8 +140,8 @@ export default async function StaffRunbooksPage({
           title={`Live Server Ports, SQLite Databases & KMS Health (${systemHealth.summary.healthy} Healthy • ${systemHealth.summary.warning} Warning • ${systemHealth.summary.error} Error)`}
           subtitle={
             includeExternalProbe
-              ? `Full runtime + external India SMB API probe executed at ${new Date(systemHealth.checkedAt).toLocaleTimeString("en-IN")}`
-              : `Local ports, SQLite WAL engines & KMS cipher probed at ${new Date(systemHealth.checkedAt).toLocaleTimeString("en-IN")}. Click "Test All Ports, DBs & Public APIs" to include external IFSC, Pincode & Forex APIs.`
+              ? `Full runtime + external India SMB API probe executed at ${new Date(systemHealth.checkedAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" })}`
+              : `Local ports, SQLite WAL engines & KMS cipher probed at ${new Date(systemHealth.checkedAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" })}. Click "Test All Ports, DBs & Public APIs" to include external IFSC, Pincode & Forex APIs.`
           }
           action={
             <ActionLink
@@ -248,7 +248,7 @@ export default async function StaffRunbooksPage({
             </form>
           ) : (
             <div className="rounded-xl border border-zinc-200/80 bg-zinc-50/70 px-3.5 py-2.5 text-zinc-600">
-              Read-only view — only Super Admins can add or change platform rollout toggles.
+              Read-only view - only Super Admins can add or change platform rollout toggles.
             </div>
           )}
 
@@ -335,7 +335,7 @@ export default async function StaffRunbooksPage({
                     {fb.comment && <p className="mt-1 text-zinc-600">{fb.comment}</p>}
                   </div>
                   <span className="shrink-0 text-[11px] text-zinc-400 tabular-nums">
-                    {new Date(fb.createdAt).toLocaleDateString("en-IN")}
+                    {new Date(fb.createdAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}
                   </span>
                 </div>
               ))}
@@ -345,7 +345,7 @@ export default async function StaffRunbooksPage({
 
         <SectionCard
           title={`Unanswered Help Searches (${adminAnalytics.zeroResultSearches.length})`}
-          subtitle="Search terms with zero matching guides — prioritize writing new guides for top queries"
+          subtitle="Search terms with zero matching guides - prioritize writing new guides for top queries"
         >
           {adminAnalytics.zeroResultSearches.length === 0 ? (
             <p className="text-xs text-zinc-500">
@@ -361,7 +361,7 @@ export default async function StaffRunbooksPage({
                   <div className="min-w-0">
                     <span className="font-medium text-slate-900">&ldquo;{z.query}&rdquo;</span>
                     <div className="text-[11px] text-zinc-400 tabular-nums">
-                      Last searched {new Date(z.lastSearchedAt).toLocaleString("en-IN")}
+                      Last searched {new Date(z.lastSearchedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
                     </div>
                   </div>
                   <StatusPill

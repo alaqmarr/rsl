@@ -485,7 +485,7 @@ export function savePlatformSmtpConfig(params: {
 }
 
 /* ============================================================================
- * 3. Platform Managed Storage — Cloudflare R2 / S3
+ * 3. Platform Managed Storage - Cloudflare R2 / S3
  * ============================================================================ */
 
 export interface PlatformManagedR2Config {
@@ -1313,7 +1313,7 @@ export function savePlatformTurnstileConfig(params: {
 }
 
 /* ============================================================================
- * 7. Cloudflare Workers AI (10,000 Free Neurons/Day — Smart Replies, Ad Copy, Whisper)
+ * 7. Cloudflare Workers AI (10,000 Free Neurons/Day - Smart Replies, Ad Copy, Whisper)
  * ============================================================================ */
 
 export interface PlatformCloudflareAiConfig {
@@ -1562,7 +1562,7 @@ export function savePlatformCloudflareEmailConfig(params: {
 
 export function buildCloudflareEmailWorkerSnippet(appOrigin: string): string {
   const cleanOrigin = appOrigin.replace(/\/+$/, "");
-  return `// Cloudflare Email Worker (100% Free — Deploy in Cloudflare Dashboard → Email → Email Routing → Email Workers)
+  return `// Cloudflare Email Worker (100% Free - Deploy in Cloudflare Dashboard → Email → Email Routing → Email Workers)
 // Route catch-all or bills+*@yourdomain to this Worker, and set Worker secret RSL_EMAIL_WEBHOOK_SECRET.
 export default {
   async email(message, env, ctx) {
@@ -2139,7 +2139,7 @@ export function seedPlatformCredentialsBundle(
     savePlatformGoogleAdsConfig({ ...bundle.google_ads, staffId });
     seeded.push("google_ads");
   } else if (bundle.google_ads) {
-    skipped.push("google_ads (optional — uses google_oauth Cloud Project automatically)");
+    skipped.push("google_ads (optional - uses google_oauth Cloud Project automatically)");
   }
 
   if (

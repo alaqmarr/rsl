@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { registerUserWithWorkspace, resolveUserSessionFromToken } from "@rsl/auth";
 import { staffGrantFreeAllToolsAccess } from "@rsl/billing";
 import {
+  buildTallyWebhookSignedHeaders,
   generateStandaloneTallyConnectorMjs,
   generateTallyPrimeTdlAddOn,
   getOrCreateTallyWebhookEndpoint,
@@ -17,6 +18,25 @@ import {
   registerTallyCompaniesForWorkspace,
 } from "@rsl/tally";
 import { POST as tallyWebhookPost } from "../app/api/webhooks/tally/route";
+
+function buildSignedTallyJsonRequest(
+  url: string,
+  webhookToken: string,
+  payload: unknown,
+  userAgent = "TallyPrime-RSL-TDL/2.9"
+): NextRequest {
+  const body = JSON.stringify(payload);
+  return new NextRequest(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "user-agent": userAgent,
+      "x-tally-webhook-token": webhookToken,
+      ...buildTallyWebhookSignedHeaders(webhookToken, body),
+    },
+    body,
+  });
+}
 
 function createTestWorkspace(tag: string, businessName?: string) {
   const email = `${tag.toLowerCase()}-${Date.now()}-${Math.floor(Math.random() * 10000)}@rapidshiftlabs.in`;
@@ -292,32 +312,26 @@ describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product 
     const ep = getOrCreateTallyWebhookEndpoint(wsId);
 
     // 1. User creates a new Stock Item in Tally Prime (Gateway -> Create -> Stock Item -> Ctrl+A or Alt+C inside a bill)
-    const singleItemReq = new NextRequest(
-      `https://kabra.tally.rapidshiftlabs.in/api/webhooks/tally?token=${encodeURIComponent(ep.webhookToken)}`,
+    const singleItemReq = buildSignedTallyJsonRequest(
+      "https://kabra.tally.rapidshiftlabs.in/api/webhooks/tally",
+      ep.webhookToken,
       {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "user-agent": "TallyPrime-RSL-TDL/2.9",
+        mode: "masters",
+        companyName: "Kabra Electricals",
+        stockItem: {
+          guid: "item-guid-havells-mcb",
+          name: "Havells 32A DP MCB",
+          parentGroup: "Switchgear",
+          categoryName: "Havells",
+          baseUnit: "PCS",
+          hsnCode: "853620",
+          gstRatePercent: "18%",
+          openingQty: "50 PCS",
+          openingValue: "-42,500.00",
+          standardCost: "850.00/PCS",
+          standardSellingPrice: "1,180.00/PCS",
+          reorderLevel: "10 PCS",
         },
-        body: JSON.stringify({
-          mode: "masters",
-          companyName: "Kabra Electricals",
-          stockItem: {
-            guid: "item-guid-havells-mcb",
-            name: "Havells 32A DP MCB",
-            parentGroup: "Switchgear",
-            categoryName: "Havells",
-            baseUnit: "PCS",
-            hsnCode: "853620",
-            gstRatePercent: "18%",
-            openingQty: "50 PCS",
-            openingValue: "-42,500.00",
-            standardCost: "850.00/PCS",
-            standardSellingPrice: "1,180.00/PCS",
-            reorderLevel: "10 PCS",
-          },
-        }),
       }
     );
     const singleItemRes = await tallyWebhookPost(singleItemReq);
@@ -330,46 +344,40 @@ describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product 
     expect(singleItemJson.stockItemsUpserted).toBe(1);
 
     // 2. User creates a Party Ledger & Godowns via bulk masters sync ("Sync All Now")
-    const bulkMastersReq = new NextRequest(
-      `https://kabra.tally.rapidshiftlabs.in/api/webhooks/tally?token=${encodeURIComponent(ep.webhookToken)}`,
+    const bulkMastersReq = buildSignedTallyJsonRequest(
+      "https://kabra.tally.rapidshiftlabs.in/api/webhooks/tally",
+      ep.webhookToken,
       {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "user-agent": "TallyPrime-RSL-TDL/2.9",
-        },
-        body: JSON.stringify({
-          mode: "masters",
-          companyName: "Kabra Electricals",
-          godowns: [{ guid: "gd-bhiwandi", name: "Bhiwandi Central Godown", parentName: "Primary" }],
-          partyLedgers: [
-            {
-              guid: "pty-siddhi",
-              name: "Siddhi Infra Projects",
-              parentGroup: "Sundry Debtors",
-              gstin: "27AABCS1429B1Z5",
-              phone: "9820456789",
-              creditDays: "30 Days",
-              creditLimit: "5,00,000.00",
-              openingBalance: "-40,000.00",
-            },
-          ],
-          stockItems: [
-            {
-              guid: "item-guid-polycab-wire",
-              name: "Polycab 2.5 sqmm FR Coil",
-              parentGroup: "Wires & Cables",
-              baseUnit: "COIL",
-              hsnCode: "8544",
-              gstRatePercent: "18",
-              openingQty: "30 COIL",
-              openingValue: "-54,000.00",
-              standardCost: "1800.00/COIL",
-              standardSellingPrice: "2250.00/COIL",
-              godownAllocations: [{ godownName: "Bhiwandi Central Godown", qty: "30 COIL" }],
-            },
-          ],
-        }),
+        mode: "masters",
+        companyName: "Kabra Electricals",
+        godowns: [{ guid: "gd-bhiwandi", name: "Bhiwandi Central Godown", parentName: "Primary" }],
+        partyLedgers: [
+          {
+            guid: "pty-siddhi",
+            name: "Siddhi Infra Projects",
+            parentGroup: "Sundry Debtors",
+            gstin: "27AABCS1429B1Z5",
+            phone: "9820456789",
+            creditDays: "30 Days",
+            creditLimit: "5,00,000.00",
+            openingBalance: "-40,000.00",
+          },
+        ],
+        stockItems: [
+          {
+            guid: "item-guid-polycab-wire",
+            name: "Polycab 2.5 sqmm FR Coil",
+            parentGroup: "Wires & Cables",
+            baseUnit: "COIL",
+            hsnCode: "8544",
+            gstRatePercent: "18",
+            openingQty: "30 COIL",
+            openingValue: "-54,000.00",
+            standardCost: "1800.00/COIL",
+            standardSellingPrice: "2250.00/COIL",
+            godownAllocations: [{ godownName: "Bhiwandi Central Godown", qty: "30 COIL" }],
+          },
+        ],
       }
     );
     const bulkMastersRes = await tallyWebhookPost(bulkMastersReq);
@@ -475,22 +483,16 @@ describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product 
     const ep = getOrCreateTallyWebhookEndpoint(wsId);
 
     // 1. Connection Test (mode=ping) reports 3 open companies in Tally — including "Vardhman Dormant Holdings" with 0 bills
-    const pingReq = new NextRequest(
-      `https://vardhman.tally.rapidshiftlabs.in/api/webhooks/tally?mode=ping&token=${encodeURIComponent(ep.webhookToken)}`,
+    const pingReq = buildSignedTallyJsonRequest(
+      "https://vardhman.tally.rapidshiftlabs.in/api/webhooks/tally?mode=ping",
+      ep.webhookToken,
       {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "user-agent": "TallyPrime-RSL-TDL/2.9",
-        },
-        body: JSON.stringify({
-          companyName: "Vardhman Textiles Mumbai",
-          openCompanies: [
-            { name: "Vardhman Textiles Mumbai", guid: "comp-mum-01" },
-            { name: "Vardhman Yarns Surat", guid: "comp-sur-02" },
-            { name: "Vardhman Dormant Holdings", guid: "comp-dor-03" },
-          ],
-        }),
+        companyName: "Vardhman Textiles Mumbai",
+        openCompanies: [
+          { name: "Vardhman Textiles Mumbai", guid: "comp-mum-01" },
+          { name: "Vardhman Yarns Surat", guid: "comp-sur-02" },
+          { name: "Vardhman Dormant Holdings", guid: "comp-dor-03" },
+        ],
       }
     );
     const pingRes = await tallyWebhookPost(pingReq);
@@ -670,47 +672,42 @@ describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product 
 
     // 1. Backwards-compatibility: already-loaded .tdl v2.8 multi-part VoucherJsonForm ("bill": [ headerPart, itemsPart, billsPart ])
     //    where Repeat with 1 item emitted a single JSON object instead of an array!
-    const v28MultiPartBillReq = new NextRequest(
-      `https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?token=${encodeURIComponent(ep.webhookToken)}`,
+    const v28MultiPartBillReq = buildSignedTallyJsonRequest(
+      "https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally",
+      ep.webhookToken,
       {
-        method: "POST",
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          "user-agent": "TallyPrime-RSL-TDL/2.8",
-        },
-        body: JSON.stringify({
-          bill: [
-            {
-              guid: "v28-multipart-guid-88",
-              masterId: "880",
-              alterId: "881",
-              companyName: "RapidShift Demo Traders",
-              voucherNumber: "88",
-              voucherType: "Sales",
-              baseVoucherType: "Sales",
-              partyName: "Mehta Industrial Supplies",
-              partyParentGroup: "Sundry Debtors",
-              partyPhone: "9820112233",
-              amountRupees: "14,200.00",
-              voucherDate: "2026-11-04",
-              inAlterMode: "No",
+        bill: [
+          {
+            guid: "v28-multipart-guid-88",
+            masterId: "880",
+            alterId: "881",
+            companyName: "RapidShift Demo Traders",
+            voucherNumber: "88",
+            voucherType: "Sales",
+            baseVoucherType: "Sales",
+            partyName: "Mehta Industrial Supplies",
+            partyParentGroup: "Sundry Debtors",
+            partyPhone: "9820112233",
+            amountRupees: "14,200.00",
+            voucherDate: "2026-11-04",
+            inAlterMode: "No",
+          },
+          {
+            lineItems: {
+              itemName: "Bosch Angle Grinder GWS 600",
+              billedQty: "2 PCS",
+              actualQty: "2 PCS",
+              rate: "7,100.00/PCS",
+              discount: "0",
+              amount: "14,200.00",
+              godownName: "Main Location",
+              batchName: "Primary Batch",
             },
-            {
-              lineItems: {
-                itemName: "Bosch Angle Grinder GWS 600",
-                billedQty: "2 PCS",
-                actualQty: "2 PCS",
-                rate: "7,100.00/PCS",
-                discount: "0",
-                amount: "14,200.00",
-                godownName: "Main Location",
-                batchName: "Primary Batch",
-              },
-            },
-            {},
-          ],
-        }),
-      }
+          },
+          {},
+        ],
+      },
+      "TallyPrime-RSL-TDL/2.8"
     );
     const v28MultiPartBillRes = await tallyWebhookPost(v28MultiPartBillReq);
     expect(v28MultiPartBillRes.status).toBe(200);
@@ -722,38 +719,33 @@ describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product 
     expect(v28MultiPartBillJson.upsertedBills).toBe(1);
 
     // 2. Backwards-compatibility: .tdl v2.8 part-keyed BulkCompanyMastersJsonForm AND empty ?mode=masters payload
-    const v28PartKeyedMastersReq = new NextRequest(
-      `https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?mode=masters&token=${encodeURIComponent(ep.webhookToken)}`,
+    const v28PartKeyedMastersReq = buildSignedTallyJsonRequest(
+      "https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?mode=masters",
+      ep.webhookToken,
       {
-        method: "POST",
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          "user-agent": "TallyPrime-RSL-TDL/2.8",
+        rslmastershdrpart: {
+          mode: "masters",
+          companyName: "RapidShift Demo Traders",
         },
-        body: JSON.stringify({
-          rslmastershdrpart: {
-            mode: "masters",
-            companyName: "RapidShift Demo Traders",
+        rslbulkstockpart: {
+          stockItems: {
+            guid: "v28-single-obj-stock-1",
+            name: "Anchor Roma 16A Socket",
+            stockGroup: "Electricals",
+            uom: "PCS",
+            hsnCode: "8536",
+            gstRatePct: "18",
+            sellingPriceRupees: "120",
+            costPriceRupees: "85",
+            openingQty: "100 PCS",
+            openingValueRupees: "8500",
+            closingQty: "100 PCS",
+            closingRateRupees: "85",
+            closingValueRupees: "8500",
           },
-          rslbulkstockpart: {
-            stockItems: {
-              guid: "v28-single-obj-stock-1",
-              name: "Anchor Roma 16A Socket",
-              stockGroup: "Electricals",
-              uom: "PCS",
-              hsnCode: "8536",
-              gstRatePct: "18",
-              sellingPriceRupees: "120",
-              costPriceRupees: "85",
-              openingQty: "100 PCS",
-              openingValueRupees: "8500",
-              closingQty: "100 PCS",
-              closingRateRupees: "85",
-              closingValueRupees: "8500",
-            },
-          },
-        }),
-      }
+        },
+      },
+      "TallyPrime-RSL-TDL/2.8"
     );
     const v28PartKeyedMastersRes = await tallyWebhookPost(v28PartKeyedMastersReq);
     expect(v28PartKeyedMastersRes.status).toBe(200);
@@ -765,16 +757,10 @@ describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product 
     expect(v28PartKeyedMastersJson.stockItemsUpserted).toBe(1);
 
     // Empty ?mode=masters (e.g. brand-new company with 0 stock items / 0 party ledgers) MUST succeed cleanly (never HTTP 400!)
-    const emptyMastersReq = new NextRequest(
-      `https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?mode=masters&token=${encodeURIComponent(ep.webhookToken)}`,
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          "user-agent": "TallyPrime-RSL-TDL/2.9",
-        },
-        body: JSON.stringify({}),
-      }
+    const emptyMastersReq = buildSignedTallyJsonRequest(
+      "https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?mode=masters",
+      ep.webhookToken,
+      {}
     );
     const emptyMastersRes = await tallyWebhookPost(emptyMastersReq);
     expect(emptyMastersRes.status).toBe(200);
@@ -783,20 +769,14 @@ describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product 
 
     // 3. .tdl v2.9 flat single-part PingJsonReport (openCompaniesPipe), SingleStockJsonReport, SingleLedgerJsonReport,
     //    and VoucherJsonReport (lineItemsPacked + billAllocationsPacked)
-    const v29PingReq = new NextRequest(
-      `https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?mode=ping&token=${encodeURIComponent(ep.webhookToken)}`,
+    const v29PingReq = buildSignedTallyJsonRequest(
+      "https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?mode=ping",
+      ep.webhookToken,
       {
-        method: "POST",
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          "user-agent": "TallyPrime-RSL-TDL/2.9",
-        },
-        body: JSON.stringify({
-          mode: "ping",
-          companyName: "RapidShift Demo Traders",
-          openCompaniesPipe:
-            "^^RapidShift Demo Traders~~comp-guid-demo1~~2026-04-01^^RapidShift Retail Unit-2~~comp-guid-demo2~~2026-04-01",
-        }),
+        mode: "ping",
+        companyName: "RapidShift Demo Traders",
+        openCompaniesPipe:
+          "^^RapidShift Demo Traders~~comp-guid-demo1~~2026-04-01^^RapidShift Retail Unit-2~~comp-guid-demo2~~2026-04-01",
       }
     );
     const v29PingRes = await tallyWebhookPost(v29PingReq);
@@ -810,34 +790,28 @@ describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product 
 
     // .tdl v2.9 SingleStockJsonReport (flat masterKind = "stockItem")
     const v29SingleStockRes = await tallyWebhookPost(
-      new NextRequest(
-        `https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?mode=masters&token=${encodeURIComponent(ep.webhookToken)}`,
+      buildSignedTallyJsonRequest(
+        "https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?mode=masters",
+        ep.webhookToken,
         {
-          method: "POST",
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-            "user-agent": "TallyPrime-RSL-TDL/2.9",
-          },
-          body: JSON.stringify({
-            mode: "masters",
-            masterKind: "stockItem",
-            companyName: "RapidShift Demo Traders",
-            guid: "v29-stock-polycab-4sq",
-            masterId: "901",
-            alterId: "902",
-            name: "Polycab 4 sqmm Flame Retardant",
-            stockGroup: "Cables",
-            uom: "COIL",
-            hsnCode: "8544",
-            gstRatePct: "18",
-            sellingPriceRupees: "3400",
-            costPriceRupees: "2800",
-            openingQty: "25 COIL",
-            openingValueRupees: "70000",
-            closingQty: "25 COIL",
-            closingRateRupees: "2800",
-            closingValueRupees: "70000",
-          }),
+          mode: "masters",
+          masterKind: "stockItem",
+          companyName: "RapidShift Demo Traders",
+          guid: "v29-stock-polycab-4sq",
+          masterId: "901",
+          alterId: "902",
+          name: "Polycab 4 sqmm Flame Retardant",
+          stockGroup: "Cables",
+          uom: "COIL",
+          hsnCode: "8544",
+          gstRatePct: "18",
+          sellingPriceRupees: "3400",
+          costPriceRupees: "2800",
+          openingQty: "25 COIL",
+          openingValueRupees: "70000",
+          closingQty: "25 COIL",
+          closingRateRupees: "2800",
+          closingValueRupees: "70000",
         }
       )
     );
@@ -845,28 +819,22 @@ describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product 
 
     // .tdl v2.9 SingleLedgerJsonReport (flat masterKind = "partyLedger")
     const v29SingleLedRes = await tallyWebhookPost(
-      new NextRequest(
-        `https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?mode=masters&token=${encodeURIComponent(ep.webhookToken)}`,
+      buildSignedTallyJsonRequest(
+        "https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?mode=masters",
+        ep.webhookToken,
         {
-          method: "POST",
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-            "user-agent": "TallyPrime-RSL-TDL/2.9",
-          },
-          body: JSON.stringify({
-            mode: "masters",
-            masterKind: "partyLedger",
-            companyName: "RapidShift Demo Traders",
-            guid: "v29-led-mehta",
-            name: "Mehta Industrial Supplies",
-            parentGroup: "Sundry Debtors",
-            phone: "9820112233",
-            gstin: "27AAACM1234F1Z9",
-            creditLimitRupees: "250000",
-            creditDays: "15 Days",
-            openingBalanceRupees: "10000",
-            closingBalanceRupees: "10000",
-          }),
+          mode: "masters",
+          masterKind: "partyLedger",
+          companyName: "RapidShift Demo Traders",
+          guid: "v29-led-mehta",
+          name: "Mehta Industrial Supplies",
+          parentGroup: "Sundry Debtors",
+          phone: "9820112233",
+          gstin: "27AAACM1234F1Z9",
+          creditLimitRupees: "250000",
+          creditDays: "15 Days",
+          openingBalanceRupees: "10000",
+          closingBalanceRupees: "10000",
         }
       )
     );
@@ -874,34 +842,28 @@ describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product 
 
     // .tdl v2.9 VoucherJsonReport Sales with lineItemsPacked ("^^" rows, "~~" cols)
     const v29SalesRes = await tallyWebhookPost(
-      new NextRequest(
-        `https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?token=${encodeURIComponent(ep.webhookToken)}`,
+      buildSignedTallyJsonRequest(
+        "https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally",
+        ep.webhookToken,
         {
-          method: "POST",
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-            "user-agent": "TallyPrime-RSL-TDL/2.9",
+          bill: {
+            guid: "v29-sales-guid-89",
+            masterId: "889",
+            alterId: "890",
+            companyName: "RapidShift Demo Traders",
+            voucherNumber: "89",
+            voucherType: "Sales",
+            baseVoucherType: "Sales",
+            partyName: "Mehta Industrial Supplies",
+            partyParentGroup: "Sundry Debtors",
+            partyPhone: "9820112233",
+            amountRupees: "7660",
+            voucherDate: "2026-11-04",
+            inAlterMode: "No",
+            lineItemsPacked:
+              "^^Anchor Roma 16A Socket~~10 PCS~~10 PCS~~120.00/PCS~~0~~1200.00~~Main Location~~Primary Batch^^Polycab 4 sqmm Flame Retardant~~2 COIL~~2 COIL~~3400.00/COIL~~5~~6460.00~~Main Location~~Primary Batch",
+            billAllocationsPacked: "",
           },
-          body: JSON.stringify({
-            bill: {
-              guid: "v29-sales-guid-89",
-              masterId: "889",
-              alterId: "890",
-              companyName: "RapidShift Demo Traders",
-              voucherNumber: "89",
-              voucherType: "Sales",
-              baseVoucherType: "Sales",
-              partyName: "Mehta Industrial Supplies",
-              partyParentGroup: "Sundry Debtors",
-              partyPhone: "9820112233",
-              amountRupees: "7660",
-              voucherDate: "2026-11-04",
-              inAlterMode: "No",
-              lineItemsPacked:
-                "^^Anchor Roma 16A Socket~~10 PCS~~10 PCS~~120.00/PCS~~0~~1200.00~~Main Location~~Primary Batch^^Polycab 4 sqmm Flame Retardant~~2 COIL~~2 COIL~~3400.00/COIL~~5~~6460.00~~Main Location~~Primary Batch",
-              billAllocationsPacked: "",
-            },
-          }),
         }
       )
     );
@@ -911,30 +873,24 @@ describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product 
 
     // .tdl v2.9 VoucherJsonReport Receipt with billAllocationsPacked settling Sales #89 -> marks #89 PAID!
     const v29RcptRes = await tallyWebhookPost(
-      new NextRequest(
-        `https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?token=${encodeURIComponent(ep.webhookToken)}`,
+      buildSignedTallyJsonRequest(
+        "https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally",
+        ep.webhookToken,
         {
-          method: "POST",
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-            "user-agent": "TallyPrime-RSL-TDL/2.9",
+          bill: {
+            guid: "v29-rcpt-guid-501",
+            masterId: "910",
+            alterId: "911",
+            companyName: "RapidShift Demo Traders",
+            voucherNumber: "RCPT-501",
+            voucherType: "Receipt",
+            baseVoucherType: "Receipt",
+            partyName: "Mehta Industrial Supplies",
+            amountRupees: "7660",
+            voucherDate: "2026-11-04",
+            lineItemsPacked: "",
+            billAllocationsPacked: "^^89~~Agst Ref~~7,660.00",
           },
-          body: JSON.stringify({
-            bill: {
-              guid: "v29-rcpt-guid-501",
-              masterId: "910",
-              alterId: "911",
-              companyName: "RapidShift Demo Traders",
-              voucherNumber: "RCPT-501",
-              voucherType: "Receipt",
-              baseVoucherType: "Receipt",
-              partyName: "Mehta Industrial Supplies",
-              amountRupees: "7660",
-              voucherDate: "2026-11-04",
-              lineItemsPacked: "",
-              billAllocationsPacked: "^^89~~Agst Ref~~7,660.00",
-            },
-          }),
         }
       )
     );
@@ -942,26 +898,20 @@ describe("Phase 28 — Zero Bill Overwrite (#8 vs #9), Direct Real-Time Product 
 
     // 4. Genuine ₹0.00 sample voucher during Sync All Now skips cleanly without poisoning lastErrorMessage!
     const zeroValSampleRes = await tallyWebhookPost(
-      new NextRequest(
-        `https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally?token=${encodeURIComponent(ep.webhookToken)}`,
+      buildSignedTallyJsonRequest(
+        "https://rapidshift-labs-117a.tally.rapidshiftlabs.in/api/webhooks/tally",
+        ep.webhookToken,
         {
-          method: "POST",
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-            "user-agent": "TallyPrime-RSL-TDL/2.9",
+          bill: {
+            guid: "v29-zero-sample-guid",
+            masterId: "915",
+            companyName: "RapidShift Demo Traders",
+            voucherNumber: "SAMPLE-01",
+            voucherType: "Sales",
+            partyName: "Mehta Industrial Supplies",
+            amountRupees: "0",
+            voucherDate: "2026-11-04",
           },
-          body: JSON.stringify({
-            bill: {
-              guid: "v29-zero-sample-guid",
-              masterId: "915",
-              companyName: "RapidShift Demo Traders",
-              voucherNumber: "SAMPLE-01",
-              voucherType: "Sales",
-              partyName: "Mehta Industrial Supplies",
-              amountRupees: "0",
-              voucherDate: "2026-11-04",
-            },
-          }),
         }
       )
     );

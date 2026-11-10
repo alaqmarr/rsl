@@ -114,7 +114,7 @@ export default async function WhatsAppPage({
       <PageHeader
         eyebrow="Daily Operations"
         title="WhatsApp Template Manager & Broadcasts"
-        subtitle="Build official WhatsApp Business templates for Tally PDF invoices, payment receipts, reminders, and customer offers — with live phone preview and Meta sync."
+        subtitle="Build official WhatsApp Business templates for Tally PDF invoices, payment receipts, reminders, and customer offers - with live phone preview and Meta sync."
         actions={
           <div className="flex flex-wrap items-center gap-2.5">
             {canManageTemplates && !hasAllStarterTemplates && (
@@ -287,7 +287,7 @@ export default async function WhatsAppPage({
                             : t.approvalStatus === "PENDING"
                               ? "Pending Meta Review"
                               : t.approvalStatus === "DRAFT"
-                                ? "Draft — Submit to Meta"
+                                ? "Draft - Submit to Meta"
                                 : t.approvalStatus
                         }
                         tone={
@@ -352,14 +352,14 @@ export default async function WhatsAppPage({
             <InlineAddonPlanBanner plan={broadcastPlan} returnPath="/whatsapp" />
           ) : !canBroadcast ? (
             <p className="rounded-xl border border-zinc-200 bg-zinc-50/70 p-3.5 text-xs text-zinc-600">
-              Read-only view — Owner, Admin, or Manager permission is required to launch bulk
+              Read-only view - Owner, Admin, or Manager permission is required to launch bulk
               WhatsApp broadcasts.
             </p>
           ) : approvedTemplates.length === 0 ? (
             <p className="text-[13px] text-zinc-500">
               {wa.templates.length === 0
                 ? "Save or load a WhatsApp template above before sending a broadcast."
-                : "No approved WhatsApp templates available yet — wait for Meta review or load ready-made templates."}
+                : "No approved WhatsApp templates available yet - wait for Meta review or load ready-made templates."}
             </p>
           ) : wa.eligibleOptInCount === 0 ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200/80 bg-zinc-50/70 p-4 text-[13px] text-zinc-600">
@@ -388,7 +388,7 @@ export default async function WhatsAppPage({
                 <select name="templateId" required className="rsl-input">
                   {approvedTemplates.map((t) => (
                     <option key={t.id} value={t.id}>
-                      {t.name} ({t.category} — est.{" "}
+                      {t.name} ({t.category} - est.{" "}
                       {formatInr(wa.eligibleOptInCount * (t.category === "marketing" ? 95 : 85), {
                         showDecimals: true,
                       })}
@@ -455,7 +455,7 @@ export default async function WhatsAppPage({
             </form>
           ) : (
             <p className="rounded-xl border border-zinc-200 bg-zinc-50/70 p-3.5 text-xs text-zinc-600">
-              Read-only view — messaging or template management permission is required to edit the
+              Read-only view - messaging or template management permission is required to edit the
               do-not-message list.
             </p>
           )}

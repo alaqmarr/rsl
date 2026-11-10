@@ -11,6 +11,7 @@ import {
 import {
   AccessRestrictedState,
   FlashBanner,
+  GuideDrawerButton,
   MetricCard,
   PageHeader,
   SectionCard,
@@ -70,6 +71,26 @@ export default async function AdminStaffTeamPage({
         eyebrow="Internal Access & Security"
         title="Staff Team & Roles"
         subtitle="Manage who can sign in to the RSL Staff Portal, assign Finance or Support roles, reset staff passwords, or disable departed team members."
+        actions={
+          <GuideDrawerButton
+            drawerId="staff-role-permissions-guide"
+            label="Need help? • Staff Role Matrix"
+            badgeText="3 roles"
+            guide={{
+              eyebrow: "Internal Staff RBAC",
+              title: "Staff Portal Roles & Separation of Duties",
+              summary:
+                "Assign each team member the narrowest role required for their operational duties. Every action is recorded under their individual staff identity.",
+              steps: Object.entries(ROLE_LABELS).map(([, info]) => ({
+                title: info.label,
+                detail: info.desc,
+              })),
+              cautions: [
+                "At least 1 active Super Admin is protected at the database layer so you can never lock out the control plane.",
+              ],
+            }}
+          />
+        }
       />
 
       <FlashBanner notice={sp.notice} error={sp.error} />
@@ -147,14 +168,6 @@ export default async function AdminStaffTeamPage({
                   className="adm-input font-mono"
                 />
               </div>
-            </div>
-
-            <div className="rounded-xl border border-zinc-200/80 bg-zinc-50/70 p-3 text-[11px] leading-relaxed text-zinc-600">
-              {Object.entries(ROLE_LABELS).map(([key, info]) => (
-                <div key={key} className="mb-1 last:mb-0">
-                  <strong className="text-slate-900">{info.label}:</strong> {info.desc}
-                </div>
-              ))}
             </div>
 
             <SubmitButton className="adm-btn-primary w-full" pendingText="Creating Staff Account...">

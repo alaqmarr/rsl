@@ -1,5 +1,5 @@
 ---
-title: Tally Prime All-in-One Suite — Bills, Direct Product Sync, Multi-Company, Client Ledgers & Exact PDFs
+title: Tally Prime All-in-One Suite - Bills, Direct Product Sync, Multi-Company, Client Ledgers & Exact PDFs
 summary: Complete keystroke-by-keystroke Tally Prime guide to configure F11 and F12 settings, load your personalized <business>-rsl-sync.tdl v2.9 add-on, sync Products (Stock Items) and Party Ledgers live on Ctrl + A, detect multiple Tally companies via F3, settle Paid-in-Tally invoices automatically, and send untouched Tally-printed PDF invoices on WhatsApp.
 section: Daily Operations
 audience: customer
@@ -8,13 +8,13 @@ order: 4
 lastReviewed: 2026-11-04
 ---
 
-## Core Guarantees — Zero Bill Overwrites, Direct Product Sync & Untouched Tally PDFs
+## Core Guarantees - Zero Bill Overwrites, Direct Product Sync & Untouched Tally PDFs
 
 RapidShift Labs provides an **All-in-One Tally Prime Suite** spanning **Bills & Receipts** (`/tally`), **Client & Supplier Ledgers** (`/tally/parties`), and **Stock & Godown Inventory** (`/inventory`):
 
 1. **Zero Bill Overwrite Guarantee**: Creating sequential bills in Tally Prime (for example **Bill `#8`** followed immediately by **Bill `#9`**) resolves each voucher's exact `MasterID` and `GUID` independently in `.tdl v2.9`, backed by a server-side Non-Destructive Bill Number Collision Shield so earlier saved bills are never replaced.
 2. **Direct Real-Time Product & Ledger Sync**: Saving any **Stock Item** or **Party Ledger** in Tally Prime (`Ctrl + A` in Create/Alter or `Alt + C` inside a voucher) pushes the product or ledger directly to RapidShift Labs in real time, while **`<Your Business> & RSL Sync - Sync All Now`** bulk-imports all existing Godowns, Stock Items, Party Ledgers, and Vouchers per company.
-3. **100% Untouched Tally-Printed Invoice PDFs**: RapidShift Labs never redesigns or alters your Tally invoice layout. When local Port `9000` or Windows Connector `v2.6` is active, RapidShift exports Tally Prime's native `Voucher` print output (`%PDF-1.x`) byte-for-byte — preserving your company logo, custom TDL columns, HSN/SAC table, e-Invoice IRN/QR code, and authorised signatory box.
+3. **100% Untouched Tally-Printed Invoice PDFs**: RapidShift Labs never redesigns or alters your Tally invoice layout. When local Port `9000` or Windows Connector `v2.6` is active, RapidShift exports Tally Prime's native `Voucher` print output (`%PDF-1.x`) byte-for-byte - preserving your company logo, custom TDL columns, HSN/SAC table, e-Invoice IRN/QR code, and authorised signatory box.
 
 ![Tally Prime to Cloud Dashboard and WhatsApp Sync Architecture](/diagrams/tally-sync-architecture.svg)
 
@@ -22,7 +22,7 @@ RapidShift Labs provides an **All-in-One Tally Prime Suite** spanning **Bills & 
 
 ---
 
-## Pre-Step 0 — Required `F11` Company Features & `F12` Settings in Tally Prime
+## Pre-Step 0 - Required `F11` Company Features & `F12` Settings in Tally Prime
 
 Follow these one-time keystrokes inside each Tally Prime company you want to sync so Products, Selling Prices, Bill-Wise Settlements, and Customer Mobile Numbers populate accurately:
 
@@ -54,7 +54,7 @@ Follow these one-time keystrokes inside each Tally Prime company you want to syn
 
 ---
 
-## Step 1 — Verify Your Dedicated Tally HTTPS Endpoint
+## Step 1 - Verify Your Dedicated Tally HTTPS Endpoint
 
 1. Sign in to `https://app.rapidshiftlabs.in` and click **Tally Prime & Bills** (`/tally`) in the left sidebar.
 2. Click the **Connect Tally Prime (.tdl & Setup Guide)** tab (`/tally?tab=connect`).
@@ -63,7 +63,7 @@ Follow these one-time keystrokes inside each Tally Prime company you want to syn
 
 ---
 
-## Step 2 — Enable Tally Prime Local XML Server on Port `9000` (For Native Tally PDFs)
+## Step 2 - Enable Tally Prime Local XML Server on Port `9000` (For Native Tally PDFs)
 
 1. In **Tally Prime**, press **F1 (Help)** -> **Settings** -> **Connectivity** -> **Client/Server Configuration**.
 2. Configure the fields as follows:
@@ -75,7 +75,7 @@ Follow these one-time keystrokes inside each Tally Prime company you want to syn
 
 ---
 
-## Step 3 — Download & Load Your Personalized `<business>-rsl-sync.tdl` (`v2.9`)
+## Step 3 - Download & Load Your Personalized `<business>-rsl-sync.tdl` (`v2.9`)
 
 1. In Windows File Explorer, click **View -> Show -> File name extensions** so `.tdl` extensions are visible.
 2. In RapidShift Labs (**Tally Prime & Bills -> Connect Tally Prime**), click **Download `<your-business>-rsl-sync.tdl` (`v2.9`)**.
@@ -91,14 +91,14 @@ Follow these one-time keystrokes inside each Tally Prime company you want to syn
 
 ---
 
-## Step 4 — Opening & Syncing Multiple Tally Companies (`F3 -> Select Company`)
+## Step 4 - Opening & Syncing Multiple Tally Companies (`F3 -> Select Company`)
 
 Tally Prime exports vouchers and masters from companies that are currently **open in Tally memory**:
 
 1. If you operate **multiple Tally companies** (such as Head Office + Branch, Wholesale + Retail, or separate Financial Year books):
    - Press **F3 (Company)** inside Tally Prime -> choose **Select Company** -> open each additional company so all active companies are loaded in Tally Prime's left-hand **List of Open Companies**.
 2. On **Gateway of Tally**, click **`<Your Business Name> & RSL Sync - Connection Test`**:
-   - `.tdl v2.9` transmits your complete list of open Tally companies (`openCompanies`) and registers every allowed company in RapidShift Labs immediately — even brand-new companies with 0 bills.
+   - `.tdl v2.9` transmits your complete list of open Tally companies (`openCompanies`) and registers every allowed company in RapidShift Labs immediately - even brand-new companies with 0 bills.
 3. Next, click **`<Your Business Name> & RSL Sync - Sync All Now`**:
    - `.tdl v2.9` loops through **every open Tally company** one by one, bulk-syncing each company's **Godowns**, **Stock Items (Products)**, **Sundry Debtor & Creditor Ledgers**, **Sales/Purchase/Receipt/Payment/Credit/Debit Vouchers**, and **Day Book Deletion Reconciliations** with strict per-company scoping.
 4. In RapidShift Labs, use the **Tally Company** switcher bar right at the top of `/tally`, `/tally/parties`, and `/inventory` to view **All Synced Companies** together or isolate any single Tally company's bills, receivables, and stock valuation.
@@ -106,7 +106,7 @@ Tally Prime exports vouchers and masters from companies that are currently **ope
 
 ---
 
-## Step 5 — Set Up Automatic Untouched Tally PDF Invoice & Overdue Reminder Rules
+## Step 5 - Set Up Automatic Untouched Tally PDF Invoice & Overdue Reminder Rules
 
 1. Open **WhatsApp & Templates** (`/whatsapp`), click **Load Ready-Made Tally Templates**, and click **Sync Templates with WhatsApp**.
 2. Open **Tally Prime & Bills -> WhatsApp Rules & Reminders** (`/tally?tab=rules`):

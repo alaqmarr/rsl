@@ -11,7 +11,7 @@ lastReviewed: 2026-11-03
 ## Understanding WhatsApp's 24-Hour Window vs. Approved Templates
 
 - **Inside 24 Hours of a Customer's Last Message**: You can reply freely with plain text or attachments inside **Customer Messages** (`/inbox`) with zero template approval needed.
-- **Outside 24 Hours (or First-Touch Bills & Broadcasts)**: Meta requires an **APPROVED WhatsApp Business Template** — such as a Tally GST invoice PDF (`UTILITY`), payment receipt (`UTILITY`), overdue reminder (`UTILITY`), or seasonal offer (`MARKETING`).
+- **Outside 24 Hours (or First-Touch Bills & Broadcasts)**: Meta requires an **APPROVED WhatsApp Business Template** - such as a Tally GST invoice PDF (`UTILITY`), payment receipt (`UTILITY`), overdue reminder (`UTILITY`), or seasonal offer (`MARKETING`).
 
 ![WhatsApp Cloud API and Shared Team Inbox Message Flow](/diagrams/whatsapp-cloud-flow.svg)
 
@@ -19,28 +19,28 @@ lastReviewed: 2026-11-03
 
 ---
 
-## Step 1 — Load Ready-Made Tally Starter Templates in One Click
+## Step 1 - Load Ready-Made Tally Starter Templates in One Click
 
 1. Open **WhatsApp & Templates** (`/whatsapp`) in the left sidebar. *(Ensure **WhatsApp Business Messaging** is unlocked on your account and your WABA is connected in **Connected Channels**.)*
 2. Click **Load Ready-Made Tally Templates** at the top of the screen.
 3. RapidShift immediately installs pre-mapped templates ready for Meta sync:
-   - `tally_tax_invoice_pdf` — **Utility (`DOCUMENT` PDF Header)**: attaches your 100% untouched Tally-printed PDF invoice (`{{1}}` Party Name, `{{2}}` Bill No., `{{3}}` Amount ₹, `{{4}}` Due Date).
-   - `tally_sales_bill_created` — **Utility (`TEXT`)**: instant bill summary notification.
-   - `tally_payment_receipt_thankyou` — **Utility (`TEXT`)**: instant `F6 Receipt` payment thank-you confirmation.
-   - `tally_overdue_payment_reminder` — **Utility (`TEXT`)**: polite balance-due payment reminder.
+   - `tally_tax_invoice_pdf` - **Utility (`DOCUMENT` PDF Header)**: attaches your 100% untouched Tally-printed PDF invoice (`{{1}}` Party Name, `{{2}}` Bill No., `{{3}}` Amount ₹, `{{4}}` Due Date).
+   - `tally_sales_bill_created` - **Utility (`TEXT`)**: instant bill summary notification.
+   - `tally_payment_receipt_thankyou` - **Utility (`TEXT`)**: instant `F6 Receipt` payment thank-you confirmation.
+   - `tally_overdue_payment_reminder` - **Utility (`TEXT`)**: polite balance-due payment reminder.
 4. Click **Sync Templates with WhatsApp** to submit them to your connected Meta WhatsApp Business Account (WABA) and pull live approval statuses (`PENDING` -> `APPROVED`).
 
 ---
 
-## Step 2 — Building a Custom Template Without Getting Rejected by Meta (Minute-by-Minute)
+## Step 2 - Building a Custom Template Without Getting Rejected by Meta (Minute-by-Minute)
 
 In the **Visual WhatsApp Template Studio** on `/whatsapp`, fill in each field following Meta's strict formatting rules:
 
 1. **Template Name**:
-   - Use **lowercase letters, numbers, and underscores (`_`) only** — never spaces, hyphens, or capital letters (for example `diwali_wholesale_catalogue_2026` or `dispatch_lr_tracking_update`).
+   - Use **lowercase letters, numbers, and underscores (`_`) only** - never spaces, hyphens, or capital letters (for example `diwali_wholesale_catalogue_2026` or `dispatch_lr_tracking_update`).
 2. **Category**:
    - Choose **`UTILITY`** for transactional updates tied to an existing order, Tally invoice, payment receipt, or delivery status.
-   - Choose **`MARKETING`** for promotional offers, festive greetings, price lists, or re-engagement broadcasts. *(Tip: Never submit promotional discounts under `UTILITY` — Meta's automated reviewer will either reclassify or reject it.)*
+   - Choose **`MARKETING`** for promotional offers, festive greetings, price lists, or re-engagement broadcasts. *(Tip: Never submit promotional discounts under `UTILITY` - Meta's automated reviewer will either reclassify or reject it.)*
 3. **Language Code**:
    - Select `en` / `en_US` (English) or your regional Indian language code (`hi` Hindi, `gu` Gujarati, `mr` Marathi, `ta` Tamil, `te` Telugu) matching your message text.
 4. **Header Format**:
@@ -63,7 +63,7 @@ In the **Visual WhatsApp Template Studio** on `/whatsapp`, fill in each field fo
 
 ---
 
-## Step 3 — Recording Customer Opt-In Consent
+## Step 3 - Recording Customer Opt-In Consent
 
 Before sending promotional broadcasts, record how each customer agreed to receive WhatsApp updates:
 
@@ -74,10 +74,10 @@ Before sending promotional broadcasts, record how each customer agreed to receiv
 
 ---
 
-## Step 4 — Launching a Safe Bulk WhatsApp Broadcast
+## Step 4 - Launching a Safe Bulk WhatsApp Broadcast
 
 1. Scroll to **Launch Broadcast Campaign** on `/whatsapp`.
-2. Enter a **Campaign Name** (for example `November Price List — Regular Dealers`).
+2. Enter a **Campaign Name** (for example `November Price List - Regular Dealers`).
 3. Select an **`APPROVED`** template from the dropdown.
 4. Fill in default/mapped variable values (`{{1}}` automatically substitutes each contact's name when mapped, or enter fixed campaign values).
 5. Review the **Pre-Send Cost & Audience Check** shown before clicking launch:

@@ -8,7 +8,7 @@ import {
   ingressDb,
   platformLogsDb,
 } from "@rsl/tenancy";
-import { BrandLogo, FlashBanner } from "@rsl/ui";
+import { BrandLogo, FlashBanner, ThemeToggleButton } from "@rsl/ui";
 import { AdminSetupForm } from "@/components/admin-auth-forms";
 import { getOptionalStaffSession } from "@/lib/session";
 
@@ -91,34 +91,37 @@ export default async function PlatformSetupPage({
   ];
 
   return (
-    <div className="min-h-screen bg-[#F8F9FB] px-5 py-10 text-slate-900 sm:px-8 lg:px-10 xl:px-14">
+    <div className="rsl-ambient-canvas min-h-screen px-5 py-10 text-slate-900 sm:px-8 lg:px-10 xl:px-14">
       <div className="w-full">
         {/* Header Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-zinc-200/90 bg-white px-6 py-4 shadow-[0_4px_20px_rgba(15,23,42,0.04)]">
+        <div className="rsl-frost-card flex flex-wrap items-center justify-between gap-4 rounded-2xl px-6 py-4">
           <BrandLogo
             variant="long"
             size="sm"
             subtitle={`Platform Setup & Readiness • setup.${endpoints.primaryDomain}`}
           />
-          <span
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-semibold ${
-              isFirstRun
-                ? "border-amber-200 bg-amber-50 text-amber-800"
-                : "border-emerald-200 bg-emerald-50 text-emerald-800"
-            }`}
-          >
-            {isFirstRun ? (
-              <>
-                <ShieldCheck className="h-3.5 w-3.5 text-amber-600" />
-                <span>Step 1 of Setup • Awaiting Super Admin</span>
-              </>
-            ) : (
-              <>
-                <Lock className="h-3.5 w-3.5 text-emerald-600" />
-                <span>Bootstrap Completed & Locked</span>
-              </>
-            )}
-          </span>
+          <div className="flex items-center gap-2.5">
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-semibold ${
+                isFirstRun
+                  ? "border-amber-200 bg-amber-50 text-amber-800"
+                  : "border-emerald-200 bg-emerald-50 text-emerald-800"
+              }`}
+            >
+              {isFirstRun ? (
+                <>
+                  <ShieldCheck className="h-3.5 w-3.5 text-amber-600" />
+                  <span>Step 1 of Setup • Awaiting Super Admin</span>
+                </>
+              ) : (
+                <>
+                  <Lock className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>Bootstrap Completed & Locked</span>
+                </>
+              )}
+            </span>
+            <ThemeToggleButton compact />
+          </div>
         </div>
 
         <div className="mt-6">
@@ -128,7 +131,7 @@ export default async function PlatformSetupPage({
         {isFirstRun ? (
           <div className="mt-6 grid gap-6 lg:grid-cols-12">
             {/* Left Column: Create First Super Admin Form */}
-            <div className="rounded-2xl border border-zinc-200/90 bg-white p-6 shadow-[0_8px_30px_rgba(15,23,42,0.05)] sm:p-8 lg:col-span-7">
+            <div className="rsl-frost-card rounded-2xl p-6 sm:p-8 lg:col-span-7">
               <div className="text-[11px] font-bold tracking-wider text-emerald-700 uppercase">
                 Zero-Credential Git Bootstrap
               </div>
@@ -149,7 +152,7 @@ export default async function PlatformSetupPage({
 
             {/* Right Column: Modular Setup Architecture Preview */}
             <div className="space-y-3 lg:col-span-5">
-              <div className="rounded-2xl border border-zinc-200/90 bg-white p-5">
+              <div className="rsl-frost-card rounded-2xl p-5">
                 <h2 className="text-xs font-bold tracking-wide text-slate-900 uppercase">
                   Setup Module Pipeline
                 </h2>
@@ -188,7 +191,7 @@ export default async function PlatformSetupPage({
           </div>
         ) : !isSuperAdmin ? (
           /* Public / Non-Super-Admin Locked Gate */
-          <div className="mt-6 rounded-2xl border border-zinc-200/90 bg-white p-8 text-center shadow-[0_8px_30px_rgba(15,23,42,0.05)]">
+          <div className="rsl-frost-card mt-6 rounded-2xl p-8 text-center">
             <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
               <Lock className="h-5 w-5" />
             </div>
@@ -208,7 +211,7 @@ export default async function PlatformSetupPage({
         ) : (
           /* Authenticated Super Admin Setup & Readiness Hub (Ready for Future Module Expansion) */
           <div className="mt-6 space-y-6">
-            <div className="rounded-2xl border border-emerald-200/90 bg-white p-6 shadow-[0_8px_30px_rgba(15,23,42,0.05)]">
+            <div className="rsl-frost-card rounded-2xl p-6">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <div className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700">

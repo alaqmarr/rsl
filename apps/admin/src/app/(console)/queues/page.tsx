@@ -429,7 +429,7 @@ export default async function QueuesAndOpsPage({
                   sandbox="allow-same-origin"
                   srcDoc={tpl.html}
                   title={tpl.title}
-                  className="h-[640px] w-full border-0 bg-[#EDF1F7]"
+                  className="h-[640px] w-full border-0 bg-zinc-100"
                 />
               </div>
             ))}

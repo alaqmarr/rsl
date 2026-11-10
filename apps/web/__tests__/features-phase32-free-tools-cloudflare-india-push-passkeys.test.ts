@@ -34,6 +34,7 @@ import {
 } from "@rsl/tally";
 import {
   buildCloudflareEmailWorkerSnippet,
+  clearPlatformCredentialOverride,
   ensurePlatformVapidConfig,
   generateSmartAdCopy,
   getPlatformCloudflareEmailConfig,
@@ -283,13 +284,46 @@ describe("Phase 32 — Free Tools Suite: Cloudflare Stack, India Open SMB Utilit
     expect(cleanReport.riskLevel).toBe("low");
     expect(cleanReport.findings).toHaveLength(0);
 
-    const hindiRes = await translateIndianBusinessText({
+    const unconfiguredHindiRes = await translateIndianBusinessText({
       text: "Dear {{1}}, your invoice #{{2}} is due tomorrow. Thank you!",
       targetLanguage: "hi",
     });
-    expect(hindiRes.ok).toBe(true);
-    expect(hindiRes.translatedText).toContain("{{1}}");
-    expect(hindiRes.translatedText).toContain("{{2}}");
+    expect(unconfiguredHindiRes.ok).toBe(false);
+    expect(unconfiguredHindiRes.provider).toBe("unconfigured");
+
+    seedPlatformCredentialsBundle({
+      staffId: "stf_phase32_seeder",
+      bundle: {
+        cloudflare_ai: {
+          enabled: true,
+          accountId: "99aabbccddeeff001122334455667788",
+          apiToken: "cf_live_ai_tok_998877665544332211",
+          textModel: "@cf/meta/llama-3.1-8b-instruct",
+        },
+      },
+    });
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          success: true,
+          result: { response: "प्रिय __VAR0__, आपका चालान #__VAR1__ कल देय है। धन्यवाद!" },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )) as typeof fetch;
+    try {
+      const hindiRes = await translateIndianBusinessText({
+        text: "Dear {{1}}, your invoice #{{2}} is due tomorrow. Thank you!",
+        targetLanguage: "hi",
+      });
+      expect(hindiRes.ok).toBe(true);
+      expect(hindiRes.provider).toBe("cloudflare_workers_ai");
+      expect(hindiRes.translatedText).toContain("{{1}}");
+      expect(hindiRes.translatedText).toContain("{{2}}");
+    } finally {
+      globalThis.fetch = origFetch;
+      clearPlatformCredentialOverride("cloudflare_ai");
+    }
 
     const adCopy = await generateSmartAdCopy({
       businessName: "Radiant Industrial Co",

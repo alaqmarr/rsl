@@ -5,6 +5,7 @@ import zlib from "node:zlib";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
+  assertSafeExternalUrl,
   assertValidUlid,
   decryptEnvelope,
   encryptEnvelope,
@@ -277,13 +278,13 @@ export function readLocalBackupBundleBytes(workspaceId: string, backupId: string
 }
 
 /**
- * Strict Verified Restore Pipeline (Section 22.6):
+ * Verified Restore Pipeline:
  * 1. Verifies HMAC manifest signature & ciphertext digest (`RSL-BACKUP-1001` on tamper)
  * 2. Decrypts & opens with `trusted_schema = OFF`
  * 3. Rejects unexpected tables, views, or triggers (`RSL-BACKUP-1002`)
  * 4. Runs `PRAGMA integrity_check`
  * 5. Takes 7-day pre-restore snapshot, swaps `data.db` atomically while leaving
- *    `control.db` (Wallet, Entitlements) and `logs/current.db` (Unsubscribed numbers, SendGuards) untouched!
+ *    `control.db` (Wallet, Entitlements) and `logs/current.db` (Unsubscribed numbers, SendGuards) untouched.
  */
 export const restoreSignedEncryptedBackup = defineAction({
   key: "backup.restored",
@@ -324,7 +325,7 @@ export const restoreSignedEncryptedBackup = defineAction({
 
     const actualCipherSha = crypto.createHash("sha256").update(bundle.encryptedPayload).digest("hex");
     if (actualCipherSha !== bundle.manifest.ciphertextSha256) {
-      throw new RslError("RSL-BACKUP-1001", "Backup file verification failed — the file may be incomplete or altered.");
+      throw new RslError("RSL-BACKUP-1001", "Backup file verification failed - the file may be incomplete or altered.");
     }
 
     const compressedB64 = decryptEnvelope(bundle.encryptedPayload);
@@ -373,7 +374,7 @@ export const restoreSignedEncryptedBackup = defineAction({
 
       runSqlMigrations(stagedClient, TENANT_DATA_MIGRATIONS);
 
-      // Pause any automated broadcasts on restore per Section 22.6 step 9
+      // Pause any active broadcasts on restore so restored rows never resume mid-send
       stagedClient.prepare("UPDATE broadcasts SET status = 'paused' WHERE status = 'sending'").run();
       stagedClient.close();
 
@@ -534,15 +535,41 @@ export function exportContactsAsCsv(workspaceId: string): string {
   return [header, ...lines].join("\n");
 }
 
+const MAX_CSV_IMPORT_BYTES = 2 * 1024 * 1024; // 2 MB hard cap
+const MAX_CSV_IMPORT_ROWS = 5_000;
+
+function normalizeImportPhoneE164(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const stripped = raw.replace(/[\s\-().]/g, "").trim();
+  if (!stripped) return null;
+  if (/^\+[1-9]\d{7,14}$/.test(stripped)) return stripped;
+  if (/^[6-9]\d{9}$/.test(stripped)) return `+91${stripped}`;
+  if (/^91[6-9]\d{9}$/.test(stripped)) return `+${stripped}`;
+  if (/^0[6-9]\d{9}$/.test(stripped)) return `+91${stripped.slice(1)}`;
+  return null;
+}
+
+function stripCsvFormulaPrefix(value: string): string {
+  return value.replace(/^[=+\-@\t\r]+/, "").trim();
+}
+
 export const bulkImportContactsCsv = defineAction({
   key: "inbox.contact.created",
   permission: "inbox:reply",
   input: z.object({
-    csvContent: z.string().min(5),
+    csvContent: z.string().min(5).max(MAX_CSV_IMPORT_BYTES),
     recordWhatsAppConsent: z.boolean().default(false),
   }),
-  summarize: (_in, out?: { importedCount: number }) => `Imported ${out?.importedCount ?? 0} contacts from CSV`,
+  summarize: (_in, out?: { importedCount: number; skippedDuplicatesCount?: number }) =>
+    `Imported ${out?.importedCount ?? 0} contacts from CSV${out?.skippedDuplicatesCount ? ` (${out.skippedDuplicatesCount} duplicates skipped)` : ""}`,
   handler: (ctx, input) => {
+    if (Buffer.byteLength(input.csvContent, "utf8") > MAX_CSV_IMPORT_BYTES) {
+      throw new RslError("RSL-VAL-1001", "CSV import exceeds the 2 MB maximum size limit.");
+    }
+    if (input.csvContent.includes("\0")) {
+      throw new RslError("RSL-VAL-1001", "Invalid binary file content detected. Upload a plain UTF-8 CSV file.");
+    }
+
     const db = tenantDataDb(ctx);
     const lines = input.csvContent
       .split(/\r?\n/)
@@ -550,6 +577,12 @@ export const bulkImportContactsCsv = defineAction({
       .filter(Boolean);
     if (lines.length < 2) {
       throw new RslError("RSL-VAL-1001", "CSV must include a header row and at least one contact.");
+    }
+    if (lines.length - 1 > MAX_CSV_IMPORT_ROWS) {
+      throw new RslError(
+        "RSL-VAL-1001",
+        `CSV import is capped at ${MAX_CSV_IMPORT_ROWS.toLocaleString("en-IN")} contacts per batch.`
+      );
     }
 
     const headers = lines[0]!.split(",").map((h) => h.replace(/^"|"$/g, "").trim().toLowerCase());
@@ -560,20 +593,46 @@ export const bulkImportContactsCsv = defineAction({
     const iEmail = idx(["email"]);
     const iCompany = idx(["company", "business", "firm"]);
 
+    const existingContacts = db
+      .select({
+        phoneE164: tenantDataSchema.contacts.phoneE164,
+        email: tenantDataSchema.contacts.email,
+      })
+      .from(tenantDataSchema.contacts)
+      .all();
+    const seenPhones = new Set<string>(
+      existingContacts.map((c) => (c.phoneE164 || "").trim()).filter(Boolean)
+    );
+    const seenEmails = new Set<string>(
+      existingContacts.map((c) => (c.email || "").trim().toLowerCase()).filter(Boolean)
+    );
+
     const now = Date.now();
     let importedCount = 0;
+    let skippedDuplicatesCount = 0;
 
     const tx = db.$client.transaction(() => {
       for (let r = 1; r < lines.length; r++) {
         const cols = lines[r]!
           .split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/)
-          .map((c) => c.replace(/^"|"$/g, "").trim());
-        const name = (iName >= 0 ? cols[iName] : cols[0])?.trim();
+          .map((c) => c.replace(/^"|"$/g, "").replace(/""/g, '"').trim());
+        const rawName = (iName >= 0 ? cols[iName] : cols[0])?.trim();
+        const name = rawName ? stripCsvFormulaPrefix(rawName).slice(0, 140) : "";
         if (!name) continue;
 
-        const phone = (iPhone >= 0 ? cols[iPhone] : undefined)?.trim() || null;
-        const email = (iEmail >= 0 ? cols[iEmail] : undefined)?.trim() || null;
-        const company = (iCompany >= 0 ? cols[iCompany] : undefined)?.trim() || null;
+        const phone = normalizeImportPhoneE164(iPhone >= 0 ? cols[iPhone] : undefined);
+        const rawEmail = (iEmail >= 0 ? cols[iEmail] : undefined)?.trim().toLowerCase() || "";
+        const email = rawEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail) ? rawEmail.slice(0, 180) : null;
+        const rawCompany = (iCompany >= 0 ? cols[iCompany] : undefined)?.trim() || "";
+        const company = rawCompany ? stripCsvFormulaPrefix(rawCompany).slice(0, 160) : null;
+
+        if ((phone && seenPhones.has(phone)) || (email && seenEmails.has(email))) {
+          skippedDuplicatesCount++;
+          continue;
+        }
+        if (phone) seenPhones.add(phone);
+        if (email) seenEmails.add(email);
+
         const cid = newEntityId("cnt", ctx.workspaceId);
 
         db.insert(tenantDataSchema.contacts)
@@ -609,7 +668,7 @@ export const bulkImportContactsCsv = defineAction({
     });
 
     tx.immediate();
-    return { importedCount };
+    return { importedCount, skippedDuplicatesCount };
   },
 });
 
@@ -623,7 +682,10 @@ export const requestCustomBackupProvider = defineAction({
     contactEmail: z.string().email(),
   }),
   summarize: (input) => `Requested custom backup adapter for '${input.providerName}'`,
-  handler: (ctx, input) => {
+  handler: async (ctx, input) => {
+    const validatedUrl = input.providerUrl?.trim()
+      ? await assertSafeExternalUrl(input.providerUrl.trim(), { label: "Provider URL" })
+      : null;
     const id = newEntityId("dst", ctx.workspaceId);
     controlDb()
       .insert(controlSchema.providerRequests)
@@ -631,7 +693,7 @@ export const requestCustomBackupProvider = defineAction({
         id,
         workspaceId: ctx.workspaceId,
         providerName: input.providerName.trim(),
-        providerUrl: input.providerUrl?.trim() || null,
+        providerUrl: validatedUrl,
         urgency: input.urgency,
         contactEmail: input.contactEmail.trim(),
         status: "submitted",

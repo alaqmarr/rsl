@@ -48,7 +48,7 @@ export function rupeesToPaise(rupees: number | string): number {
 
 /**
  * Computes the Indian Financial Year ("YY-YY", e.g. "26-27") strictly in `Asia/Kolkata` (IST, UTC+05:30)
- * so transactions between 00:00–05:29 IST on April 1st are never mis-assigned to the prior FY (P1-21 / ACT-3.1).
+ * so transactions between 00:00 and 05:29 IST on April 1st are never mis-assigned to the prior FY.
  */
 export function computeIndianFinancialYearIst(date: Date | number = new Date()): string {
   const ts = typeof date === "number" ? date : date.getTime();
@@ -69,8 +69,120 @@ export function formatIstDateIso(ts: number): string {
 }
 
 /**
+ * Formats a timestamp explicitly in `Asia/Kolkata` (IST) so SSR and browser renders match.
+ */
+export function formatIstDateTime(
+  ts: number | Date | null | undefined,
+  options?: Intl.DateTimeFormatOptions
+): string {
+  if (ts === null || ts === undefined) return "-";
+  const dateObj = typeof ts === "number" ? new Date(ts) : ts;
+  if (Number.isNaN(dateObj.getTime())) return "-";
+  return dateObj.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Kolkata",
+    ...options,
+  });
+}
+
+export function formatIstDate(
+  ts: number | Date | null | undefined,
+  options?: Intl.DateTimeFormatOptions
+): string {
+  if (ts === null || ts === undefined) return "-";
+  const dateObj = typeof ts === "number" ? new Date(ts) : ts;
+  if (Number.isNaN(dateObj.getTime())) return "-";
+  return dateObj.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Kolkata",
+    ...options,
+  });
+}
+
+export interface GstInvoiceDisplayTotals {
+  isAdvanceReceipt: boolean;
+  isCreditNote: boolean;
+  isInterState: boolean;
+  sacCode: string;
+  docHeading: string;
+  totalRowLabel: string;
+  taxRegimeLabel: string;
+  subtotalPaise: number;
+  cgstPaise: number;
+  sgstPaise: number;
+  igstPaise: number;
+  totalGstPaise: number;
+  totalPaise: number;
+  subtotalFormatted: string;
+  cgstFormatted: string;
+  sgstFormatted: string;
+  igstFormatted: string;
+  totalGstFormatted: string;
+  totalFormatted: string;
+}
+
+export function computeGstInvoiceDisplayModel(input: {
+  docType?: string | null;
+  sacCode?: string | null;
+  subtotalPaise: number;
+  cgstPaise: number;
+  sgstPaise: number;
+  igstPaise: number;
+  totalPaise: number;
+}): GstInvoiceDisplayTotals {
+  const isAdvanceReceipt = input.docType === "advance_receipt";
+  const isCreditNote = input.docType === "credit_note";
+  const isInterState = input.igstPaise !== 0;
+  const sacCode = (input.sacCode || "998314").trim() || "998314";
+  const totalGstPaise = input.cgstPaise + input.sgstPaise + input.igstPaise;
+  const docHeading = isAdvanceReceipt
+    ? "Advance Receipt Voucher (0% GST Deposit)"
+    : isCreditNote
+      ? "GST Credit Note (Sec. 34 CGST Act)"
+      : "Tax Invoice (Original for Recipient)";
+  const totalRowLabel = isCreditNote
+    ? "Total Credited (INR)"
+    : isAdvanceReceipt
+      ? "Deposit Received (INR)"
+      : "Total Payable (INR)";
+  const taxRegimeLabel = isAdvanceReceipt
+    ? "Prepaid Deposit (0% GST - Tax Invoice issued on usage)"
+    : isInterState
+      ? "Inter-State Supply (18% IGST)"
+      : "Intra-State Supply (9% CGST + 9% SGST)";
+
+  return {
+    isAdvanceReceipt,
+    isCreditNote,
+    isInterState,
+    sacCode,
+    docHeading,
+    totalRowLabel,
+    taxRegimeLabel,
+    subtotalPaise: input.subtotalPaise,
+    cgstPaise: input.cgstPaise,
+    sgstPaise: input.sgstPaise,
+    igstPaise: input.igstPaise,
+    totalGstPaise,
+    totalPaise: input.totalPaise,
+    subtotalFormatted: formatInr(input.subtotalPaise, { showDecimals: true }),
+    cgstFormatted: formatInr(input.cgstPaise, { showDecimals: true }),
+    sgstFormatted: formatInr(input.sgstPaise, { showDecimals: true }),
+    igstFormatted: formatInr(input.igstPaise, { showDecimals: true }),
+    totalGstFormatted: formatInr(totalGstPaise, { showDecimals: true }),
+    totalFormatted: formatInr(input.totalPaise, { showDecimals: true }),
+  };
+}
+
+/**
  * Neutralizes OWASP CSV / Spreadsheet Formula Injection (`=`, `+`, `-`, `@`, `\t`, `\r`)
- * while preserving numeric values and optional E.164 phone numbers (`+91...`) (P2-09 / SEC-10).
+ * while preserving numeric values and optional E.164 phone numbers (`+91...`).
  */
 export function sanitizeCsvFormulaCell(
   value: unknown,

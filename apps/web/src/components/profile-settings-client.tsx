@@ -3,10 +3,21 @@
 import React, { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BellRing, Fingerprint, Trash2 } from "lucide-react";
-import { IosSpinner, SectionCard, sileo, StatusPill } from "@rsl/ui";
+import { BellRing, Fingerprint, QrCode, ShieldCheck, Trash2 } from "lucide-react";
 import {
+  CopyCodeBlock,
+  GuideDrawerButton,
+  IosSpinner,
+  SectionCard,
+  sileo,
+  StatusPill,
+  TotpQrCodeCard,
+} from "@rsl/ui";
+import {
+  beginUserTotpEnrollmentJsonAction,
   changePasswordJsonAction,
+  confirmUserTotpEnrollmentJsonAction,
+  disableUserTotpMfaJsonAction,
   revokeOtherSessionsJsonAction,
   revokeSessionJsonAction,
   saveUserProfileJsonAction,
@@ -34,6 +45,8 @@ export interface ProfileSettingsClientProps {
     jobTitle: string | null;
     emailVerified: boolean;
     createdAt: number;
+    totpEnabled?: boolean;
+    backupCodesRemaining?: number;
   };
   currentRoleLabel: string;
   activeWorkspaceId: string;
@@ -106,6 +119,100 @@ export function ProfileSettingsClient({
   const [passkeyLabel, setPasskeyLabel] = useState("");
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
+
+  const [totpEnrollment, setTotpEnrollment] = useState<{
+    secret: string;
+    otpauthUri: string;
+    qrCodeDataUri: string;
+    accountEmail: string;
+    issuer: string;
+  } | null>(null);
+  const [totpConfirmCode, setTotpConfirmCode] = useState("");
+  const [totpDisablePassword, setTotpDisablePassword] = useState("");
+  const [totpBackupCodes, setTotpBackupCodes] = useState<string[] | null>(null);
+  const [isBeginningTotp, startBeginTotpTransition] = useTransition();
+  const [isConfirmingTotp, startConfirmTotpTransition] = useTransition();
+  const [isDisablingTotp, startDisableTotpTransition] = useTransition();
+
+  function handleBeginTotpEnrollment() {
+    startBeginTotpTransition(async () => {
+      const res = await beginUserTotpEnrollmentJsonAction();
+      if (res.ok && res.enrollment) {
+        setTotpBackupCodes(null);
+        setTotpConfirmCode("");
+        setTotpEnrollment({
+          secret: res.enrollment.secret,
+          otpauthUri: res.enrollment.otpauthUri,
+          qrCodeDataUri: res.enrollment.qrCodeDataUri,
+          accountEmail: res.enrollment.accountEmail || user.email,
+          issuer: res.enrollment.issuer || "RapidShift Labs",
+        });
+        sileo.info({
+          title: "Authenticator QR Code Ready",
+          description: res.message,
+          duration: 4600,
+        });
+      } else {
+        sileo.error({
+          title: "Could Not Start 2FA Setup",
+          description: res.message,
+          duration: 5000,
+        });
+      }
+    });
+  }
+
+  function handleConfirmTotpEnrollment(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData();
+    fd.set("code", totpConfirmCode);
+    startConfirmTotpTransition(async () => {
+      const res = await confirmUserTotpEnrollmentJsonAction(fd);
+      if (res.ok) {
+        setTotpEnrollment(null);
+        setTotpConfirmCode("");
+        setTotpBackupCodes(res.backupCodes || null);
+        sileo.success({
+          title: "Authenticator 2FA Enabled",
+          description: res.message,
+          duration: 5200,
+        });
+        router.refresh();
+      } else {
+        sileo.error({
+          title: "Verification Code Rejected",
+          description: res.message,
+          duration: 5000,
+        });
+      }
+    });
+  }
+
+  function handleDisableTotpMfa(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData();
+    fd.set("codeOrPassword", totpDisablePassword);
+    startDisableTotpTransition(async () => {
+      const res = await disableUserTotpMfaJsonAction(fd);
+      if (res.ok) {
+        setTotpDisablePassword("");
+        setTotpEnrollment(null);
+        setTotpBackupCodes(null);
+        sileo.success({
+          title: "Authenticator 2FA Disabled",
+          description: res.message,
+          duration: 4600,
+        });
+        router.refresh();
+      } else {
+        sileo.error({
+          title: "Could Not Disable 2FA",
+          description: res.message,
+          duration: 5000,
+        });
+      }
+    });
+  }
 
   async function handleEnrollPasskey() {
     if (typeof window === "undefined" || !window.PublicKeyCredential) {
@@ -736,11 +843,216 @@ export function ProfileSettingsClient({
         </div>
       </div>
 
+      {/* Authenticator App (RFC 6238 TOTP QR Code & Recovery Codes) */}
+      <SectionCard
+        title="Authenticator App (2FA QR Code & Recovery Codes)"
+        subtitle="Protect your login and confidential Tally & GST actions with Google Authenticator, 1Password, Microsoft Authenticator, or Authy"
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <GuideDrawerButton
+              label="2FA Setup Guide"
+              guide={{
+                title: "How to Set Up Your Authenticator App (2FA QR Code)",
+                summary: "RFC 6238 TOTP 6-digit rotating codes + 8 one-time recovery codes",
+                steps: [
+                  {
+                    title: "Generate Your Unique Authenticator QR Code",
+                    detail:
+                      "Click Generate 2FA QR Code below. A cryptographic Base32 secret and scannable QR code will appear right inside this card.",
+                  },
+                  {
+                    title: "Scan in Google Authenticator, 1Password, or Authy",
+                    detail:
+                      "Open your preferred authenticator app on your phone and scan the QR code, or tap Open in Authenticator App if you are on the same device.",
+                  },
+                  {
+                    title: "Enter the 6-Digit Code & Save Recovery Codes",
+                    detail:
+                      "Type the current 6-digit code shown in your app and click Confirm & Activate 2FA. Save the 8 one-time recovery codes in a safe place in case you change phones.",
+                  },
+                ],
+              }}
+            />
+            <StatusPill
+              label={user.totpEnabled ? "2FA Active" : "Not Enrolled"}
+              tone={user.totpEnabled ? "emerald" : "amber"}
+            />
+          </div>
+        }
+      >
+        <div className="space-y-4 text-xs">
+          {totpBackupCodes && totpBackupCodes.length > 0 && (
+            <div className="space-y-2.5 rounded-xl border border-emerald-200 bg-emerald-50/75 p-4 text-emerald-950">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="font-semibold">
+                  Save Your 8 One-Time Recovery Backup Codes Now
+                </div>
+                <StatusPill label="Shown Only Once" tone="emerald" />
+              </div>
+              <p className="text-[11.5px] leading-relaxed text-emerald-900/90">
+                Each recovery code can be used once to sign in if you lose your phone or authenticator app. Store them in your password vault.
+              </p>
+              <CopyCodeBlock
+                code={totpBackupCodes.join("\n")}
+              />
+            </div>
+          )}
+
+          {totpEnrollment ? (
+            <div className="space-y-4">
+              <TotpQrCodeCard
+                qrCodeDataUri={totpEnrollment.qrCodeDataUri}
+                otpauthUri={totpEnrollment.otpauthUri}
+                secret={totpEnrollment.secret}
+                accountEmail={totpEnrollment.accountEmail}
+                issuer={totpEnrollment.issuer}
+              />
+
+              <form
+                onSubmit={handleConfirmTotpEnrollment}
+                className="flex flex-wrap items-end gap-3 rounded-xl border border-zinc-200/80 bg-zinc-50/60 p-3.5"
+              >
+                <div className="min-w-[220px] flex-1">
+                  <label htmlFor="user-totp-confirm-code" className="rsl-label">
+                    Enter 6-Digit Code From App to Activate *
+                  </label>
+                  <input
+                    id="user-totp-confirm-code"
+                    name="code"
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={8}
+                    required
+                    value={totpConfirmCode}
+                    onChange={(e) => setTotpConfirmCode(e.target.value)}
+                    placeholder="123456"
+                    className="rsl-input font-mono text-sm tracking-widest"
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="submit"
+                    disabled={isConfirmingTotp}
+                    className="rsl-btn-primary inline-flex items-center gap-2 py-2.5 text-xs"
+                  >
+                    {isConfirmingTotp ? (
+                      <IosSpinner size="xs" className="text-white" />
+                    ) : (
+                      <ShieldCheck className="h-4 w-4" />
+                    )}
+                    <span>
+                      {isConfirmingTotp ? "Verifying Code..." : "Confirm & Activate 2FA"}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isConfirmingTotp}
+                    onClick={() => {
+                      setTotpEnrollment(null);
+                      setTotpConfirmCode("");
+                    }}
+                    className="rsl-btn-secondary py-2.5 text-xs"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          ) : user.totpEnabled ? (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-emerald-950">
+                <div>
+                  <div className="font-semibold">
+                    Authenticator App 2FA is active on {user.email}
+                  </div>
+                  <div className="mt-0.5 text-[11.5px] text-emerald-900/80">
+                    Remaining one-time recovery codes:{" "}
+                    <span className="font-mono font-bold">
+                      {user.backupCodesRemaining ?? 0}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={isBeginningTotp}
+                  onClick={handleBeginTotpEnrollment}
+                  className="rsl-btn-secondary inline-flex items-center gap-1.5 py-2 text-xs"
+                >
+                  {isBeginningTotp ? (
+                    <IosSpinner size="xs" />
+                  ) : (
+                    <QrCode className="h-3.5 w-3.5" />
+                  )}
+                  <span>Rotate 2FA QR Code &amp; Recovery Codes</span>
+                </button>
+              </div>
+
+              <form
+                onSubmit={handleDisableTotpMfa}
+                className="flex flex-wrap items-end gap-2.5 rounded-xl border border-zinc-200/80 bg-zinc-50/50 p-3.5"
+              >
+                <div className="min-w-[220px] flex-1">
+                  <label htmlFor="disable-totp-password" className="rsl-label">
+                    Confirm Current Password to Disable 2FA
+                  </label>
+                  <input
+                    id="disable-totp-password"
+                    name="currentPassword"
+                    type="password"
+                    required
+                    autoComplete="current-password"
+                    value={totpDisablePassword}
+                    onChange={(e) => setTotpDisablePassword(e.target.value)}
+                    placeholder="Enter your account password"
+                    className="rsl-input text-xs"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isDisablingTotp}
+                  className="rsl-btn-danger-soft inline-flex items-center gap-1.5 py-2 text-xs"
+                >
+                  {isDisablingTotp && <IosSpinner size="xs" />}
+                  <span>{isDisablingTotp ? "Disabling..." : "Disable Authenticator 2FA"}</span>
+                </button>
+              </form>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200/80 bg-zinc-50/60 px-4 py-3.5">
+              <div className="max-w-xl space-y-1">
+                <div className="font-semibold text-slate-900">
+                  Add a Mobile Authenticator App (QR Code)
+                </div>
+                <p className="text-[11.5px] leading-relaxed text-zinc-600">
+                  Generate an RFC 6238 QR code to pair Google Authenticator, 1Password, Microsoft Authenticator, or Authy. You can also use 6-digit authenticator codes for instant step-up verification when unmasking confidential party records.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={isBeginningTotp}
+                onClick={handleBeginTotpEnrollment}
+                className="rsl-btn-primary inline-flex items-center gap-2 py-2.5 text-xs"
+              >
+                {isBeginningTotp ? (
+                  <IosSpinner size="xs" className="text-white" />
+                ) : (
+                  <QrCode className="h-4 w-4" />
+                )}
+                <span>
+                  {isBeginningTotp ? "Generating QR Code..." : "Generate 2FA QR Code"}
+                </span>
+              </button>
+            </div>
+          )}
+        </div>
+      </SectionCard>
+
       {/* Biometric Passkeys & Instant Browser/Mobile Web Push */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <SectionCard
           title={`Biometric Passkeys (${passkeys.length})`}
-          subtitle="Sign in with 1-tap Fingerprint, Face ID, or Windows Hello — phishing-resistant W3C WebAuthn"
+          subtitle="Sign in with 1-tap Fingerprint, Face ID, or Windows Hello - phishing-resistant W3C WebAuthn"
           action={
             <StatusPill
               label={passkeys.length > 0 ? `${passkeys.length} Enrolled` : "Recommended"}
@@ -867,7 +1179,7 @@ export function ProfileSettingsClient({
               </div>
             ) : (
               <p className="text-[11.5px] text-zinc-500">
-                Works free on Chrome, Edge, Firefox &amp; Android home-screen PWAs — even when the
+                Works free on Chrome, Edge, Firefox &amp; Android home-screen PWAs - even when the
                 RSL tab is minimized.
               </p>
             )}

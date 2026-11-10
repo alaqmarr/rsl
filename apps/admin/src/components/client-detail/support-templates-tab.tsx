@@ -32,19 +32,19 @@ export function ClientSupportTemplatesTab({
             <li className="flex items-center gap-2">
               <MessageSquare className="h-3.5 w-3.5 text-emerald-600" />
               <span>
-                <code className="font-mono font-semibold">tally_sales_bill_created</code> — Automatic Sales Bill notification
+                <code className="font-mono font-semibold">tally_sales_bill_created</code> - Automatic Sales Bill notification
               </span>
             </li>
             <li className="flex items-center gap-2">
               <MessageSquare className="h-3.5 w-3.5 text-emerald-600" />
               <span>
-                <code className="font-mono font-semibold">tally_payment_receipt_thankyou</code> — Payment Receipt confirmation
+                <code className="font-mono font-semibold">tally_payment_receipt_thankyou</code> - Payment Receipt confirmation
               </span>
             </li>
             <li className="flex items-center gap-2">
               <MessageSquare className="h-3.5 w-3.5 text-emerald-600" />
               <span>
-                <code className="font-mono font-semibold">tally_overdue_payment_reminder</code> — Polite Overdue Bill reminder
+                <code className="font-mono font-semibold">tally_overdue_payment_reminder</code> - Polite Overdue Bill reminder
               </span>
             </li>
           </ul>

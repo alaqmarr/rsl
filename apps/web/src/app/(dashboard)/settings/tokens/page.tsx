@@ -4,6 +4,7 @@ import {
   API_SCOPES,
   listOutboundWebhookEndpoints,
   listWorkspaceApiKeys,
+  listWorkspaceWebhookDeliveries,
   WEBHOOK_EVENTS,
 } from "@rsl/api-keys";
 import {
@@ -80,9 +81,7 @@ export default async function UnifiedApiTokensPage({
   const connectionsData = listWorkspaceConnections(session.workspace.id);
   const tallyEndpoint = getOrCreateTallyWebhookEndpoint(session.workspace.id);
   const tallyLiveStatus = computeTallyWebhookLiveStatus(tallyEndpoint);
-  const tallyWebhookUrl = canManageTally
-    ? `${endpoints.tallyWebhookUrl}?token=${tallyEndpoint.webhookToken}`
-    : `${endpoints.tallyWebhookUrl}?token=••••••••••••••••`;
+  const tallyWebhookUrl = endpoints.tallyWebhookUrl;
   const metaVerifyToken = canManageConnections
     ? getOrCreateWorkspaceWebhookVerifyToken(session.workspace.id)
     : "••••••••••••••••";
@@ -91,6 +90,9 @@ export default async function UnifiedApiTokensPage({
   const apiKeys = hasApiEntitlement ? listWorkspaceApiKeys(session.workspace.id) : [];
   const outboundWebhooks = hasApiEntitlement
     ? listOutboundWebhookEndpoints(session.workspace.id)
+    : [];
+  const webhookDeliveries = hasApiEntitlement
+    ? listWorkspaceWebhookDeliveries(session.workspace.id, 30)
     : [];
 
   const apiPlans = !hasApiEntitlement
@@ -110,7 +112,7 @@ export default async function UnifiedApiTokensPage({
       <PageHeader
         eyebrow="Settings & Account"
         title="Unified API Tokens, Client Subdomains & Webhook Vault"
-        subtitle="Manage every token and dedicated SSL client endpoint across your business in a single screen — External Channel tokens, Tally Prime webhook token, Meta webhook verify token, and Platform REST API keys."
+        subtitle="Manage every token and dedicated SSL client endpoint across your business in a single screen - External Channel tokens, Tally Prime webhook token, Meta webhook verify token, and Platform REST API keys."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {canManageConnections && !hasDriveConnected && (
@@ -226,6 +228,18 @@ export default async function UnifiedApiTokensPage({
           signingSecret: canManageApiKeys ? w.signingSecret : "••••••••••••••••",
           events: w.events,
           lastDeliveryStatus: w.lastDeliveryStatus,
+        }))}
+        webhookDeliveries={webhookDeliveries.map((d) => ({
+          id: d.id,
+          endpointId: d.endpointId,
+          eventType: d.eventType,
+          status: d.status,
+          attemptCount: d.attemptCount,
+          httpStatus: d.httpStatus,
+          lastError: d.lastError,
+          nextRetryAt: d.nextRetryAt,
+          createdAt: d.createdAt,
+          deliveredAt: d.deliveredAt,
         }))}
         apiScopes={API_SCOPES.map((s) => ({ key: s.key, label: s.label }))}
         webhookEvents={WEBHOOK_EVENTS.map((e) => ({ key: e.key, label: e.label }))}

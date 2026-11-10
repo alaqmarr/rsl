@@ -51,6 +51,11 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ kind: string }> }
 ) {
+  const fetchSite = request.headers.get("sec-fetch-site");
+  if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") {
+    return NextResponse.json({ error: "Cross-site PDF downloads are forbidden." }, { status: 403 });
+  }
+
   const session = await getOptionalWebSession();
   if (!session) {
     return NextResponse.json({ error: "Authentication required" }, { status: 401 });
@@ -72,7 +77,7 @@ export async function GET(
   const url = new URL(request.url);
   const wsId = session.workspace.id;
 
-  // Serve exact untouched native Tally Prime printed invoice PDF (%PDF-1.x)
+  // Serve native Tally Prime printed invoice PDF (%PDF-1.x)
   if (kind === "tally-voucher-native") {
     const voucherId = url.searchParams.get("voucherId")?.trim() || "";
     const nativePdf = getNativeTallyVoucherPdf(wsId, voucherId);

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { eq } from "drizzle-orm";
+import crypto from "node:crypto";
+import { desc, eq } from "drizzle-orm";
 import { LRUCache } from "lru-cache";
 import pLimit from "p-limit";
 import { assertValidUlid, getEnv, newId, RslError, type ActorType } from "@rsl/core";
@@ -33,6 +34,8 @@ export interface TenantContext {
   readonly actorId: string;
   readonly roleSlug?: string;
   readonly assetScope?: string[] | null;
+  readonly apiKeyScopes?: string[] | null;
+  readonly systemCapability?: string | null;
   readonly impersonatorId?: string | null;
   readonly correlationId: string;
   readonly requestId: string;
@@ -60,6 +63,7 @@ export function resolveSafeTenantDir(tenantId: string): string {
 let controlSingleton: ControlDb | null = null;
 let controlAppliedVersion = 0;
 let ingressSingleton: IngressDb | null = null;
+let ingressAppliedVersion = 0;
 let platformLogsSingleton: PlatformLogsDb | null = null;
 
 export function controlDb(): ControlDb {
@@ -83,7 +87,13 @@ export function controlDb(): ControlDb {
 }
 
 export function ingressDb(): IngressDb {
-  if (ingressSingleton) return ingressSingleton;
+  const latestIngressVersion = INGRESS_MIGRATIONS[INGRESS_MIGRATIONS.length - 1]?.version ?? 0;
+  if (ingressSingleton) {
+    if (ingressAppliedVersion < latestIngressVersion) {
+      ingressAppliedVersion = runSqlMigrations(ingressSingleton.$client, INGRESS_MIGRATIONS);
+    }
+    return ingressSingleton;
+  }
   const env = getEnv();
   const platformDir = path.join(env.DATA_DIR, "platform");
   ensureSecureDir(platformDir);
@@ -91,7 +101,7 @@ export function ingressDb(): IngressDb {
   const dbPath = path.join(platformDir, "ingress.db");
   const raw = createSqliteClient(dbPath);
   applyConnectionPragmas(raw, "standard");
-  runSqlMigrations(raw, INGRESS_MIGRATIONS);
+  ingressAppliedVersion = runSqlMigrations(raw, INGRESS_MIGRATIONS);
   ingressSingleton = wrapIngressDb(raw);
   return ingressSingleton;
 }
@@ -162,20 +172,61 @@ const logsHandleCache = new LRUCache<string, CachedHandle<TenantLogsDb>>({
   },
 });
 
-function verifyActiveTenantStatus(tenantId: string, allowSuspendedRead = false): {
+interface CachedTenantRegistryRow {
   dataDbPath: string;
   logsDbPath: string;
   status: string;
-} {
-  const ctrl = controlDb();
-  const reg = ctrl
-    .select()
-    .from(controlSchema.tenantRegistry)
-    .where(eq(controlSchema.tenantRegistry.tenantId, tenantId))
-    .get();
+  dataSchemaVersion: number;
+  logsSchemaVersion: number;
+}
 
+const tenantRegistryCache = new LRUCache<string, CachedTenantRegistryRow>({
+  max: 2000,
+  ttl: 5_000,
+});
+
+const tenantInvalidationListeners = new Set<(tenantId?: string) => void>();
+
+export function onTenantRegistryInvalidated(listener: (tenantId?: string) => void): void {
+  tenantInvalidationListeners.add(listener);
+}
+
+export function invalidateTenantRegistryCache(tenantId?: string): void {
+  if (tenantId) {
+    tenantRegistryCache.delete(tenantId);
+  } else {
+    tenantRegistryCache.clear();
+  }
+  for (const listener of tenantInvalidationListeners) {
+    try {
+      listener(tenantId);
+    } catch {
+      // Never block cache invalidation on listener errors
+    }
+  }
+}
+
+function verifyActiveTenantStatus(tenantId: string, allowSuspendedRead = false): CachedTenantRegistryRow {
+  let reg = tenantRegistryCache.get(tenantId);
   if (!reg) {
-    throw new RslError("RSL-TENANT-1001", "Business storage is not initialized yet.");
+    const ctrl = controlDb();
+    const dbRow = ctrl
+      .select()
+      .from(controlSchema.tenantRegistry)
+      .where(eq(controlSchema.tenantRegistry.tenantId, tenantId))
+      .get();
+
+    if (!dbRow) {
+      throw new RslError("RSL-TENANT-1001", "Business storage is not initialized yet.");
+    }
+    reg = {
+      dataDbPath: dbRow.dataDbPath,
+      logsDbPath: dbRow.logsDbPath,
+      status: dbRow.status,
+      dataSchemaVersion: dbRow.dataSchemaVersion,
+      logsSchemaVersion: dbRow.logsSchemaVersion,
+    };
+    tenantRegistryCache.set(tenantId, reg);
   }
 
   if (reg.status === "restoring" || reg.status === "migrating" || reg.status === "migration_failed" || reg.status === "deleted") {
@@ -186,11 +237,7 @@ function verifyActiveTenantStatus(tenantId: string, allowSuspendedRead = false):
     throw new RslError("RSL-TENANT-1002");
   }
 
-  return {
-    dataDbPath: reg.dataDbPath,
-    logsDbPath: reg.logsDbPath,
-    status: reg.status,
-  };
+  return reg;
 }
 
 export function tenantDataDb(ctx: Pick<TenantContext, "workspaceId">, options?: { allowSuspendedRead?: boolean }): TenantDataDb {
@@ -221,13 +268,17 @@ export function tenantDataDb(ctx: Pick<TenantContext, "workspaceId">, options?: 
     },
   });
 
-  // Update schema version if lazy-migrated
-  const ctrl = controlDb();
-  ctrl
-    .update(controlSchema.tenantRegistry)
-    .set({ dataSchemaVersion: version, updatedAt: Date.now() })
-    .where(eq(controlSchema.tenantRegistry.tenantId, tenantId))
-    .run();
+  // Write to control.db ONLY when a lazy schema migration actually advanced the version
+  if (version !== reg.dataSchemaVersion) {
+    const ctrl = controlDb();
+    ctrl
+      .update(controlSchema.tenantRegistry)
+      .set({ dataSchemaVersion: version, updatedAt: Date.now() })
+      .where(eq(controlSchema.tenantRegistry.tenantId, tenantId))
+      .run();
+    reg.dataSchemaVersion = version;
+    tenantRegistryCache.set(tenantId, reg);
+  }
 
   return wrapped;
 }
@@ -260,34 +311,83 @@ export function tenantLogsDb(ctx: Pick<TenantContext, "workspaceId">): TenantLog
     },
   });
 
-  const ctrl = controlDb();
-  ctrl
-    .update(controlSchema.tenantRegistry)
-    .set({ logsSchemaVersion: version, updatedAt: Date.now() })
-    .where(eq(controlSchema.tenantRegistry.tenantId, tenantId))
-    .run();
+  if (version !== reg.logsSchemaVersion) {
+    const ctrl = controlDb();
+    ctrl
+      .update(controlSchema.tenantRegistry)
+      .set({ logsSchemaVersion: version, updatedAt: Date.now() })
+      .where(eq(controlSchema.tenantRegistry.tenantId, tenantId))
+      .run();
+    reg.logsSchemaVersion = version;
+    tenantRegistryCache.set(tenantId, reg);
+  }
 
   return wrapped;
 }
 
 export function closeTenantHandles(tenantId: string): void {
   const validId = assertValidUlid(tenantId, "tenantId");
+  tenantRegistryCache.delete(validId);
   dataHandleCache.delete(validId);
   logsHandleCache.delete(validId);
 }
 
 export function closeAllHandlesForShutdown(): void {
+  for (const handle of dataHandleCache.values()) {
+    try {
+      if (handle.db.$client.open) {
+        handle.db.$client.pragma("wal_checkpoint(PASSIVE)");
+      }
+    } catch {
+      // Best-effort checkpoint during shutdown
+    }
+    handle.close();
+  }
+  for (const handle of logsHandleCache.values()) {
+    try {
+      if (handle.db.$client.open) {
+        handle.db.$client.pragma("wal_checkpoint(PASSIVE)");
+      }
+    } catch {
+      // Best-effort checkpoint during shutdown
+    }
+    handle.close();
+  }
+  tenantRegistryCache.clear();
   dataHandleCache.clear();
   logsHandleCache.clear();
   if (controlSingleton) {
+    try {
+      if (controlSingleton.$client.open) {
+        controlSingleton.$client.pragma("wal_checkpoint(PASSIVE)");
+      }
+    } catch {
+      // Best-effort checkpoint during shutdown
+    }
     controlSingleton.$client.close();
     controlSingleton = null;
+    controlAppliedVersion = 0;
   }
   if (ingressSingleton) {
+    try {
+      if (ingressSingleton.$client.open) {
+        ingressSingleton.$client.pragma("wal_checkpoint(PASSIVE)");
+      }
+    } catch {
+      // Best-effort checkpoint during shutdown
+    }
     ingressSingleton.$client.close();
     ingressSingleton = null;
+    ingressAppliedVersion = 0;
   }
   if (platformLogsSingleton) {
+    try {
+      if (platformLogsSingleton.$client.open) {
+        platformLogsSingleton.$client.pragma("wal_checkpoint(PASSIVE)");
+      }
+    } catch {
+      // Best-effort checkpoint during shutdown
+    }
     platformLogsSingleton.$client.close();
     platformLogsSingleton = null;
   }
@@ -363,6 +463,7 @@ export function provisionTenantDatabase(workspaceId: string): {
     .onConflictDoUpdate({
       target: controlSchema.tenantRegistry.tenantId,
       set: {
+        status: "active",
         dataDbPath,
         logsDbPath,
         dataSchemaVersion: dataVersion,
@@ -373,6 +474,7 @@ export function provisionTenantDatabase(workspaceId: string): {
       },
     })
     .run();
+  tenantRegistryCache.delete(validId);
 
   return { tenantDir, dataDbPath, logsDbPath };
 }
@@ -581,7 +683,7 @@ export function getTenancyHandleMetrics() {
     openLogsHandles: logsHandleCache.size,
     maxOpenHandles: env.TENANT_DB_MAX_OPEN,
     idleCloseMs: env.TENANT_DB_IDLE_CLOSE_MS,
-    platformFiles: {
+      platformFiles: {
       controlDbBytes: statSafe(path.join(platformDir, "control.db")),
       controlWalBytes: statSafe(path.join(platformDir, "control.db-wal")),
       ingressDbBytes: statSafe(path.join(platformDir, "ingress.db")),
@@ -590,7 +692,313 @@ export function getTenancyHandleMetrics() {
   };
 }
 
+/* ============================================================================
+ * DPDP Act 2023 Right-to-Access Export, Crypto-Shredding Erasure & Staff Audit
+ * ============================================================================ */
+
+export interface CustomerVisibleStaffAccessEntry {
+  id: string;
+  kind: "impersonation" | "inspection" | "staff_action";
+  ts: number;
+  endedAt: number | null;
+  staffName: string;
+  staffRole: string;
+  action: string;
+  ticketReference: string | null;
+  summary: string;
+}
+
+export function listCustomerVisibleStaffAccessLogs(
+  workspaceId: string,
+  limit = 50
+): CustomerVisibleStaffAccessEntry[] {
+  const validId = assertValidUlid(workspaceId, "workspaceId");
+  const ctrl = controlDb();
+  const plogs = platformLogsDb();
+
+  const staffRows = ctrl.select().from(controlSchema.platformStaff).all();
+  const staffMap = new Map(staffRows.map((s) => [s.id, s]));
+
+  const impersonations = plogs
+    .select()
+    .from(platformLogsSchema.impersonationLogs)
+    .where(eq(platformLogsSchema.impersonationLogs.workspaceId, validId))
+    .orderBy(desc(platformLogsSchema.impersonationLogs.startedAt))
+    .limit(limit)
+    .all();
+
+  const actions = plogs
+    .select()
+    .from(platformLogsSchema.staffActionLogs)
+    .where(eq(platformLogsSchema.staffActionLogs.targetTenantId, validId))
+    .orderBy(desc(platformLogsSchema.staffActionLogs.ts))
+    .limit(limit)
+    .all();
+
+  const merged: CustomerVisibleStaffAccessEntry[] = [
+    ...impersonations.map((imp) => {
+      const staff = staffMap.get(imp.staffId);
+      return {
+        id: imp.id,
+        kind: "impersonation" as const,
+        ts: imp.startedAt,
+        endedAt: imp.endedAt ?? null,
+        staffName: staff?.name ?? "Platform Support Engineer",
+        staffRole: staff?.staffRole ?? "support",
+        action: "support.impersonation_session",
+        ticketReference: null,
+        summary: `Temporary support session (${imp.reason})`,
+      };
+    }),
+    ...actions.map((act) => {
+      const staff = staffMap.get(act.staffId);
+      return {
+        id: act.id,
+        kind: (act.action.startsWith("inspector.") ? "inspection" : "staff_action") as
+          | "inspection"
+          | "staff_action",
+        ts: act.ts,
+        endedAt: null,
+        staffName: staff?.name ?? "Platform Staff",
+        staffRole: staff?.staffRole ?? "support",
+        action: act.action,
+        ticketReference: act.ticketReference ?? null,
+        summary: act.summary,
+      };
+    }),
+  ];
+
+  return merged.sort((a, b) => b.ts - a.ts).slice(0, limit);
+}
+
+export function exportWorkspaceDataPortabilitySnapshot(workspaceId: string): Record<string, unknown> {
+  const validId = assertValidUlid(workspaceId, "workspaceId");
+  const ctrl = controlDb();
+  const ws = ctrl
+    .select()
+    .from(controlSchema.workspaces)
+    .where(eq(controlSchema.workspaces.id, validId))
+    .get();
+  if (!ws) {
+    throw new RslError("RSL-TENANT-1001", "Workspace not found.");
+  }
+
+  const tdb = tenantDataDb({ workspaceId: validId }, { allowSuspendedRead: true });
+  const raw = tdb.$client;
+
+  const safeAll = (table: string, maxRows = 10_000) => {
+    try {
+      return raw.prepare(`SELECT * FROM ${table} LIMIT ?`).all(maxRows);
+    } catch {
+      return [];
+    }
+  };
+
+  return {
+    exportedAt: new Date().toISOString(),
+    schema: "rsl-dpdp-portability-v1",
+    workspace: {
+      id: ws.id,
+      name: ws.name,
+      slug: ws.slug,
+      gstin: ws.gstin,
+      billingEmail: ws.billingEmail,
+      businessPhone: ws.businessPhone,
+      stateCode: ws.stateCode,
+      currency: ws.currency,
+      timezone: ws.timezone,
+      createdAt: ws.createdAt,
+    },
+    invoices: ctrl
+      .select()
+      .from(controlSchema.invoices)
+      .where(eq(controlSchema.invoices.workspaceId, validId))
+      .all(),
+    ledgerEntries: ctrl
+      .select()
+      .from(controlSchema.ledgerEntries)
+      .where(eq(controlSchema.ledgerEntries.workspaceId, validId))
+      .all(),
+    contacts: safeAll("contacts"),
+    conversations: safeAll("conversations"),
+    messages: safeAll("messages"),
+    tallyCompanies: safeAll("tally_companies"),
+    tallyParties: safeAll("tally_parties"),
+    tallyVouchers: safeAll("tally_vouchers"),
+    campaigns: safeAll("campaigns"),
+    reviews: safeAll("reviews"),
+    staffAccessAuditTrail: listCustomerVisibleStaffAccessLogs(validId, 200),
+  };
+}
+
+export function eraseAndCryptoShredWorkspace(params: {
+  workspaceId: string;
+  actorId: string;
+  reason: string;
+}): { shreddedAt: number; tombstoneId: string } {
+  const validId = assertValidUlid(params.workspaceId, "workspaceId");
+  const ctrl = controlDb();
+  const ws = ctrl
+    .select()
+    .from(controlSchema.workspaces)
+    .where(eq(controlSchema.workspaces.id, validId))
+    .get();
+  if (!ws) {
+    throw new RslError("RSL-TENANT-1001", "Workspace does not exist.");
+  }
+
+  const reason = params.reason.trim() || "DPDP right-to-erasure request";
+  const now = Date.now();
+
+  // 1. Release all open SQLite handles before unlinking tenant files
+  closeTenantHandles(validId);
+
+  // 2. Crypto-shred wrapped secrets, revoke tokens/sessions, and scrub workspace PII in one transaction
+  const shredSentinel = `shredded:${crypto.randomBytes(16).toString("hex")}`;
+  const tx = ctrl.$client.transaction(() => {
+    ctrl
+      .update(controlSchema.tenantRegistry)
+      .set({
+        status: "deleted",
+        nextOutboxAt: null,
+        dataSizeBytes: 0,
+        logsSizeBytes: 0,
+        updatedAt: now,
+      })
+      .where(eq(controlSchema.tenantRegistry.tenantId, validId))
+      .run();
+
+    ctrl
+      .update(controlSchema.connections)
+      .set({ encryptedTokens: shredSentinel, status: "revoked", updatedAt: now })
+      .where(eq(controlSchema.connections.workspaceId, validId))
+      .run();
+
+    ctrl
+      .update(controlSchema.agentDevices)
+      .set({ signingSecretEncrypted: shredSentinel, status: "revoked", revokedAt: now })
+      .where(eq(controlSchema.agentDevices.workspaceId, validId))
+      .run();
+
+    ctrl
+      .update(controlSchema.backupDestinations)
+      .set({ encryptedConfig: shredSentinel, status: "degraded" })
+      .where(eq(controlSchema.backupDestinations.workspaceId, validId))
+      .run();
+
+    ctrl
+      .update(controlSchema.storageConfigurations)
+      .set({ encryptedCredentials: null, usedBytes: 0, objectCount: 0, status: "deleted", updatedAt: now })
+      .where(eq(controlSchema.storageConfigurations.workspaceId, validId))
+      .run();
+
+    ctrl
+      .update(controlSchema.apiKeys)
+      .set({ revokedAt: now })
+      .where(eq(controlSchema.apiKeys.workspaceId, validId))
+      .run();
+
+    ctrl.delete(controlSchema.tallyWebhookEndpoints).where(eq(controlSchema.tallyWebhookEndpoints.workspaceId, validId)).run();
+    ctrl.delete(controlSchema.outboundWebhookEndpoints).where(eq(controlSchema.outboundWebhookEndpoints.workspaceId, validId)).run();
+    ctrl.delete(controlSchema.webPushSubscriptions).where(eq(controlSchema.webPushSubscriptions.workspaceId, validId)).run();
+    ctrl.delete(controlSchema.invitations).where(eq(controlSchema.invitations.workspaceId, validId)).run();
+    ctrl.delete(controlSchema.assetRouting).where(eq(controlSchema.assetRouting.tenantId, validId)).run();
+    ctrl.delete(controlSchema.sessions).where(eq(controlSchema.sessions.activeWorkspaceId, validId)).run();
+    ctrl.delete(controlSchema.memberships).where(eq(controlSchema.memberships.workspaceId, validId)).run();
+
+    ctrl
+      .update(controlSchema.workspaces)
+      .set({
+        name: `[Deleted Workspace ${validId.slice(-6)}]`,
+        businessPhone: null,
+        billingEmail: null,
+        website: null,
+        addressLine: null,
+        city: null,
+        pincode: null,
+        gstin: null,
+        upiVpa: null,
+        upiPayeeName: null,
+        bankName: null,
+        bankBranch: null,
+        bankAccountNumber: null,
+        bankIfsc: null,
+        webhookVerifyToken: null,
+        billingStatus: "cancelled",
+        publicLinkEpoch: (ws.publicLinkEpoch ?? 1) + 1000,
+        deletedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(controlSchema.workspaces.id, validId))
+      .run();
+  });
+  tx();
+  invalidateTenantRegistryCache(validId);
+
+  // 3. Remove physical per-tenant SQLite & log files on disk
+  const tenantDir = resolveSafeTenantDir(validId);
+  if (fs.existsSync(tenantDir)) {
+    fs.rmSync(tenantDir, { recursive: true, force: true });
+  }
+
+  // 4. Write immutable deletion tombstone in platform-logs.db
+  platformLogsDb()
+    .insert(platformLogsSchema.tenantDeletionTombstones)
+    .values({
+      tenantId: validId,
+      workspaceName: ws.name,
+      deletedByActorId: params.actorId,
+      cryptoShreddedAt: now,
+      reason,
+    })
+    .onConflictDoUpdate({
+      target: platformLogsSchema.tenantDeletionTombstones.tenantId,
+      set: {
+        deletedByActorId: params.actorId,
+        cryptoShreddedAt: now,
+        reason,
+      },
+    })
+    .run();
+
+  return { shreddedAt: now, tombstoneId: validId };
+}
+
+/**
+ * Checks whether a token uses the explicit internal `rsl_sandbox_` sentinel.
+ * Real provider tokens beginning with `test_` or `sandbox_` are never treated as sandbox tokens.
+ */
+export function isExplicitInternalSandboxSentinel(token?: string | null): boolean {
+  return typeof token === "string" && token.trim().startsWith("rsl_sandbox_");
+}
+
+/**
+ * Returns true only when an explicit `rsl_sandbox_` sentinel is paired with a `"test"` workspace
+ * (or automated test runner). Live production workspaces never enter simulated sandbox mode.
+ */
+export function isWorkspaceSandboxIntegrationMode(
+  workspaceId: string,
+  token?: string | null
+): boolean {
+  if (!isExplicitInternalSandboxSentinel(token)) {
+    return false;
+  }
+  const ws = controlDb()
+    .select({ mode: controlSchema.workspaces.mode })
+    .from(controlSchema.workspaces)
+    .where(eq(controlSchema.workspaces.id, workspaceId))
+    .get();
+  if (ws?.mode === "test") {
+    return true;
+  }
+  if (process.env.NODE_ENV === "test" || Boolean(process.env.VITEST)) {
+    return true;
+  }
+  return false;
+}
+
 export * from "./ssl";
 export * from "./platform-credentials";
 export * from "./credential-diagnostics";
 export * from "./free-ai-services";
+export * from "./client-cloudflare";

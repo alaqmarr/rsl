@@ -74,7 +74,7 @@ export async function enqueueWorkspaceSslProvisioning(params: {
   }
 
   if ((params.processInlineIfLocal ?? true) && !isRedisConfigured() && queuedJobs > 0) {
-    await processDueSqliteOutboxForTenant(params.workspaceId);
+    await processDueSqliteOutboxForTenant(params.workspaceId, { queueName: "ssl.provision" });
   }
 
   return {
@@ -151,7 +151,7 @@ export async function sweepDueSslProvisioningJobs(limit = 50): Promise<{
   let processedTenants = 0;
   if (!isRedisConfigured()) {
     for (const workspaceId of byWorkspace) {
-      await processDueSqliteOutboxForTenant(workspaceId);
+      await processDueSqliteOutboxForTenant(workspaceId, { queueName: "ssl.provision" });
       processedTenants++;
     }
   }

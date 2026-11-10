@@ -1,23 +1,26 @@
 "use client";
 
 import React, { useState, useTransition } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Activity,
   AlertTriangle,
-  Building2,
   CheckCircle2,
   Cpu,
-  FileText,
   Globe,
-  HelpCircle,
   Lock,
-  RefreshCw,
   ShieldCheck,
 } from "lucide-react";
-import { IosSpinner, SectionCard, sileo, StatusPill } from "@rsl/ui";
+import {
+  GuideDrawerButton,
+  IosSpinner,
+  openGuideDrawerById,
+  SectionCard,
+  sileo,
+  StatusPill,
+} from "@rsl/ui";
 import { CopyTextButton } from "@/components/client-utils";
+import { buildTallySuiteGuideContent } from "@/lib/tally-guide-drawer";
 import {
   generatePairingCodeJsonAction,
   provisionWorkspaceSslJsonAction,
@@ -522,14 +525,27 @@ export function TallyConnectStudio({
   const curlPingCmd = `curl -X POST "${cleanWebhookEndpoint}?mode=ping" -H "X-Tally-Webhook-Token: ${revealToken && token ? token : "<YOUR_TALLY_TOKEN>"}" -H "Content-Type: application/json" -d "{\\"mode\\":\\"ping\\"}"`;
   const otaScheduledTaskCmd = `schtasks /Create /SC DAILY /TN "RSL_Tally_TDL_AutoUpdate" /TR "powershell -NoProfile -WindowStyle Hidden -Command \\"Invoke-WebRequest -UseBasicParsing '${otaLatestTdlUrl}' -OutFile 'C:\\TallyPrime\\${personalTdlFilename}'\\"" /ST 08:30 /F`;
 
+  const tallyGuideData = buildTallySuiteGuideContent({
+    tdlFilename: personalTdlFilename,
+    installerFilename: personalInstallerFilename,
+    brandTitle: personalBrandTitle,
+    otaTaskCommand: otaScheduledTaskCmd,
+  });
+
   return (
     <div className="w-full space-y-6">
-      {/* 1. LIVE CONNECTION STATUS & 4-STEP WORKFLOW CHECKLIST */}
+      {/* 1. LIVE CONNECTION STATUS & COMPACT READINESS STRIP */}
       <SectionCard
-        title="Tally Prime Live Connection Workflow & Readiness"
-        subtitle={`Primary domain: ${primaryDomain} • Real-time verification across Tally Prime, native Tally PDF capture (${nativePdfCount} stored), and WhatsApp automation`}
+        title="Tally Prime Live Connection Status"
+        subtitle={`Primary domain: ${primaryDomain} • ${nativePdfCount} untouched Tally PDF(s) captured`}
         action={
           <div className="flex flex-wrap items-center gap-2">
+            <GuideDrawerButton
+              drawerId="tally-connect-guide"
+              label="Need help? • Setup Guide"
+              badgeText="4 topics"
+              guide={tallyGuideData}
+            />
             <StatusPill
               label={connectionOverview.overallLabel}
               tone={mapToneToPill(connectionOverview.overallTone)}
@@ -549,27 +565,6 @@ export function TallyConnectStudio({
         }
       >
         <div className="space-y-4">
-          {/* Exact Native Tally PDF Preservation Notice */}
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200/85 bg-emerald-50/65 px-4 py-3 text-xs text-emerald-950">
-            <div className="flex items-start gap-2.5">
-              <FileText className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
-              <div className="leading-relaxed">
-                <strong>100% Exact Tally-Printed Invoice PDF Format Preserved:</strong> RapidShift
-                Labs exports your voucher directly through Tally Prime&rsquo;s own{" "}
-                <code className="font-mono font-semibold">Voucher</code> print engine (
-                <code className="font-mono">$$SysName:PDF</code>) and sends that exact{" "}
-                <code className="font-mono">.pdf</code> document over WhatsApp untouched — keeping
-                your company logo, GSTIN, e-Invoice IRN/QR, bank details, and custom Tally print
-                configuration byte-for-byte.
-              </div>
-            </div>
-            <StatusPill
-              label={`${nativePdfCount} Native Tally PDF(s) Stored`}
-              tone="emerald"
-              showDot={false}
-            />
-          </div>
-
           {lastCheckReceipt && (
             <div
               className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 text-xs ${
@@ -584,20 +579,11 @@ export function TallyConnectStudio({
                 ) : (
                   <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600" />
                 )}
-                <div>
-                  <span className="font-semibold">{lastCheckReceipt.message}</span>
-                  {lastCheckReceipt.ok && (
-                    <span className="ml-1 text-emerald-800">
-                      (Endpoint verification tests your URL &amp; token — to pull existing Tally
-                      bills, click <strong>&ldquo;{menuSyncLabel}&rdquo;</strong> in Tally
-                      Prime or <strong>&ldquo;Fetch Bills from Tally Now&rdquo;</strong>.)
-                    </span>
-                  )}
-                </div>
+                <span className="font-semibold">{lastCheckReceipt.message}</span>
               </div>
               {lastCheckReceipt.latencyMs !== undefined && (
-                <span className="rounded-md bg-white/90 px-2 py-0.5 font-mono text-[11px] font-bold text-slate-800">
-                  {lastCheckReceipt.latencyMs} ms HTTP round-trip
+                <span className="rounded-md bg-white px-2 py-0.5 font-mono text-xs font-bold text-slate-800">
+                  {lastCheckReceipt.latencyMs} ms
                 </span>
               )}
             </div>
@@ -615,7 +601,7 @@ export function TallyConnectStudio({
                 <button
                   type="button"
                   onClick={handleLiveHandshakeCheck}
-                  className="rsl-btn-secondary py-1 text-[11px]"
+                  className="rsl-btn-secondary py-1 text-xs"
                 >
                   Re-Verify Now
                 </button>
@@ -645,45 +631,10 @@ export function TallyConnectStudio({
               return (
                 <div
                   key={step.key}
-                  className="flex min-w-0 flex-col justify-between gap-2.5 rounded-xl border border-zinc-200/85 bg-zinc-50/65 p-3.5 text-xs"
+                  className="flex min-w-0 items-center justify-between gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-3 text-xs"
                 >
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-[11px] font-bold text-zinc-500 uppercase">
-                        Step {step.step}
-                      </span>
-                      <StatusPill label={pillLabel} tone={pillTone} showDot={false} />
-                    </div>
-                    <div className="font-semibold text-slate-900">{step.title}</div>
-                    <p className="leading-relaxed text-zinc-600">{step.summary}</p>
-                  </div>
-                  {step.key === "whatsapp" && step.status !== "complete" && canManageTally && (
-                    <div className="flex flex-wrap items-center gap-2 pt-1">
-                      <Link
-                        href="/connections"
-                        className="font-semibold text-emerald-700 hover:underline"
-                      >
-                        Connect WhatsApp →
-                      </Link>
-                      <span className="text-zinc-300">•</span>
-                      <Link
-                        href="/whatsapp"
-                        className="font-semibold text-emerald-700 hover:underline"
-                      >
-                        Templates →
-                      </Link>
-                    </div>
-                  )}
-                  {step.key === "automation" && step.status !== "complete" && canManageTally && (
-                    <div className="pt-1">
-                      <Link
-                        href="/tally?tab=rules"
-                        className="font-semibold text-emerald-700 hover:underline"
-                      >
-                        Create Automation Rule →
-                      </Link>
-                    </div>
-                  )}
+                  <span className="truncate font-semibold text-slate-900">{step.title}</span>
+                  <StatusPill label={pillLabel} tone={pillTone} showDot={false} />
                 </div>
               );
             })}
@@ -934,7 +885,7 @@ export function TallyConnectStudio({
                 </div>
               ) : (
                 <p className="text-[11px] text-zinc-500">
-                  Read-only role — ask a Business Owner, Admin, or Manager to reveal or rotate
+                  Read-only role - ask a Business Owner, Admin, or Manager to reveal or rotate
                   webhook credentials.
                 </p>
               )}
@@ -1049,7 +1000,7 @@ export function TallyConnectStudio({
               {routingMode === "selected" && (
                 <div className="space-y-2 rounded-xl border border-zinc-200/85 bg-zinc-50/60 p-3">
                   <label className="block font-semibold text-slate-900">
-                    Allowed Tally Company Names (one per line — exact match to Tally Prime)
+                    Allowed Tally Company Names (one per line - exact match to Tally Prime)
                   </label>
                   {knownCompanyNames.length > 0 && (
                     <div className="flex flex-wrap items-center gap-1.5 pb-1">
@@ -1103,85 +1054,63 @@ export function TallyConnectStudio({
                 </div>
               )}
             </form>
-
-            <div className="rounded-xl border border-zinc-200/80 bg-zinc-50/60 p-3 text-[11px] leading-relaxed text-zinc-600">
-              <div className="flex items-center gap-1.5 font-semibold text-slate-900">
-                <Building2 className="h-3.5 w-3.5 text-emerald-600" />
-                <span>CA Firm / Group PC with Multiple Separate RapidShift Workspaces?</span>
-              </div>
-              <p className="mt-1">
-                Select <strong>Only Selected Companies</strong> above, save, and click{" "}
-                <strong>Download Multi-Workspace Isolated .tdl ({workspaceSlug})</strong>. Every TDL
-                function &amp; variable is namespaced to{" "}
-                <code className="font-mono text-slate-800">{workspaceSlug}</code> so multiple{" "}
-                <code className="font-mono">.tdl</code> files load side-by-side in one Tally Prime!
-              </p>
-            </div>
           </div>
         </SectionCard>
 
         {/* Zero-Re-Download OTA Auto-Updater */}
         <SectionCard
-          title="Zero-Re-Download Architecture (Automatic Future Updates)"
-          subtitle="Your team never has to manually re-download .tdl files as new RapidShift features launch"
-          action={<StatusPill label="OTA Auto-Update Ready" tone="emerald" showDot={false} />}
+          title="Automatic OTA Updates"
+          subtitle="Thin-client cloud rules and automatic over-the-air .tdl refresh"
+          action={
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusPill label="OTA Ready" tone="emerald" showDot={false} />
+              <button
+                type="button"
+                onClick={() => openGuideDrawerById("tally-connect-guide", "connector")}
+                className="rsl-guide-trigger text-xs"
+              >
+                Need help? • OTA Guide
+              </button>
+            </div>
+          }
         >
           <div className="space-y-3 text-xs">
-            <div className="space-y-2 rounded-xl border border-zinc-200/85 bg-zinc-50/70 p-3.5 leading-relaxed text-zinc-700">
-              <div className="flex items-center gap-2 font-semibold text-slate-900">
-                <RefreshCw className="h-4 w-4 text-emerald-600" />
-                <span>How Updates Roll Out Without Touching Tally Prime:</span>
-              </div>
-              <ul className="list-disc space-y-1.5 pl-4 text-[11px]">
-                <li>
-                  <strong>1. Thin-Client Server Rules:</strong> All WhatsApp templates, automation
-                  rules, overdue schedules, multi-company filters, wallet overdrafts, and PDF
-                  routing run 100% on RapidShift Cloud — adding new features requires zero TDL
-                  changes.
-                </li>
-                <li>
-                  <strong>2. Automatic OTA Self-Updater in Windows Connector:</strong> When{" "}
-                  <code className="font-mono text-slate-900">rsl-tally-connector.mjs</code> (v2.2+)
-                  runs on the Tally PC, it checks{" "}
-                  <code className="font-mono">?mode=tdl-manifest</code> automatically, updates your
-                  local <code className="font-mono">.tdl</code> file over-the-air whenever a newer
-                  version ships, AND exports exact native Tally printed PDFs!
-                </li>
-                <li>
-                  <strong>3. Optional 1-Line Windows Auto-Updater (For .tdl-Only PCs):</strong> Run
-                  this command once in PowerShell on the Tally PC so Windows automatically refreshes{" "}
-                  <code className="font-mono">C:\TallyPrime\{personalTdlFilename}</code> from your
-                  endpoint before Tally starts each morning:
-                </li>
-              </ul>
-            </div>
-
+            <p className="leading-relaxed text-zinc-600">
+              WhatsApp templates, overdue schedules, and company filters run in the cloud with zero
+              manual TDL edits. If you only use the standalone .tdl file without the Windows
+              Connector, copy the optional scheduled task inside the OTA Guide.
+            </p>
             {canManageTally && (
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-semibold text-slate-800">
-                    One-Time Windows Scheduled Task (Auto-Updates .tdl Daily):
-                  </span>
-                  <CopyTextButton text={otaScheduledTaskCmd} label="Copy Auto-Update Cmd" />
-                </div>
-                <pre className="overflow-x-auto rounded-lg bg-slate-950 p-2.5 font-mono text-[11px] text-zinc-100">
-                  <code>{otaScheduledTaskCmd}</code>
-                </pre>
+              <div className="flex flex-wrap items-center gap-2">
+                <CopyTextButton text={otaScheduledTaskCmd} label="Copy Daily Auto-Update Task" />
               </div>
             )}
           </div>
         </SectionCard>
       </div>
 
-      {/* 4. DETAILED SETUP GUIDE — TWO CONNECTION METHODS SIDE-BY-SIDE */}
+      {/* 4. TWO CONNECTION METHODS SIDE-BY-SIDE (CLEAN ACTION CARDS + BOTTOM DRAWER TRIGGERS) */}
       <div id="setup-guide" className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         {/* METHOD A: PERSONALIZED TALLY PRIME .TDL ADD-ON (v2.9) */}
         <SectionCard
-          title={`Method A — ${personalBrandTitle} Add-On (${personalTdlFilename})`}
-          subtitle="Instant real-time sync on Bills, Receipts, Products (Stock Items), Client Ledgers, Multi-Company & Paid-in-Tally"
-          action={<StatusPill label="v2.9 • Bills + Products + Multi-Company" tone="emerald" showDot={false} />}
+          title={`Method A - ${personalBrandTitle} Add-On (${personalTdlFilename})`}
+          subtitle="Instant real-time sync on Bills, Receipts, Products, Client Ledgers & Paid-in-Tally"
+          action={
+            <button
+              type="button"
+              onClick={() => openGuideDrawerById("tally-connect-guide", "tdl")}
+              className="rsl-guide-trigger text-xs"
+            >
+              Need help? • .tdl Steps
+            </button>
+          }
         >
           <div className="space-y-4 text-xs">
+            <p className="leading-relaxed text-zinc-600">
+              Download your personalized v2.9 add-on file below and load it in Tally Prime (
+              <code className="font-mono text-slate-900">F1 → TDLs &amp; Add-Ons → F4</code>). Click{" "}
+              <strong>Need help? • .tdl Steps</strong> for the 6-step setup walkthrough.
+            </p>
             {canManageTally && (
               <div className="flex flex-wrap items-center gap-2">
                 <a href={tdlDownloadHref} className="rsl-btn-primary text-xs">
@@ -1210,82 +1139,21 @@ export function TallyConnectStudio({
                 />
               </div>
             )}
-
-            <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/70 p-4">
-              <div className="font-semibold text-slate-900">
-                Complete Step-by-Step Setup in Tally Prime (Shows &ldquo;{personalBrandTitle}&rdquo; in Gateway of Tally)
-              </div>
-              <ol className="mt-2.5 list-decimal space-y-2.5 pl-4 leading-relaxed text-zinc-700">
-                <li>
-                  <strong>Enable Tally Port 9000 for Native PDF, Ledger &amp; Stock Capture:</strong> In Tally Prime,
-                  press <strong>F1 (Help)</strong> → <strong>Settings</strong> →{" "}
-                  <strong>Connectivity</strong> → <strong>Client/Server Configuration</strong> → set{" "}
-                  <strong>TallyPrime acts as = Both</strong> and <strong>Port = 9000</strong>. This
-                  lets RapidShift capture your exact Tally-printed invoice PDF, Client Ledgers, and Stock Items automatically!
-                </li>
-                <li>
-                  <strong>Save Your Personalized TDL File:</strong> Save{" "}
-                  <code className="rounded bg-white px-1.5 py-0.5 font-mono text-[11px] text-slate-900">
-                    {personalTdlFilename}
-                  </code>{" "}
-                  to{" "}
-                  <code className="font-mono text-slate-900">
-                    C:\TallyPrime\{personalTdlFilename}
-                  </code>{" "}
-                  (overwriting any older copy — do not leave duplicates with <code className="font-mono">(1).tdl</code> in Downloads).
-                </li>
-                <li>
-                  <strong>Load / Reload into Tally Memory:</strong> Press <strong>F1 (Help)</strong>{" "}
-                  → <strong>TDLs &amp; Add-Ons</strong> → <strong>F4 (Manage Local TDLs)</strong> →
-                  set <strong>Load selected TDL files on startup = Yes</strong>, enter{" "}
-                  <code className="font-mono text-slate-900">
-                    C:\TallyPrime\{personalTdlFilename}
-                  </code>
-                  , and press <strong>Ctrl + A</strong>.
-                </li>
-                <li>
-                  <strong>Step A — Test Connection &amp; Register Open Companies:</strong> On{" "}
-                  <strong>Gateway of Tally</strong>, click{" "}
-                  <strong>&ldquo;{menuTestLabel}&rdquo;</strong>. Tally verifies{" "}
-                  <code className="font-mono text-emerald-800">{cleanWebhookEndpoint}</code>,
-                  automatically registers every open Tally company, and pops up{" "}
-                  <strong>{personalBrandTitle} — Connected</strong>.
-                </li>
-                <li>
-                  <strong>Step B — Sync All Products, Ledgers, Bills &amp; Multi-Company Books:</strong>{" "}
-                  Click <strong>&ldquo;{menuSyncLabel}&rdquo;</strong> on Gateway of Tally (or
-                  press <code className="font-mono">Alt + R</code> in Day Book) to sync all Godowns,
-                  Stock Items (Products), Client &amp; Supplier Ledgers, Bills, and Receipts across
-                  every open Tally company in one click!
-                </li>
-                <li>
-                  <strong>Step C — Live Products, Ledgers, Bills, Paid-in-Tally &amp; Delete:</strong>{" "}
-                  Creating or altering any <strong>Stock Item</strong> or <strong>Party Ledger</strong>{" "}
-                  (even via <code className="font-mono">Alt + C</code> inside a bill!) or saving any
-                  Sales (F8), Receipt (F6), Payment (F5), Purchase (F9), Credit Note (Alt+F6), or
-                  Debit Note (Alt+F5) with <strong>Ctrl + A</strong> syncs live without ever
-                  overwriting earlier bills!
-                </li>
-              </ol>
-            </div>
           </div>
         </SectionCard>
 
         {/* METHOD B: LOCAL PORT-9000 XML PULL & WINDOWS PC CONNECTOR */}
         <SectionCard
-          title={`Method B — Tally Port 9000 & Windows Connector v2.6 (${devices.length} Paired)`}
-          subtitle="Recommended for Remote Cloud • Syncs Multi-Company Ledgers, Inventory, Native Tally PDFs + OTA .tdl updates"
+          title={`Method B - Windows Connector v2.6 (${devices.length} Paired)`}
+          subtitle="Continuous Multi-Company sync, untouched Tally PDF export & OTA updates"
           action={
-            canManageTally ? (
-              <div className="flex flex-wrap items-center gap-1.5">
-                <a href={installerDownloadHref} className="rsl-btn-primary py-1.5 text-xs">
-                  1-Click Setup ({personalInstallerFilename})
-                </a>
-                <a href={connectorDownloadHref} className="rsl-btn-secondary py-1.5 text-xs">
-                  Connector (.mjs)
-                </a>
-              </div>
-            ) : undefined
+            <button
+              type="button"
+              onClick={() => openGuideDrawerById("tally-connect-guide", "connector")}
+              className="rsl-guide-trigger text-xs"
+            >
+              Need help? • Connector Steps
+            </button>
           }
         >
           <div className="space-y-4 text-xs">
@@ -1298,9 +1166,8 @@ export function TallyConnectStudio({
                       ? ` • Company: "${localPortProbe.activeCompanyName}"`
                       : ""}
                   </div>
-                  <p className="text-[11px] text-emerald-900">
-                    Pull {localPortProbe.voucherCount} saved bill(s)/receipt(s) + exact native Tally
-                    printed PDFs directly from Tally Prime on this PC:
+                  <p className="text-xs text-emerald-900">
+                    Pull {localPortProbe.voucherCount} saved voucher(s) and native Tally PDFs:
                   </p>
                 </div>
                 <button
@@ -1319,88 +1186,43 @@ export function TallyConnectStudio({
               </div>
             )}
 
-            <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/70 p-4">
-              <div className="font-semibold text-slate-900">
-                Step-by-Step: Pair Windows Connector (Native PDF Export + Multi-Company Sync)
+            {canManageTally && (
+              <div className="flex flex-wrap items-center gap-2">
+                <a href={installerDownloadHref} className="rsl-btn-primary text-xs">
+                  1-Click Setup ({personalInstallerFilename})
+                </a>
+                <a href={connectorDownloadHref} className="rsl-btn-secondary text-xs">
+                  Connector (.mjs)
+                </a>
+                <button
+                  type="button"
+                  disabled={isPairing}
+                  onClick={handleGeneratePairingCode}
+                  className="rsl-btn-secondary inline-flex items-center gap-1.5 text-xs"
+                >
+                  {isPairing && <IosSpinner size="xs" />}
+                  <span>Generate 15-Min PC Pairing Code</span>
+                </button>
               </div>
-              <ol className="mt-2.5 list-decimal space-y-2 pl-4 leading-relaxed text-zinc-700">
-                <li>
-                  Ensure Tally Prime XML Server is enabled on{" "}
-                  <code className="font-mono font-bold text-slate-900">127.0.0.1:9000</code> (F1 →
-                  Settings → Connectivity → Client/Server = Both, Port = 9000).
-                </li>
-                <li>
-                  Download{" "}
-                  {canManageTally ? (
-                    <a
-                      href={connectorDownloadHref}
-                      className="font-semibold text-emerald-700 underline"
-                    >
-                      rsl-tally-connector.mjs
-                    </a>
-                  ) : (
-                    <code className="font-mono">rsl-tally-connector.mjs</code>
-                  )}{" "}
-                  onto the Tally Windows PC (Node.js 20+, zero npm packages needed).
-                </li>
-                <li>
-                  Click <strong>Generate 15-Min PC Pairing Code</strong> below, run the one-time{" "}
-                  <code className="font-mono">--pair</code> command, then start{" "}
-                  <code className="font-mono">node rsl-tally-connector.mjs</code>. Every 30 seconds
-                  it syncs all open Tally companies, reconciles deleted bills, exports Tally&rsquo;s
-                  exact printed invoice PDF (<code className="font-mono">%PDF-1.x</code>), and
-                  auto-updates your local <code className="font-mono">.tdl</code> file!
-                </li>
-              </ol>
+            )}
 
-              {canManageTally && (
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={isPairing}
-                    onClick={handleGeneratePairingCode}
-                    className="rsl-btn-primary inline-flex items-center gap-1.5 text-xs"
-                  >
-                    {isPairing && <IosSpinner size="xs" />}
-                    <span>Generate 15-Min PC Pairing Code</span>
-                  </button>
+            {canManageTally && pairingCode && (
+              <div className="space-y-2 rounded-xl border border-emerald-300 bg-emerald-50/90 p-3.5 text-emerald-950">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-semibold">
+                    One-Time Pairing Code (Valid 15 Minutes):
+                  </span>
+                  <CopyTextButton text={pairingCode} label="Copy Code" />
                 </div>
-              )}
-
-              {canManageTally && pairingCode && (
-                <div className="mt-3 space-y-2 rounded-xl border border-emerald-300 bg-emerald-50/90 p-3.5 text-emerald-950">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-semibold">
-                      One-Time Pairing Code (Valid 15 Minutes):
-                    </span>
-                    <CopyTextButton text={pairingCode} label="Copy Code" />
-                  </div>
-                  <div className="font-mono text-base font-bold tracking-wider text-slate-900">
-                    {pairingCode}
-                  </div>
-                  <div className="space-y-1.5 pt-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-semibold">
-                        Run once in PowerShell / CMD on your Tally PC:
-                      </span>
-                      <CopyTextButton text={pairCmd} label="Copy Command" />
-                    </div>
-                    <pre className="overflow-x-auto rounded-lg bg-slate-950 p-2.5 font-mono text-[11px] text-zinc-100">
-                      <code>{pairCmd}</code>
-                    </pre>
-                    <div className="flex items-center justify-between gap-2 pt-1">
-                      <span className="text-[11px] font-semibold">
-                        Verify Port 9000 + Cloud HTTPS anytime:
-                      </span>
-                      <CopyTextButton text={doctorCmd} label="Copy Doctor Cmd" />
-                    </div>
-                    <pre className="overflow-x-auto rounded-lg bg-slate-950 p-2.5 font-mono text-[11px] text-emerald-300">
-                      <code>{doctorCmd}</code>
-                    </pre>
-                  </div>
+                <div className="font-mono text-base font-bold tracking-wider text-slate-900">
+                  {pairingCode}
                 </div>
-              )}
-            </div>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <CopyTextButton text={pairCmd} label="Copy Pair Command" />
+                  <CopyTextButton text={doctorCmd} label="Copy Doctor Command" />
+                </div>
+              </div>
+            )}
 
             {/* Paired PCs List */}
             <div className="space-y-2">
@@ -1409,8 +1231,8 @@ export function TallyConnectStudio({
               </div>
               {devices.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/50 p-4 text-zinc-500">
-                  No Windows PC paired yet. Use Method A (.tdl v2.9) for instant voucher, product &amp; ledger push, or
-                  pair an office PC above for continuous Port 9000 + Multi-Company + native Tally PDF cloud sync.
+                  No Windows PC paired yet. Download the 1-Click Setup launcher above or open{" "}
+                  <strong>Need help? • Connector Steps</strong> for guidance.
                 </div>
               ) : (
                 <div className="divide-y divide-zinc-200/80 rounded-xl border border-zinc-200/90 bg-white">
@@ -1432,15 +1254,15 @@ export function TallyConnectStudio({
                               type="button"
                               disabled={isRevoking}
                               onClick={() => handleRevokeDevice(d.id)}
-                              className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-100"
+                              className="rsl-btn-danger-soft !min-h-7 !px-2.5 !py-1 !text-xs"
                             >
                               {isRevoking && <IosSpinner size="xs" />}
                               <span>Unpair</span>
                             </button>
                           )}
                         </div>
-                        <p className="text-[11px] text-zinc-600">{d.liveStatus.detail}</p>
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500">
+                        <p className="text-xs text-zinc-600">{d.liveStatus.detail}</p>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
                           <span>
                             {d.osVersion || "Windows"} • v{d.agentVersion}
                           </span>
@@ -1458,203 +1280,32 @@ export function TallyConnectStudio({
         </SectionCard>
       </div>
 
-      {/* 4B. REQUIRED TALLY PRIME F11 / F12 SETTINGS & MULTI-COMPANY CHECKLIST */}
-      <div id="tally-setup-guide">
-        <SectionCard
-          title="Required Tally Prime Settings (F11 / F12 / F3) — Step-by-Step Operations Guide"
-          subtitle="Follow these exact Tally Prime keystrokes once so Products (Stock Items), Selling Prices, Multiple Companies, and Paid-in-Tally Ledgers sync automatically"
-          action={
-            <a
-              href="/guides/tally-sync-and-import"
-              target="_blank"
-              rel="noreferrer"
-              className="rsl-btn-secondary py-1 text-xs"
-            >
-              Open Full Printable Tally Guide →
-            </a>
-          }
-        >
-          <div className="grid grid-cols-1 gap-3.5 text-xs md:grid-cols-2 xl:grid-cols-3">
-            <div className="rounded-xl border border-emerald-200/85 bg-emerald-50/55 p-4">
-              <div className="font-bold text-slate-900">
-                1. Reload {personalTdlFilename} (v2.9) — Zero Bill Overwrite
-              </div>
-              <p className="mt-1.5 leading-relaxed text-zinc-700">
-                Download <strong>{personalTdlFilename} (v2.9)</strong> above and overwrite your
-                existing <code className="font-mono">.tdl</code> file. In Tally Prime, press{" "}
-                <strong>F1 (Help) → TDLs &amp; Add-Ons → F4 (Manage Local TDLs) → Ctrl + A</strong>.
-                Version 2.9 guarantees sequential bills (e.g. Bill #8 then Bill #9) always capture
-                their own unique Tally MasterID &amp; GUID and never overwrite earlier bills.
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/65 p-4">
-              <div className="font-bold text-slate-900">
-                2. Direct Product (Stock Item) Import — F11 &amp; F12 Rates
-              </div>
-              <p className="mt-1.5 leading-relaxed text-zinc-700">
-                In Tally Prime, press <strong>F11 (Features)</strong> → set{" "}
-                <strong>Maintain Inventory = Yes</strong> and{" "}
-                <strong>Enable Goods and Services Tax (GST) = Yes</strong>. When creating/editing a
-                product (<strong>Create → Stock Item</strong> or{" "}
-                <code className="font-mono">Alt + C</code> inside a bill), press{" "}
-                <strong>F12 (Configure)</strong> → set{" "}
-                <strong>Provide Standard Buying and Selling Rates = Yes</strong>. Every{" "}
-                <strong>Ctrl + A</strong> syncs the Product, UOM, HSN, GST %, Selling Price, and
-                Opening Stock directly to <Link href="/inventory" className="font-semibold text-emerald-700 underline">Inventory</Link>!
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/65 p-4">
-              <div className="font-bold text-slate-900">
-                3. Multi-Company Sync — Open All Companies via F3
-              </div>
-              <p className="mt-1.5 leading-relaxed text-zinc-700">
-                Tally Prime exports data for companies currently <strong>open in memory</strong>. If
-                you manage 2+ companies or split financial years, press{" "}
-                <strong>F3 (Company) → Select Company</strong> in Tally Prime to open each company
-                you want synced, then click <strong>&ldquo;{menuSyncLabel}&rdquo;</strong> once.
-                Every open company is detected, isolated, and selectable in the{" "}
-                <strong>Tally Company</strong> bar at the top of the portal.
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/65 p-4">
-              <div className="font-bold text-slate-900">
-                4. Client Ledgers &amp; Auto Paid-in-Tally — F11 Bill-Wise
-              </div>
-              <p className="mt-1.5 leading-relaxed text-zinc-700">
-                Press <strong>F11 → Enable Bill-wise entry = Yes</strong>. Inside each Customer /
-                Supplier Ledger (<strong>Alter → Ledger</strong>), set{" "}
-                <strong>Maintain balances bill-by-bill = Yes</strong>, enter{" "}
-                <strong>Default credit period</strong>, press{" "}
-                <strong>F12 → Provide Contact Details = Yes</strong>, and enter their 10-digit{" "}
-                <strong>Mobile no.</strong> When recording an <strong>F6 Receipt</strong> or{" "}
-                <strong>F5 Payment</strong>, choose <strong>Agst Ref</strong> and pick the bill # to
-                mark it Paid automatically.
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/65 p-4">
-              <div className="font-bold text-slate-900">
-                5. Instant Sync for Existing Products &amp; Ledgers
-              </div>
-              <p className="mt-1.5 leading-relaxed text-zinc-700">
-                Already created hundreds of Stock Items, Godowns, and Party Ledgers in Tally before
-                installing <code className="font-mono">.tdl v2.9</code>? Just click{" "}
-                <strong>&ldquo;{menuSyncLabel}&rdquo;</strong> on Gateway of Tally once — v2.9
-                uploads all existing Godowns, Products, Party Ledgers, and Bills per open company in
-                seconds!
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/65 p-4">
-              <div className="font-bold text-slate-900">
-                6. Untouched Tally PDF Invoices — Port 9000
-              </div>
-              <p className="mt-1.5 leading-relaxed text-zinc-700">
-                To attach your exact Tally-printed Tax Invoice PDF (with logo, GST table &amp;
-                e-Invoice QR) on WhatsApp, press{" "}
-                <strong>F1 → Settings → Connectivity → Client/Server Configuration</strong> → set{" "}
-                <strong>TallyPrime acts as = Both</strong> and <strong>Port = 9000</strong>, and run
-                your 1-Click Windows Connector (<code className="font-mono">{personalInstallerFilename}</code>).
-              </p>
-            </div>
-          </div>
-        </SectionCard>
-      </div>
-
-      {/* 5. TROUBLESHOOTING GUIDE: "ENDPOINT VERIFIED, WHY DIDN'T MY BILL REFLECT?" */}
-      <SectionCard
-        title="Troubleshooting Checklist — “Endpoint Verified, Why Didn’t My Tally Bill Reflect?”"
-        subtitle="Check these 6 common causes whenever your connection test passes but a Sales Invoice does not show in Bills & Receipts"
+      {/* Quick Help Strip Replacing F11/F12 & Troubleshooting Walls */}
+      <div
+        id="tally-setup-guide"
+        className="rsl-frost-surface flex flex-wrap items-center justify-between gap-3 rounded-2xl px-5 py-3.5 text-xs"
       >
-        <div className="grid grid-cols-1 gap-3 text-xs md:grid-cols-2 xl:grid-cols-3">
-          <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/60 p-3.5">
-            <div className="flex items-center gap-2 font-semibold text-slate-900">
-              <HelpCircle className="h-4 w-4 shrink-0 text-emerald-600" />
-              <span>1. Reload .tdl v2.9 in Tally Memory</span>
-            </div>
-            <p className="mt-1.5 leading-relaxed text-zinc-600">
-              Check <strong>Last Client Source</strong> above — it must show{" "}
-              <code className="font-mono text-slate-900">TallyPrime-RSL-TDL/2.9</code>. Overwrite{" "}
-              <code className="font-mono text-slate-900">{personalTdlFilename}</code> and press{" "}
-              <strong>F1 → TDLs &amp; Add-Ons → F4 → Ctrl + A</strong> (press <code className="font-mono">Esc</code>{" "}
-              if any old dialog is open).
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/60 p-3.5">
-            <div className="flex items-center gap-2 font-semibold text-slate-900">
-              <HelpCircle className="h-4 w-4 shrink-0 text-emerald-600" />
-              <span>2. Push Previously Saved Bills</span>
-            </div>
-            <p className="mt-1.5 leading-relaxed text-zinc-600">
-              <strong>Run Live Endpoint Check</strong> only verifies your token. To sync bills saved
-              earlier or remove deleted bills, click{" "}
-              <strong>&ldquo;{menuSyncLabel}&rdquo;</strong> on Gateway of Tally (or{" "}
-              <strong>Fetch Bills &amp; Tally PDFs</strong> above).
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/60 p-3.5">
-            <div className="flex items-center gap-2 font-semibold text-slate-900">
-              <HelpCircle className="h-4 w-4 shrink-0 text-emerald-600" />
-              <span>3. Cloud vs. 127.0.0.1 URL Match</span>
-            </div>
-            <p className="mt-1.5 leading-relaxed text-zinc-600">
-              When testing locally on port 4500, use the{" "}
-              <strong>127.0.0.1:4500</strong> <code className="font-mono">.tdl</code>. In
-              production, download the{" "}
-              <strong>{workspaceSlug}.tally.{primaryDomain}</strong>{" "}
-              <code className="font-mono">.tdl</code>.
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/60 p-3.5">
-            <div className="flex items-center gap-2 font-semibold text-slate-900">
-              <HelpCircle className="h-4 w-4 shrink-0 text-emerald-600" />
-              <span>4. Multi-Company Filter Check</span>
-            </div>
-            <p className="mt-1.5 leading-relaxed text-zinc-600">
-              If <strong>Only Selected Companies</strong> is enabled above, make sure the active
-              Tally company name matches character-for-character, or switch to{" "}
-              <strong>Sync All Open Companies</strong>.
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/60 p-3.5">
-            <div className="flex items-center gap-2 font-semibold text-slate-900">
-              <HelpCircle className="h-4 w-4 shrink-0 text-emerald-600" />
-              <span>5. Optional / ₹0 / Non-Sales Vouchers</span>
-            </div>
-            <p className="mt-1.5 leading-relaxed text-zinc-600">
-              Optional pro-forma quotes (<code className="font-mono">Ctrl + L</code>), ₹0 drafts,
-              and Journal/Contra entries are skipped. Cancelled (<code className="font-mono">Alt + X</code>)
-              and deleted (<code className="font-mono">Alt + D</code>) bills update live!
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/60 p-3.5">
-            <div className="flex items-center gap-2 font-semibold text-slate-900">
-              <HelpCircle className="h-4 w-4 shrink-0 text-emerald-600" />
-              <span>6. Automatic WhatsApp + Tally PDF</span>
-            </div>
-            <p className="mt-1.5 leading-relaxed text-zinc-600">
-              Ensure: (a) Party Ledger has a 10-digit <strong>Mobile No.</strong>, (b) WhatsApp is
-              linked in{" "}
-              <Link href="/connections" className="font-semibold text-emerald-700 underline">
-                Connected Accounts
-              </Link>
-              , and (c) an active rule uses a PDF/Invoice template in{" "}
-              <Link href="/tally?tab=rules" className="font-semibold text-emerald-700 underline">
-                WhatsApp Rules
-              </Link>
-              .
-            </p>
-          </div>
+        <div className="font-medium text-slate-800">
+          Looking for Tally Prime <strong>F11 / F12 Inventory &amp; Bill-Wise flags</strong> or{" "}
+          <strong>sync troubleshooting</strong>?
         </div>
-      </SectionCard>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => openGuideDrawerById("tally-connect-guide", "settings")}
+            className="rsl-guide-trigger text-xs"
+          >
+            F11 / F12 Tally Settings
+          </button>
+          <button
+            type="button"
+            onClick={() => openGuideDrawerById("tally-connect-guide", "troubleshooting")}
+            className="rsl-guide-trigger text-xs"
+          >
+            Troubleshooting Guide
+          </button>
+        </div>
+      </div>
 
       {/* 6. RECENT SYNC & WEBHOOK DIAGNOSTICS LOG + COLLAPSIBLE VOUCHER SIMULATOR */}
       <SectionCard

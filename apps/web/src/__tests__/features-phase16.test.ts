@@ -11,6 +11,7 @@ import {
 } from "@rsl/core";
 import {
   AGENT_HEARTBEAT_STALE_MS,
+  buildTallyWebhookSignedHeaders,
   computeAgentDeviceLiveStatus,
   computeTallyWebhookLiveStatus,
   exchangePairingCodeForAgentDevice,
@@ -262,8 +263,9 @@ describe("Phase 16 Suite (Subdomain Endpoints on rapidshiftlabs.in, Tally Sync E
     expect(tdl).toContain('JSON Object Path: "tallyResult:1"');
     expect(tdl).toContain("[Collection: RSLCloudVoucherPost]");
     expect(tdl).toContain(
-      'Data Source     : HTTP JSON : "https://shah-traders.tally.rapidshiftlabs.in/api/webhooks/tally?token=tlwh_testtoken123456"'
+      'Data Source     : HTTP JSON : "https://shah-traders.tally.rapidshiftlabs.in/api/webhooks/tally"'
     );
+    expect(tdl).not.toContain("?token=");
     expect(tdl).toContain('Header          : "X-Tally-Webhook-Token: tlwh_testtoken123456"');
     expect(tdl).toContain('Header          : "User-Agent: TallyPrime-RSL-TDL/2.9"');
     expect(tdl).toContain('"Shah Traders & RSL Sync - Sync All Now"');
@@ -317,16 +319,19 @@ describe("Phase 16 Suite (Subdomain Endpoints on rapidshiftlabs.in, Tally Sync E
     );
 
     // v2.5 Tally Prime TDL ping check receives boolean ok=true AND tallyResult[0].RSLOkStatus === "Connected"
+    const pingBodyV25 = JSON.stringify({ mode: "ping", companyName: "LiveStatus Traders FY26" });
     const pingPostRes = await tallyWebhookPost(
       new NextRequest(
-        `https://shah-traders.tally.rapidshiftlabs.in/api/webhooks/tally?mode=ping&token=${encodeURIComponent(ep0.webhookToken)}`,
+        "https://shah-traders.tally.rapidshiftlabs.in/api/webhooks/tally?mode=ping",
         {
           method: "POST",
           headers: {
             "content-type": "application/json",
             "user-agent": "TallyPrime-RSL-TDL/2.5",
+            "x-tally-webhook-token": ep0.webhookToken,
+            ...buildTallyWebhookSignedHeaders(ep0.webhookToken, pingBodyV25),
           },
-          body: JSON.stringify({ mode: "ping", companyName: "LiveStatus Traders FY26" }),
+          body: pingBodyV25,
         }
       )
     );
@@ -340,16 +345,19 @@ describe("Phase 16 Suite (Subdomain Endpoints on rapidshiftlabs.in, Tally Sync E
     expect(pingJson.tallyResult[0]?.RSLMessage).toContain("LiveStatus Traders FY26");
 
     // Legacy v2.0 Tally Prime TDL (JSON Object Path: "ok:1") also receives ok[0].RSLOkStatus === "Connected"
+    const pingBodyV20 = JSON.stringify({ mode: "ping", companyName: "LiveStatus Traders FY26" });
     const legacyPingRes = await tallyWebhookPost(
       new NextRequest(
-        `https://shah-traders.tally.rapidshiftlabs.in/api/webhooks/tally?mode=ping&token=${encodeURIComponent(ep0.webhookToken)}`,
+        "https://shah-traders.tally.rapidshiftlabs.in/api/webhooks/tally?mode=ping",
         {
           method: "POST",
           headers: {
             "content-type": "application/json",
             "user-agent": "TallyPrime-RSL-TDL/2.0",
+            "x-tally-webhook-token": ep0.webhookToken,
+            ...buildTallyWebhookSignedHeaders(ep0.webhookToken, pingBodyV20),
           },
-          body: JSON.stringify({ mode: "ping", companyName: "LiveStatus Traders FY26" }),
+          body: pingBodyV20,
         }
       )
     );

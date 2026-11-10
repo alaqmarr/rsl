@@ -82,7 +82,7 @@ export function ClientProfileSslTeamTab({
   return (
     <div className="space-y-6">
       <SectionCard
-        title="Connection Suite Policy — Manual API Credential Entry"
+        title="Connection Suite Policy - Manual API Credential Entry"
         subtitle="By default, clients only see clean 1-click Facebook & Google sign-in buttons. Enable manual credential entry only when a specific client requires custom System User Tokens or support-assisted manual overrides."
         action={
           <StatusPill
@@ -283,7 +283,7 @@ export function ClientProfileSslTeamTab({
                       .sort(([a], [b]) => a.localeCompare(b))
                       .map(([code, stateName]) => (
                         <option key={code} value={code}>
-                          {code} — {stateName}
+                          {code} - {stateName}
                         </option>
                       ))}
                   </select>

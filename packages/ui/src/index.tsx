@@ -2,14 +2,17 @@ import React from "react";
 
 export {
   FlashBanner,
+  RSL_SILEO_TOAST_OPTIONS,
   SileoToastProvider,
   sileo,
   triggerSileoToast,
   type FlashToastPayload,
 } from "./sileo-toast";
 export { TurnstileWidget } from "./turnstile-widget";
+export { TotpQrCodeCard, type TotpQrCodeCardProps } from "./totp-qr-card";
 
 import {
+  ConfirmSubmitButton,
   CopyCodeBlock,
   InteractiveAreaChartCanvas,
   PasswordInput,
@@ -20,6 +23,7 @@ import {
 } from "./interactive";
 
 export {
+  ConfirmSubmitButton,
   CopyCodeBlock,
   InteractiveAreaChartCanvas,
   PasswordInput,
@@ -29,14 +33,21 @@ export {
   type PasswordInputProps,
 };
 
+export {
+  GuideDrawer,
+  GuideDrawerButton,
+  openGuideDrawerById,
+  ThemeToggleButton,
+  type GuideCopyValue,
+  type GuideDrawerContent,
+  type GuideDrawerStep,
+  type GuideDrawerTab,
+} from "./guide-drawer";
+
 const AVATAR_TONES = [
   "bg-emerald-700 text-white",
-  "bg-indigo-700 text-white",
-  "bg-sky-700 text-white",
-  "bg-amber-700 text-white",
-  "bg-teal-700 text-white",
-  "bg-violet-700 text-white",
-  "bg-rose-700 text-white",
+  "bg-slate-900 text-white",
+  "bg-amber-600 text-white",
 ] as const;
 
 export function getAvatarToneClasses(seed: string): string {
@@ -102,6 +113,20 @@ const BRAND_MARK_PX: Record<"xs" | "sm" | "md" | "lg", number> = {
   lg: 34,
 };
 
+const BRAND_MARK_CLASS: Record<"xs" | "sm" | "md" | "lg", string> = {
+  xs: "rsl-logo-mark-xs",
+  sm: "rsl-logo-mark-sm",
+  md: "rsl-logo-mark-md",
+  lg: "rsl-logo-mark-lg",
+};
+
+const BRAND_LONG_CLASS: Record<"xs" | "sm" | "md" | "lg", string> = {
+  xs: "rsl-logo-long-xs",
+  sm: "rsl-logo-long-sm",
+  md: "rsl-logo-long-md",
+  lg: "rsl-logo-long-lg",
+};
+
 export function BrandLogo({
   variant = "long",
   size = "md",
@@ -123,11 +148,12 @@ export function BrandLogo({
           width={px}
           height={px}
           draggable={false}
-          style={{ width: px, height: px, flexShrink: 0 }}
-          className="rsl-brand-logo-img shrink-0 select-none object-contain"
+          className={`rsl-brand-logo-img ${BRAND_MARK_CLASS[size]} shrink-0 select-none object-contain`}
         />
         {subtitle ? (
-          <span className="truncate text-[11px] font-medium text-zinc-500">{subtitle}</span>
+          <span className="truncate font-sans text-xs font-medium tracking-[-0.01em] text-[var(--ink-muted)]">
+            {subtitle}
+          </span>
         ) : null}
       </span>
     );
@@ -144,11 +170,10 @@ export function BrandLogo({
         width={w}
         height={h}
         draggable={false}
-        style={{ height: h, width: "auto", maxWidth: "100%", flexShrink: 0 }}
-        className="rsl-brand-logo-img shrink-0 select-none object-contain"
+        className={`rsl-brand-logo-img ${BRAND_LONG_CLASS[size]} shrink-0 select-none object-contain`}
       />
       {subtitle ? (
-        <span className="mt-1 block truncate text-[10.5px] font-medium leading-none text-zinc-500">
+        <span className="mt-1 block truncate font-sans text-[11.5px] font-medium tracking-[-0.008em] text-[var(--ink-muted)]">
           {subtitle}
         </span>
       ) : null}
@@ -170,7 +195,7 @@ export function PlatformFooter({
   const year = new Date().getFullYear();
   return (
     <footer
-      className={`no-print mt-auto shrink-0 border-t border-zinc-200/85 bg-white/95 px-5 py-4 text-xs text-zinc-500 lg:px-8 xl:px-10 ${className}`}
+      className={`rsl-frost-surface no-print mt-auto shrink-0 border-x-0 border-b-0 px-5 py-4 text-xs text-zinc-500 lg:px-8 xl:px-10 ${className}`}
     >
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div className="flex flex-wrap items-center gap-2.5">
@@ -180,15 +205,14 @@ export function PlatformFooter({
             width={75}
             height={22}
             draggable={false}
-            style={{ height: 20, width: "auto", flexShrink: 0 }}
-            className="rsl-brand-logo-img shrink-0 select-none object-contain opacity-90"
+            className="rsl-brand-logo-img rsl-logo-footer shrink-0 select-none object-contain opacity-90"
           />
           <span className="hidden text-zinc-300 sm:inline">•</span>
-          <span className="font-medium text-slate-700">{suiteLabel}</span>
+          <span className="font-semibold text-slate-800">{suiteLabel}</span>
           <span className="text-zinc-500">© {year} RapidShift Labs</span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px] font-medium text-zinc-500">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs font-medium text-zinc-500">
           {links.map((link) => (
             <a
               key={link.href + link.label}
@@ -235,12 +259,7 @@ export function IosSpinner({
       fill="none"
       role="status"
       aria-label={label}
-      style={{
-        display: "inline-block",
-        verticalAlign: "-0.14em",
-        flexShrink: 0,
-      }}
-      className={`inline-block shrink-0 select-none align-middle ${className}`}
+      className={`rsl-ios-spinner inline-block shrink-0 select-none align-middle ${className}`}
     >
       {IOS_BLADE_ANGLES.map((angle, idx) => (
         <line
@@ -253,10 +272,7 @@ export function IosSpinner({
           strokeWidth="2.35"
           strokeLinecap="round"
           transform={`rotate(${angle} 12 12)`}
-          style={{
-            animation: "rsl-ios-blade-fade 0.92s linear infinite",
-            animationDelay: `${(-((12 - idx) / 12) * 0.92).toFixed(4)}s`,
-          }}
+          className={`rsl-ios-blade rsl-ios-blade-${idx}`}
         />
       ))}
     </svg>
@@ -265,67 +281,49 @@ export function IosSpinner({
 
 export function WorkspaceLoadingScreen({
   label = "Loading...",
-  dark = false,
 }: {
   label?: string;
   dark?: boolean;
 }) {
-  const cardSurface = dark
-    ? "border-slate-800 bg-slate-900/90 shadow-[0_1px_2px_rgba(0,0,0,0.28)]"
-    : "border-zinc-200/85 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]";
-  const barStrong = dark ? "bg-slate-800" : "bg-zinc-200/80";
-  const barMedium = dark ? "bg-slate-800/80" : "bg-zinc-200/70";
-  const barSoft = dark ? "bg-slate-800/55" : "bg-zinc-100";
-
   return (
     <div className="w-full animate-fadeIn space-y-6 py-1">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="space-y-2">
-          <div className={`h-6 w-52 animate-pulse rounded-lg ${barStrong}`} />
-          <div className={`h-3.5 w-80 max-w-[75vw] animate-pulse rounded-md ${barMedium}`} />
+          <div className="h-6 w-52 animate-pulse rounded-lg bg-zinc-200" />
+          <div className="h-3.5 w-80 max-w-[75vw] animate-pulse rounded-md bg-zinc-200/75" />
         </div>
-        <span
-          className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-semibold shadow-2xs ${
-            dark
-              ? "border-slate-700 bg-slate-900 text-slate-200"
-              : "border-zinc-200 bg-white text-zinc-700"
-          }`}
-        >
-          <IosSpinner size="xs" className="text-emerald-600" />
+        <span className="rsl-frost-surface inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-semibold text-zinc-700">
+          <IosSpinner size="xs" className="text-[var(--sunset-orange)]" />
           <span>{label}</span>
         </span>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[0, 1, 2, 3].map((i) => (
-          <div key={i} className={`rounded-2xl border p-5 ${cardSurface}`}>
+          <div key={i} className="rsl-frost-card rounded-2xl p-5">
             <div className="flex items-center justify-between">
-              <div className={`h-3.5 w-28 animate-pulse rounded ${barMedium}`} />
-              <div className={`h-5 w-12 animate-pulse rounded-full ${barSoft}`} />
+              <div className="h-3.5 w-28 animate-pulse rounded bg-zinc-200" />
+              <div className="h-5 w-12 animate-pulse rounded-full bg-zinc-100" />
             </div>
-            <div className={`mt-4 h-7 w-28 animate-pulse rounded-lg ${barStrong}`} />
-            <div className={`mt-4 h-3 w-40 animate-pulse rounded ${barSoft}`} />
+            <div className="mt-4 h-7 w-28 animate-pulse rounded-lg bg-zinc-200" />
+            <div className="mt-4 h-3 w-40 animate-pulse rounded bg-zinc-100" />
           </div>
         ))}
       </div>
 
-      <div className={`overflow-hidden rounded-2xl border ${cardSurface}`}>
-        <div
-          className={`flex items-center justify-between border-b px-6 py-4 ${
-            dark ? "border-slate-800 bg-slate-900/60" : "border-zinc-100 bg-zinc-50/70"
-          }`}
-        >
-          <div className={`h-4 w-44 animate-pulse rounded ${barMedium}`} />
-          <div className={`h-7 w-28 animate-pulse rounded-lg ${barSoft}`} />
+      <div className="rsl-frost-card overflow-hidden rounded-2xl">
+        <div className="flex items-center justify-between border-b border-zinc-200 bg-zinc-50 px-6 py-4">
+          <div className="h-4 w-44 animate-pulse rounded bg-zinc-200" />
+          <div className="h-7 w-28 animate-pulse rounded-lg bg-zinc-100" />
         </div>
-        <div className={`divide-y px-6 py-2 ${dark ? "divide-slate-800" : "divide-zinc-100"}`}>
+        <div className="divide-y divide-zinc-200 px-6 py-2">
           {[0, 1, 2, 3].map((r) => (
             <div key={r} className="flex items-center justify-between gap-4 py-4">
               <div className="space-y-2">
-                <div className={`h-3.5 w-48 animate-pulse rounded ${barMedium}`} />
-                <div className={`h-3 w-72 max-w-[60vw] animate-pulse rounded ${barSoft}`} />
+                <div className="h-3.5 w-48 animate-pulse rounded bg-zinc-200" />
+                <div className="h-3 w-72 max-w-[60vw] animate-pulse rounded bg-zinc-100" />
               </div>
-              <div className={`h-6 w-20 animate-pulse rounded-full ${barSoft}`} />
+              <div className="h-6 w-20 animate-pulse rounded-full bg-zinc-100" />
             </div>
           ))}
         </div>
@@ -395,17 +393,17 @@ export type Tone =
   | "copper"
   | "neutral";
 
-const TONE_STYLES: Record<Tone, { bg: string; text: string; border: string; dot: string }> = {
-  emerald: { bg: "#ECFDF5", text: "#047857", border: "#A7F3D0", dot: "#059669" },
-  amber: { bg: "#FFFBEB", text: "#B45309", border: "#FDE68A", dot: "#D97706" },
-  ruby: { bg: "#FEF2F2", text: "#B91C1C", border: "#FECACA", dot: "#DC2626" },
-  sky: { bg: "#EFF6FF", text: "#1D4ED8", border: "#BFDBFE", dot: "#2563EB" },
-  indigo: { bg: "#EEF2FF", text: "#3730A3", border: "#C7D2FE", dot: "#4F46E5" },
-  violet: { bg: "#F5F3FF", text: "#5B21B6", border: "#DDD6FE", dot: "#7C3AED" },
-  teal: { bg: "#F0FDFA", text: "#0F766E", border: "#99F6E4", dot: "#0D9488" },
-  stone: { bg: "#F4F4F5", text: "#3F3F46", border: "#E4E4E7", dot: "#71717A" },
-  neutral: { bg: "#F4F4F5", text: "#3F3F46", border: "#E4E4E7", dot: "#71717A" },
-  copper: { bg: "#FFF7ED", text: "#C2410C", border: "#FED7AA", dot: "#EA580C" },
+const TONE_CLASS_MAP: Record<Tone, { pill: string; dot: string }> = {
+  emerald: { pill: "rsl-pill-forest", dot: "rsl-pill-dot-forest" },
+  teal: { pill: "rsl-pill-forest", dot: "rsl-pill-dot-forest" },
+  indigo: { pill: "rsl-pill-forest", dot: "rsl-pill-dot-forest" },
+  sky: { pill: "rsl-pill-forest", dot: "rsl-pill-dot-forest" },
+  violet: { pill: "rsl-pill-forest", dot: "rsl-pill-dot-forest" },
+  amber: { pill: "rsl-pill-sunset", dot: "rsl-pill-dot-sunset" },
+  copper: { pill: "rsl-pill-sunset", dot: "rsl-pill-dot-sunset" },
+  ruby: { pill: "rsl-pill-sunset", dot: "rsl-pill-dot-sunset" },
+  stone: { pill: "rsl-pill-cream", dot: "rsl-pill-dot-cream" },
+  neutral: { pill: "rsl-pill-cream", dot: "rsl-pill-dot-cream" },
 };
 
 export function StatusPill({
@@ -417,21 +415,11 @@ export function StatusPill({
   tone?: Tone;
   showDot?: boolean;
 }) {
-  const s = TONE_STYLES[tone] ?? TONE_STYLES.stone;
+  const mapped = TONE_CLASS_MAP[tone] ?? TONE_CLASS_MAP.stone;
   return (
-    <span
-      style={{
-        backgroundColor: s.bg,
-        color: s.text,
-        border: `1px solid ${s.border}`,
-      }}
-      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] leading-none font-medium tracking-tight whitespace-nowrap tabular-nums"
-    >
+    <span className={`rsl-pill ${mapped.pill}`}>
       {showDot && (
-        <span
-          style={{ backgroundColor: s.dot, width: 6, height: 6, flexShrink: 0 }}
-          className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-        />
+        <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${mapped.dot}`} />
       )}
       <span>{label}</span>
     </span>
@@ -452,13 +440,14 @@ export function PageHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-3.5 sm:flex-row sm:items-end sm:justify-between">
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
         {(eyebrow || badge) && (
-          <div className="mb-1.5 flex flex-wrap items-center gap-2">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
             {typeof eyebrow === "string" ? (
-              <span className="inline-flex items-center gap-1.5 rounded-md border border-indigo-200/70 bg-indigo-50/70 px-2 py-0.5 font-mono text-[10.5px] font-bold tracking-[0.06em] text-indigo-800 uppercase">
-                {eyebrow}
+              <span className="rsl-eyebrow">
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--sunset-orange)]" />
+                <span>{eyebrow}</span>
               </span>
             ) : (
               eyebrow
@@ -466,11 +455,11 @@ export function PageHeader({
             {badge}
           </div>
         )}
-        <h1 className="text-[22px] sm:text-[24px] font-bold leading-[1.25] tracking-[-0.025em] text-slate-950">
+        <h1 className="rsl-display-heading text-[22px] font-semibold tracking-[-0.026em] text-[var(--ink-strong)] sm:text-[26px]">
           {title}
         </h1>
         {subtitle && (
-          <p className="mt-1.5 max-w-3xl text-[13.5px] sm:text-sm leading-relaxed text-slate-600">
+          <p className="mt-1.5 max-w-3xl text-[14px] leading-relaxed text-[var(--ink-secondary)] sm:text-[14.5px]">
             {subtitle}
           </p>
         )}
@@ -504,89 +493,33 @@ export function MetricCard({
     | "teal";
   icon?: React.ReactNode;
 }) {
-  const accents = {
-    emerald: {
-      bar: "linear-gradient(90deg, #059669 0%, #10B981 100%)",
-      glow: "rgba(5, 150, 105, 0.08)",
-      chipBg: "bg-emerald-50 text-emerald-700 ring-emerald-200/90 shadow-2xs",
-      dot: "bg-emerald-500",
-    },
-    amber: {
-      bar: "linear-gradient(90deg, #D97706 0%, #F59E0B 100%)",
-      glow: "rgba(217, 119, 6, 0.08)",
-      chipBg: "bg-amber-50 text-amber-700 ring-amber-200/90 shadow-2xs",
-      dot: "bg-amber-500",
-    },
-    ruby: {
-      bar: "linear-gradient(90deg, #DC2626 0%, #F43F5E 100%)",
-      glow: "rgba(220, 38, 38, 0.08)",
-      chipBg: "bg-rose-50 text-rose-700 ring-rose-200/90 shadow-2xs",
-      dot: "bg-rose-500",
-    },
-    copper: {
-      bar: "linear-gradient(90deg, #EA580C 0%, #F97316 100%)",
-      glow: "rgba(234, 88, 12, 0.08)",
-      chipBg: "bg-orange-50 text-orange-700 ring-orange-200/90 shadow-2xs",
-      dot: "bg-orange-500",
-    },
-    sky: {
-      bar: "linear-gradient(90deg, #0284C7 0%, #38BDF8 100%)",
-      glow: "rgba(2, 132, 199, 0.08)",
-      chipBg: "bg-sky-50 text-sky-700 ring-sky-200/90 shadow-2xs",
-      dot: "bg-sky-500",
-    },
-    indigo: {
-      bar: "linear-gradient(90deg, #4338CA 0%, #6366F1 100%)",
-      glow: "rgba(67, 56, 202, 0.08)",
-      chipBg: "bg-indigo-50 text-indigo-700 ring-indigo-200/90 shadow-2xs",
-      dot: "bg-indigo-600",
-    },
-    violet: {
-      bar: "linear-gradient(90deg, #6D28D9 0%, #8B5CF6 100%)",
-      glow: "rgba(109, 40, 217, 0.08)",
-      chipBg: "bg-violet-50 text-violet-700 ring-violet-200/90 shadow-2xs",
-      dot: "bg-violet-600",
-    },
-    teal: {
-      bar: "linear-gradient(90deg, #0F766E 0%, #14B8A6 100%)",
-      glow: "rgba(15, 118, 110, 0.08)",
-      chipBg: "bg-teal-50 text-teal-700 ring-teal-200/90 shadow-2xs",
-      dot: "bg-teal-600",
-    },
-    default: {
-      bar: "linear-gradient(90deg, #334155 0%, #6366F1 100%)",
-      glow: "rgba(79, 70, 229, 0.06)",
-      chipBg: "bg-indigo-50/70 text-indigo-700 ring-indigo-200/80 shadow-2xs",
-      dot: "bg-indigo-500",
-    },
-  };
-  const accentMap = accents[accent] ?? accents.default;
+  const isWarm = accent === "amber" || accent === "ruby" || accent === "copper";
+  const barClass = isWarm
+    ? "rsl-accent-bar-sunset"
+    : accent === "default"
+      ? "rsl-accent-bar-blend"
+      : "rsl-accent-bar-forest";
+  const orbClass = isWarm ? "rsl-ambient-orb-sunset" : "rsl-ambient-orb-forest";
+  const chipClass = isWarm
+    ? "bg-amber-50 text-amber-700 ring-amber-200"
+    : "bg-emerald-50 text-emerald-700 ring-emerald-200";
+  const dotClass = isWarm ? "bg-[var(--sunset-orange)]" : "bg-[var(--accent)]";
   const isLongText = value.length > 15;
 
   return (
-    <div className="group relative z-10 flex flex-col justify-between overflow-hidden rounded-2xl border border-slate-200/95 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.05),0_10px_24px_-12px_rgba(15,23,42,0.11)] transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_16px_32px_-12px_rgba(15,23,42,0.16)]">
-      {/* Chromatic Top Depth Bar */}
-      <div
-        aria-hidden="true"
-        className="h-[3px] w-full shrink-0"
-        style={{ background: accentMap.bar }}
-      />
+    <div className="rsl-frost-card group relative z-10 flex flex-col justify-between overflow-hidden rounded-2xl hover:-translate-y-0.5">
+      <div aria-hidden="true" className={`h-[3px] w-full shrink-0 ${barClass}`} />
 
-      {/* Ambient Corner Tint Wash */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -top-8 -right-8 h-28 w-28 rounded-full blur-2xl"
-        style={{ backgroundColor: accentMap.glow }}
+        className={`pointer-events-none absolute -top-8 -right-8 h-28 w-28 rounded-full blur-2xl ${orbClass}`}
       />
 
       <div className="relative flex flex-1 flex-col justify-between p-5">
         <div>
           <div className="flex items-center justify-between gap-2.5">
             <div className="flex min-w-0 items-center gap-2">
-              <span
-                style={{ width: 8, height: 8, flexShrink: 0 }}
-                className={`inline-block h-2 w-2 shrink-0 rounded-full ${accentMap.dot}`}
-              />
+              <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${dotClass}`} />
               <span className="truncate text-[12.5px] font-semibold tracking-tight text-slate-600">
                 {label}
               </span>
@@ -594,17 +527,14 @@ export function MetricCard({
 
             {icon ? (
               <span
-                style={{ width: 32, height: 32, flexShrink: 0 }}
-                className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1 [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0 ${accentMap.chipBg}`}
+                className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ring-1 [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0 ${chipClass}`}
               >
                 {icon}
               </span>
             ) : changePct !== undefined && changePct !== null ? (
               <span
-                className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${
-                  changePct >= 0
-                    ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
-                    : "border border-rose-200 bg-rose-50 text-rose-700"
+                className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
+                  changePct >= 0 ? "rsl-pill-forest" : "rsl-pill-sunset"
                 }`}
               >
                 {changePct >= 0 ? `+${changePct}%` : `${changePct}%`}
@@ -612,23 +542,21 @@ export function MetricCard({
             ) : null}
           </div>
 
-          <div className="mt-3 flex items-baseline justify-between gap-2">
+          <div className="mt-3.5 flex items-baseline justify-between gap-2">
             <div
               title={value}
-              className={`min-w-0 font-bold tracking-[-0.03em] text-slate-950 tabular-nums ${
+              className={`rsl-display-metric min-w-0 font-semibold tracking-[-0.03em] text-slate-950 tabular-nums ${
                 isLongText
-                  ? "truncate text-[17px] sm:text-[18px] leading-snug"
-                  : "text-[26px] xl:text-[28px] leading-none"
+                  ? "truncate text-[17.5px] leading-snug sm:text-[18.5px]"
+                  : "text-[25px] leading-none xl:text-[28px]"
               }`}
             >
               {value}
             </div>
             {icon && changePct !== undefined && changePct !== null && (
               <span
-                className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${
-                  changePct >= 0
-                    ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
-                    : "border border-rose-200 bg-rose-50 text-rose-700"
+                className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
+                  changePct >= 0 ? "rsl-pill-forest" : "rsl-pill-sunset"
                 }`}
               >
                 {changePct >= 0 ? `+${changePct}%` : `${changePct}%`}
@@ -637,7 +565,7 @@ export function MetricCard({
           </div>
         </div>
 
-        <p className="mt-3.5 border-t border-slate-100 pt-2.5 text-[12px] leading-4 text-slate-500">
+        <p className="mt-3.5 border-t border-zinc-200 pt-2.5 text-xs leading-4 text-zinc-500">
           {sublabel}
         </p>
       </div>
@@ -660,49 +588,25 @@ export function SectionCard({
   noPadding?: boolean;
   accent?: "default" | "emerald" | "indigo" | "amber" | "sky" | "violet" | "ruby" | "teal";
 }) {
-  const accentBars: Record<string, string> = {
-    default: "linear-gradient(90deg, #0F172A 0%, #4338CA 55%, #059669 100%)",
-    emerald: "linear-gradient(90deg, #047857 0%, #10B981 100%)",
-    indigo: "linear-gradient(90deg, #4338CA 0%, #6366F1 100%)",
-    amber: "linear-gradient(90deg, #D97706 0%, #F59E0B 100%)",
-    sky: "linear-gradient(90deg, #0284C7 0%, #38BDF8 100%)",
-    violet: "linear-gradient(90deg, #6D28D9 0%, #8B5CF6 100%)",
-    ruby: "linear-gradient(90deg, #DC2626 0%, #F43F5E 100%)",
-    teal: "linear-gradient(90deg, #0F766E 0%, #14B8A6 100%)",
-  };
-  const pillBars: Record<string, string> = {
-    default: "bg-indigo-600",
-    emerald: "bg-emerald-600",
-    indigo: "bg-indigo-600",
-    amber: "bg-amber-500",
-    sky: "bg-sky-600",
-    violet: "bg-violet-600",
-    ruby: "bg-rose-600",
-    teal: "bg-teal-600",
-  };
+  const isWarm = accent === "amber" || accent === "ruby";
+  const topBarClass = isWarm ? "rsl-accent-bar-sunset" : "rsl-accent-bar-forest";
+  const pillClass = isWarm ? "bg-[var(--sunset-orange)]" : "bg-[var(--accent)]";
 
   return (
-    <section className="relative z-10 flex flex-col overflow-hidden rounded-2xl border border-slate-200/95 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04),0_12px_28px_-14px_rgba(15,23,42,0.10)]">
+    <section className="rsl-frost-card relative z-10 flex flex-col overflow-hidden rounded-2xl">
       {accent !== "default" && (
-        <div
-          aria-hidden="true"
-          className="h-[3px] w-full shrink-0"
-          style={{ background: accentBars[accent] ?? accentBars.default }}
-        />
+        <div aria-hidden="true" className={`h-[3px] w-full shrink-0 ${topBarClass}`} />
       )}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 bg-gradient-to-b from-slate-50/95 to-white px-5 py-4 sm:px-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-50/70 px-5 py-4 sm:px-6">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span
-              aria-hidden="true"
-              className={`h-3.5 w-1 shrink-0 rounded-full ${pillBars[accent] ?? pillBars.default}`}
-            />
-            <h2 className="text-[15px] font-semibold leading-5 tracking-[-0.015em] text-slate-950">
+          <div className="flex items-center gap-2.5">
+            <span aria-hidden="true" className={`h-4 w-1 shrink-0 rounded-full ${pillClass}`} />
+            <h2 className="text-[15.5px] font-semibold leading-5 tracking-[-0.018em] text-slate-950">
               {title}
             </h2>
           </div>
           {subtitle && (
-            <p className="mt-1 pl-3 text-[13px] leading-5 text-slate-500">{subtitle}</p>
+            <p className="mt-1 pl-3.5 text-[13px] leading-5 text-zinc-500">{subtitle}</p>
           )}
         </div>
         {action && <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div>}
@@ -730,18 +634,14 @@ export function EmptyWorkspaceState({
   icon?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-dashed border-zinc-300/90 bg-zinc-50/60 px-6 py-10 text-center">
-      <div
-        style={{ width: 44, height: 44, flexShrink: 0 }}
-        className="mx-auto mb-3.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-zinc-200 bg-white text-emerald-600 shadow-2xs [&>svg]:h-5 [&>svg]:w-5 [&>svg]:shrink-0"
-      >
+    <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50/75 px-6 py-10 text-center">
+      <div className="mx-auto mb-3.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-zinc-200 bg-white text-emerald-700 shadow-2xs [&>svg]:h-5 [&>svg]:w-5 [&>svg]:shrink-0">
         {icon ?? (
           <svg
             width={20}
             height={20}
             viewBox="0 0 24 24"
-            style={{ display: "inline-block", flexShrink: 0 }}
-            className="h-5 w-5 shrink-0"
+            className="inline-block h-5 w-5 shrink-0"
             fill="none"
             stroke="currentColor"
             strokeWidth={1.8}
@@ -793,17 +693,13 @@ export function AccessRestrictedState({
 }) {
   return (
     <div className="w-full py-4">
-      <div className="mx-auto max-w-2xl rounded-2xl border border-zinc-200/90 bg-white p-8 text-center shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-        <div
-          style={{ width: 44, height: 44, flexShrink: 0 }}
-          className="mx-auto mb-4 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-700"
-        >
+      <div className="rsl-frost-card mx-auto max-w-2xl rounded-2xl p-8 text-center">
+        <div className="mx-auto mb-4 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-700">
           <svg
             width={20}
             height={20}
             viewBox="0 0 24 24"
-            style={{ display: "inline-block", flexShrink: 0 }}
-            className="h-5 w-5 shrink-0"
+            className="inline-block h-5 w-5 shrink-0"
             fill="none"
             stroke="currentColor"
             strokeWidth={1.8}
@@ -813,13 +709,13 @@ export function AccessRestrictedState({
           </svg>
         </div>
 
-        <div className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-[11px] font-semibold text-zinc-700">
+        <div className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700">
           <span>Current Role:</span>
           <span className="font-bold text-slate-900">{roleLabel}</span>
         </div>
 
-        <h1 className="mt-3 text-lg font-bold tracking-[-0.015em] text-slate-900">
-          Access Restricted — {pageTitle}
+        <h1 className="mt-3 text-xl font-semibold tracking-[-0.02em] text-slate-900">
+          Access Restricted - {pageTitle}
         </h1>
 
         <p className="mx-auto mt-2 max-w-lg text-[13.5px] leading-relaxed text-zinc-600">
@@ -854,8 +750,8 @@ export function DualSeriesAreaChart({
   points,
   primaryLabel,
   secondaryLabel,
-  primaryColor = "#059669",
-  secondaryColor = "#D97706",
+  primaryColor = "var(--chart-primary)",
+  secondaryColor = "var(--chart-secondary)",
   formatValue = (v) => String(v),
   emptyHint = "No activity recorded in this date window yet.",
 }: {
@@ -992,12 +888,12 @@ export function ConversionFunnelBars({
                 <span className="font-normal text-zinc-500">({item.conversionFromStartPct}%)</span>
               </div>
             </div>
-            <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-zinc-200/75">
-              <div
-                className="h-full rounded-full bg-emerald-600 transition-all"
-                style={{ width: `${widthPct}%` }}
-              />
-            </div>
+            <progress
+              value={widthPct}
+              max={100}
+              aria-label={`${item.step}: ${item.conversionFromStartPct}%`}
+              className="rsl-progress mt-2.5"
+            />
           </div>
         );
       })}
@@ -1012,23 +908,45 @@ export function ReceivablesAgingStack({
   buckets: Array<{ bucket: string; billsCount: number; amountPaise: number; sharePct: number }>;
   formatInrFn: (paise: number) => string;
 }) {
-  const colors = ["#059669", "#D97706", "#EA580C", "#DC2626", "#991B1B"];
+  const segClasses = [
+    "rsl-aging-seg-0",
+    "rsl-aging-seg-1",
+    "rsl-aging-seg-2",
+    "rsl-aging-seg-3",
+    "rsl-aging-seg-4",
+  ] as const;
   const totalAmount = buckets.reduce((s, b) => s + b.amountPaise, 0);
+  let runningX = 0;
 
   return (
     <div className="space-y-4">
-      <div className="flex h-3.5 w-full gap-0.5 overflow-hidden rounded-full bg-zinc-100 p-0.5 ring-1 ring-zinc-200/70">
-        {totalAmount > 0 &&
-          buckets.map((b, i) =>
-            b.sharePct > 0 ? (
-              <div
-                key={b.bucket}
-                className="rounded-xs first:rounded-l-full last:rounded-r-full"
-                style={{ width: `${b.sharePct}%`, backgroundColor: colors[i] }}
-                title={`${b.bucket}: ${formatInrFn(b.amountPaise)}`}
-              />
-            ) : null
-          )}
+      <div className="overflow-hidden rounded-full bg-zinc-100 p-0.5 ring-1 ring-zinc-200/70">
+        <svg
+          viewBox="0 0 100 6"
+          preserveAspectRatio="none"
+          className="block h-3 w-full overflow-hidden rounded-full"
+          role="img"
+          aria-label="Receivables aging distribution"
+        >
+          {totalAmount > 0 &&
+            buckets.map((b, i) => {
+              if (b.sharePct <= 0) return null;
+              const startX = runningX;
+              runningX += b.sharePct;
+              return (
+                <rect
+                  key={b.bucket}
+                  x={startX}
+                  y={0}
+                  width={b.sharePct}
+                  height={6}
+                  className={segClasses[i % segClasses.length]}
+                >
+                  <title>{`${b.bucket}: ${formatInrFn(b.amountPaise)}`}</title>
+                </rect>
+              );
+            })}
+        </svg>
       </div>
 
       <div className="divide-y divide-zinc-100">
@@ -1036,8 +954,7 @@ export function ReceivablesAgingStack({
           <div key={b.bucket} className="flex items-center justify-between py-2.5 text-[13px]">
             <div className="flex items-center gap-2.5">
               <span
-                className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-                style={{ width: 10, height: 10, backgroundColor: colors[i] }}
+                className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${segClasses[i % segClasses.length]}`}
               />
               <span className="font-medium text-slate-900">{b.bucket}</span>
               <span className="text-zinc-500">({b.billsCount} bills)</span>
@@ -1067,7 +984,7 @@ export function StarBreakdownCard({
   return (
     <div className="grid grid-cols-1 gap-5 sm:grid-cols-[148px_1fr] sm:items-center">
       <div className="rounded-2xl border border-zinc-200/80 bg-zinc-50/70 p-4 text-center">
-        <div className="text-3xl font-semibold tracking-tight text-slate-900 tabular-nums">
+        <div className="rsl-display-metric text-3xl font-semibold text-slate-900">
           {totalReviews > 0 ? averageRating.toFixed(1) : "0.0"}
         </div>
         <div className="mt-1 flex items-center justify-center gap-0.5 text-sm leading-none">
@@ -1080,7 +997,7 @@ export function StarBreakdownCard({
             </span>
           ))}
         </div>
-        <div className="mt-1.5 text-[12px] font-medium text-zinc-500 tabular-nums">
+        <div className="mt-1.5 text-xs font-medium text-zinc-500 tabular-nums">
           {totalReviews} {totalReviews === 1 ? "review" : "reviews"}
         </div>
       </div>
@@ -1091,12 +1008,12 @@ export function StarBreakdownCard({
             <span className="w-10 shrink-0 font-medium text-slate-900 tabular-nums">
               {s.star} ★
             </span>
-            <div className="h-2 flex-1 overflow-hidden rounded-full bg-zinc-100 ring-1 ring-zinc-200/60">
-              <div
-                className="h-full rounded-full bg-amber-500"
-                style={{ width: `${s.sharePct}%` }}
-              />
-            </div>
+            <progress
+              value={s.sharePct}
+              max={100}
+              aria-label={`${s.star} star share: ${s.sharePct}%`}
+              className="rsl-progress rsl-progress-sunset flex-1"
+            />
             <span className="w-20 shrink-0 text-right text-[12.5px] font-medium text-zinc-500 tabular-nums">
               {s.count} ({s.sharePct}%)
             </span>
@@ -1217,10 +1134,7 @@ export function FormattedGuideBody({
             key={i}
             className="flex items-start gap-2.5 text-[14px] leading-[1.65] text-zinc-700"
           >
-            <span
-              style={{ width: 6, height: 6, flexShrink: 0 }}
-              className="mt-2.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-600"
-            />
+            <span className="mt-2.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-600" />
             <div className="min-w-0 flex-1">
               <div>{renderInlineGuideTokens(item.text, linkMode, `ul-${blockIdx}-${i}`)}</div>
               {item.subBullets.length > 0 && (
@@ -1256,10 +1170,7 @@ export function FormattedGuideBody({
             key={i}
             className="flex items-start gap-3 rounded-xl border border-zinc-200/80 bg-zinc-50/70 px-4 py-3 text-[14px] leading-[1.65] text-zinc-700"
           >
-            <span
-              style={{ minWidth: 24, height: 24, flexShrink: 0 }}
-              className="mt-0.5 inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-emerald-50 px-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200/80 tabular-nums"
-            >
+            <span className="mt-0.5 inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-emerald-50 px-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200/80 tabular-nums">
               {item.num}
             </span>
             <div className="min-w-0 flex-1">
@@ -1702,6 +1613,8 @@ function formatRupeeExact(paise: number): string {
 
 export interface GstTaxInvoiceDocumentProps {
   invoiceNumber: string;
+  docType?: string;
+  linkedInvoiceNumber?: string | null;
   description: string;
   sacCode: string;
   subtotalPaise: number;
@@ -1731,13 +1644,27 @@ export interface GstTaxInvoiceDocumentProps {
 }
 
 export function GstTaxInvoiceDocument(props: GstTaxInvoiceDocumentProps) {
-  const isInterState = props.igstPaise > 0;
+  const isAdvanceReceipt = props.docType === "advance_receipt";
+  const isCreditNote = props.docType === "credit_note";
+  const isInterState = props.igstPaise !== 0;
   const totalGstPaise = props.cgstPaise + props.sgstPaise + props.igstPaise;
+  const sacCode = props.sacCode || "998314";
+  const docHeading = isAdvanceReceipt
+    ? "Advance Receipt Voucher (0% GST Deposit)"
+    : isCreditNote
+      ? "GST Credit Note (Sec. 34 CGST Act)"
+      : "Tax Invoice (Original for Recipient)";
+  const totalRowLabel = isCreditNote
+    ? "Total Credited (INR)"
+    : isAdvanceReceipt
+      ? "Deposit Received (INR)"
+      : "Total Payable (INR)";
   const statusTone =
     props.status === "paid" ? "emerald" : props.status === "void" ? "ruby" : "amber";
-  const statusLabel =
-    props.status === "paid"
-      ? "PAID"
+  const statusLabel = isCreditNote
+    ? "SEC. 34 CREDIT NOTE"
+    : props.status === "paid"
+      ? "PAID IN FULL"
       : props.status === "void"
         ? "VOID"
         : "ISSUED • UNPAID";
@@ -1746,6 +1673,7 @@ export function GstTaxInvoiceDocument(props: GstTaxInvoiceDocumentProps) {
     day: "2-digit",
     month: "short",
     year: "numeric",
+    timeZone: "Asia/Kolkata",
   });
 
   const paidDateStr = props.paidAt
@@ -1753,19 +1681,17 @@ export function GstTaxInvoiceDocument(props: GstTaxInvoiceDocumentProps) {
         day: "2-digit",
         month: "short",
         year: "numeric",
+        timeZone: "Asia/Kolkata",
       })
     : null;
 
   return (
     <div
       id="rsl-print-sheet"
-      className="mx-auto max-w-4xl overflow-hidden rounded-2xl border border-zinc-200/90 bg-white text-slate-900 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+      className="rsl-frost-card mx-auto max-w-4xl overflow-hidden rounded-2xl text-slate-900"
     >
       {/* Top Corporate Stationery Accent Bar */}
-      <div className="flex h-1.5 w-full">
-        <div className="h-full w-3/4 bg-slate-900" />
-        <div className="h-full w-1/4 bg-emerald-600" />
-      </div>
+      <div className="rsl-top-seam flex h-1.5 w-full" />
 
       <div className="p-6 sm:p-10">
       {/* Top Document Header */}
@@ -1778,8 +1704,7 @@ export function GstTaxInvoiceDocument(props: GstTaxInvoiceDocumentProps) {
               width={122}
               height={36}
               draggable={false}
-              style={{ height: 34, width: "auto", flexShrink: 0 }}
-              className="shrink-0 select-none object-contain"
+              className="rsl-brand-logo-img rsl-logo-invoice shrink-0 select-none object-contain"
             />
             <div>
               <div className="text-base font-bold tracking-tight text-slate-900">
@@ -1805,16 +1730,21 @@ export function GstTaxInvoiceDocument(props: GstTaxInvoiceDocumentProps) {
         </div>
 
         <div className="sm:text-right">
-          <div className="text-[11px] font-bold tracking-[0.12em] text-zinc-500 uppercase">
-            Tax Invoice (Original for Recipient)
+          <div className="text-xs font-bold tracking-[0.1em] text-zinc-500 uppercase">
+            {docHeading}
           </div>
           <div className="mt-1 font-mono text-xl font-bold tracking-tight text-slate-900">
             {props.invoiceNumber}
           </div>
+          {isCreditNote && props.linkedInvoiceNumber ? (
+            <div className="mt-1 text-xs font-medium text-zinc-600">
+              Against Tax Invoice #{props.linkedInvoiceNumber}
+            </div>
+          ) : null}
           <div className="mt-2 flex flex-wrap items-center gap-2 sm:justify-end">
             <StatusPill label={statusLabel} tone={statusTone} />
-            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-0.5 font-mono text-[11px] font-medium text-zinc-700">
-              SAC {props.sacCode}
+            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-0.5 font-mono text-xs font-medium text-zinc-700">
+              SAC {sacCode}
             </span>
           </div>
           <div className="mt-2.5 space-y-0.5 text-xs text-zinc-600 tabular-nums">
@@ -1867,9 +1797,11 @@ export function GstTaxInvoiceDocument(props: GstTaxInvoiceDocumentProps) {
             <div>
               Tax Regime:{" "}
               <strong className="text-slate-900">
-                {isInterState
-                  ? "Inter-State Supply (18% IGST)"
-                  : "Intra-State Supply (9% CGST + 9% SGST)"}
+                {isAdvanceReceipt
+                  ? "Prepaid Deposit (0% GST - Tax Invoice issued on usage)"
+                  : isInterState
+                    ? "Inter-State Supply (18% IGST)"
+                    : "Intra-State Supply (9% CGST + 9% SGST)"}
               </strong>
             </div>
             <div>
@@ -1883,21 +1815,24 @@ export function GstTaxInvoiceDocument(props: GstTaxInvoiceDocumentProps) {
       {/* Itemized Tax Table */}
       <div className="mt-6 overflow-x-auto rounded-xl border border-zinc-200/90">
         <table className="w-full text-left text-xs">
-          <thead className="border-b border-zinc-200 bg-zinc-50 text-[11px] font-semibold tracking-wide text-zinc-600 uppercase">
+          <caption className="sr-only">
+            Itemized GST line items for invoice {props.invoiceNumber}
+          </caption>
+          <thead className="border-b border-zinc-200 bg-zinc-50 text-xs font-semibold tracking-wide text-zinc-600 uppercase">
             <tr>
-              <th className="px-4 py-3">#</th>
-              <th className="px-4 py-3">Description of Service</th>
-              <th className="px-4 py-3 font-mono">SAC</th>
-              <th className="px-4 py-3 text-right">Taxable Value</th>
+              <th scope="col" className="px-4 py-3">#</th>
+              <th scope="col" className="px-4 py-3">Description of Service</th>
+              <th scope="col" className="px-4 py-3 font-mono">SAC</th>
+              <th scope="col" className="px-4 py-3 text-right">Taxable Value</th>
               {isInterState ? (
-                <th className="px-4 py-3 text-right">IGST (18%)</th>
+                <th scope="col" className="px-4 py-3 text-right">IGST (18%)</th>
               ) : (
                 <>
-                  <th className="px-4 py-3 text-right">CGST (9%)</th>
-                  <th className="px-4 py-3 text-right">SGST (9%)</th>
+                  <th scope="col" className="px-4 py-3 text-right">CGST (9%)</th>
+                  <th scope="col" className="px-4 py-3 text-right">SGST (9%)</th>
                 </>
               )}
-              <th className="px-4 py-3 text-right">Total (INR)</th>
+              <th scope="col" className="px-4 py-3 text-right">Total (INR)</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100 bg-white">
@@ -1992,14 +1927,19 @@ export function GstTaxInvoiceDocument(props: GstTaxInvoiceDocumentProps) {
         <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/50 p-4 text-xs tabular-nums">
           <div className="space-y-2">
             <div className="flex items-center justify-between text-zinc-600">
-              <span>Taxable Subtotal</span>
+              <span>Subtotal (Before Tax)</span>
               <span className="font-medium text-slate-900">
                 {formatRupeeExact(props.subtotalPaise)}
               </span>
             </div>
-            {isInterState ? (
+            {isAdvanceReceipt ? (
               <div className="flex items-center justify-between text-zinc-600">
-                <span>IGST @ 18%</span>
+                <span>GST on Prepaid Deposit (0%)</span>
+                <span className="font-medium text-slate-900">{formatRupeeExact(0)}</span>
+              </div>
+            ) : isInterState ? (
+              <div className="flex items-center justify-between text-zinc-600">
+                <span>IGST (18% Inter-State)</span>
                 <span className="font-medium text-slate-900">
                   {formatRupeeExact(props.igstPaise)}
                 </span>
@@ -2007,13 +1947,13 @@ export function GstTaxInvoiceDocument(props: GstTaxInvoiceDocumentProps) {
             ) : (
               <>
                 <div className="flex items-center justify-between text-zinc-600">
-                  <span>CGST @ 9%</span>
+                  <span>CGST (9% Central Tax)</span>
                   <span className="font-medium text-slate-900">
                     {formatRupeeExact(props.cgstPaise)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-zinc-600">
-                  <span>SGST @ 9%</span>
+                  <span>SGST (9% State Tax)</span>
                   <span className="font-medium text-slate-900">
                     {formatRupeeExact(props.sgstPaise)}
                   </span>
@@ -2021,14 +1961,14 @@ export function GstTaxInvoiceDocument(props: GstTaxInvoiceDocumentProps) {
               </>
             )}
             <div className="flex items-center justify-between border-t border-zinc-200 pt-2 text-zinc-600">
-              <span>Total GST (18%)</span>
+              <span>{isAdvanceReceipt ? "Total GST (0%)" : "Total GST (18%)"}</span>
               <span className="font-medium text-slate-900">
                 {formatRupeeExact(totalGstPaise)}
               </span>
             </div>
             <div className="flex items-center justify-between border-t border-zinc-200 pt-2.5 text-sm font-bold text-slate-900">
-              <span>Grand Total (INR)</span>
-              <span className="text-base text-emerald-700">
+              <span>{totalRowLabel}</span>
+              <span className={`text-base ${isCreditNote ? "text-rose-700" : "text-emerald-700"}`}>
                 {formatRupeeExact(props.totalPaise)}
               </span>
             </div>
@@ -2045,8 +1985,7 @@ export function GstTaxInvoiceDocument(props: GstTaxInvoiceDocumentProps) {
             width={18}
             height={18}
             draggable={false}
-            style={{ width: 18, height: 18, flexShrink: 0 }}
-            className="shrink-0 select-none object-contain opacity-85"
+            className="rsl-brand-logo-img rsl-logo-invoice-sm shrink-0 select-none object-contain opacity-85"
           />
           <span>
             Computer-generated GST Tax Invoice issued under Rule 46 of the CGST Rules, 2017. Physical

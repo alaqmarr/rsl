@@ -13,12 +13,15 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@rsl/analytics": "workspace:*",
+    "@rsl/api-keys": "workspace:*",
     "@rsl/backup": "workspace:*",
     "@rsl/billing": "workspace:*",
     "@rsl/config": "workspace:*",
     "@rsl/connections": "workspace:*",
     "@rsl/core": "workspace:*",
     "@rsl/database": "workspace:*",
+    "@rsl/inbox": "workspace:*",
     "@rsl/logging": "workspace:*",
     "@rsl/meta": "workspace:*",
     "@rsl/queue": "workspace:*",

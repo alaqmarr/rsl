@@ -33,13 +33,19 @@ import {
 } from "@rsl/tally";
 import {
   AccessRestrictedState,
+  ConfirmSubmitButton,
   EmptyWorkspaceState,
+  GuideDrawerButton,
   MetricCard,
   PageHeader,
   SectionCard,
   StatusPill,
 } from "@rsl/ui";
 import { ConfirmWhatsAppReminderButton } from "@/components/confirm-whatsapp-reminder";
+import {
+  ConfidentialityOtpBar,
+  ConfidentialityVaultCard,
+} from "@/components/confidentiality-vault-card";
 import { FeaturePlanGate, InlineAddonPlanBanner } from "@/components/feature-plan-gate";
 import { FlashBanner } from "@/components/flash-banner";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
@@ -56,6 +62,7 @@ import {
   installStarterTemplatesAction,
   markTallyBillPaidAction,
   recordTallyVoucherAction,
+  rotatePublicBillLinksAction,
   runDueTallyRemindersAction,
   saveReminderRuleAction,
   sendBillWhatsAppAction,
@@ -88,7 +95,7 @@ export default async function TallySyncPage({
     return (
       <FeaturePlanGate
         pageTitle="Tally Prime Bills, Webhook & Automatic WhatsApp"
-        pageSubtitle="Sync Tally Prime sales bills, receipts, and overdue customer balances automatically — and send your exact Tally-printed PDF invoices on WhatsApp."
+        pageSubtitle="Sync Tally Prime sales bills, receipts, and overdue customer balances automatically - and send your exact Tally-printed PDF invoices on WhatsApp."
         plans={plans}
         returnPath="/tally"
         notice={sp.notice}
@@ -125,7 +132,11 @@ export default async function TallySyncPage({
   });
 
   const [tally, sslRecords, walletBalancePaise] = await Promise.all([
-    Promise.resolve(getTallyWorkspaceSummary(session.workspace.id)),
+    Promise.resolve(
+      getTallyWorkspaceSummary(session.workspace.id, {
+        userId: session.user.id,
+      })
+    ),
     ensureWorkspaceSslProvisioned(session.workspace.id, session.workspace.slug),
     Promise.resolve(getWalletBalancePaise(session.workspace.id)),
   ]);
@@ -234,11 +245,24 @@ export default async function TallySyncPage({
     return true;
   });
 
-  const currentBillsReturnPath = `/tally?tab=bills${
+  const currentBillsBaseReturnPath = `/tally?tab=bills${
     billStatusFilter !== "all" ? `&status=${billStatusFilter}` : ""
   }${selectedCompanyId !== "all" ? `&company=${encodeURIComponent(selectedCompanyId)}` : ""}${
     billQuery ? `&q=${encodeURIComponent(billQuery)}` : ""
   }`;
+
+  const BILLS_PAGE_SIZE = 50;
+  const totalBillPages = Math.max(1, Math.ceil(filteredVouchers.length / BILLS_PAGE_SIZE));
+  const rawBillsPage = Math.max(1, Number.parseInt(sp.page || "1", 10) || 1);
+  const currentBillsPage = Math.min(rawBillsPage, totalBillPages);
+  const pagedVouchers = filteredVouchers.slice(
+    (currentBillsPage - 1) * BILLS_PAGE_SIZE,
+    currentBillsPage * BILLS_PAGE_SIZE
+  );
+  const currentBillsReturnPath =
+    currentBillsPage > 1
+      ? `${currentBillsBaseReturnPath}&page=${currentBillsPage}`
+      : currentBillsBaseReturnPath;
 
   const tdlFilename = buildWorkspaceTdlFilename(session.workspace.name);
   const tallyBrandTitle = buildTallyDisplayBrandTitle(session.workspace.name);
@@ -291,6 +315,32 @@ export default async function TallySyncPage({
         defaultCompanyName={tally.companies[0]?.name}
       />
 
+      <ConfidentialityOtpBar
+        isMasked={tally.confidentiality.isMasked}
+        unmaskActive={tally.confidentiality.unmaskActive}
+        unmaskExpiresAt={tally.confidentiality.unmaskExpiresAt}
+        policy={tally.confidentiality.policy}
+      />
+
+      <details className="rounded-2xl border border-[var(--border)] bg-[var(--surface-muted)] px-4 py-3">
+        <summary className="cursor-pointer select-none text-xs font-semibold text-[var(--text-primary)]">
+          Buyer &amp; Supplier Confidentiality, Masking, OTP Reveal &amp; Auto-Delete Retention Settings
+        </summary>
+        <div className="mt-3">
+          <ConfidentialityVaultCard
+            initialPolicy={tally.confidentiality.policy}
+            isMasked={tally.confidentiality.isMasked}
+            unmaskActive={tally.confidentiality.unmaskActive}
+            unmaskExpiresAt={tally.confidentiality.unmaskExpiresAt}
+            canManageSettings={canRolePerform(
+              session.roleSlug,
+              "workspace:manage",
+              session.workspace.id
+            )}
+          />
+        </div>
+      </details>
+
       <PageHeader
         eyebrow="All-in-One Tally Prime Suite"
         badge={
@@ -300,7 +350,7 @@ export default async function TallySyncPage({
           />
         }
         title="Tally Prime Bills, Paid Settlements & WhatsApp"
-        subtitle={`Sync Tally Prime sales bills, receipts, supplier payments, client ledgers, and stock to ${endpoints.primaryDomain} — bills marked Paid in Tally update automatically, with "${tallyBrandTitle}" inside Tally Prime.`}
+        subtitle={`Sync Tally Prime sales bills, receipts, supplier payments, client ledgers, and stock to ${endpoints.primaryDomain} - bills marked Paid in Tally update automatically, with "${tallyBrandTitle}" inside Tally Prime.`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <ActionLink
@@ -506,7 +556,7 @@ export default async function TallySyncPage({
       {activeTab === "bills" && (
         <SectionCard
           title={`Tally Bills & Receipts Register (${filteredVouchers.length})`}
-          subtitle="Live create, alter, cancel (Alt+X), and delete (Alt+D) sync — sends your exact Tally-printed PDF format on WhatsApp"
+          subtitle="Live create, alter, cancel (Alt+X), and delete (Alt+D) sync - sends your exact Tally-printed PDF format on WhatsApp"
           action={
             <div className="flex flex-wrap items-center gap-2">
               {canManageTally && (
@@ -599,6 +649,17 @@ export default async function TallySyncPage({
                   </ActionLink>
                 )}
               </form>
+              {canManageTally && tally.vouchers.length > 0 && (
+                <form action={rotatePublicBillLinksAction} className="inline-flex">
+                  <input type="hidden" name="returnPath" value={currentBillsReturnPath} />
+                  <ConfirmSubmitButton
+                    confirmMessage="Rotate and revoke all previously shared public Tally bill links? Existing links sent earlier on WhatsApp will expire immediately, while newly sent links will work."
+                    className="rsl-btn-secondary py-1.5 text-xs text-rose-700"
+                  >
+                    Rotate Public Bill Links
+                  </ConfirmSubmitButton>
+                </form>
+              )}
             </div>
           )}
 
@@ -623,19 +684,36 @@ export default async function TallySyncPage({
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="border-b border-zinc-200/80 bg-zinc-50/70 text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
+                <caption className="sr-only">
+                  Synced Tally Prime sales bills, purchase invoices, receipts, and settlement status
+                </caption>
+                <thead className="border-b border-zinc-200/80 bg-zinc-50/70 text-xs font-semibold tracking-wide text-zinc-500 uppercase">
                   <tr>
-                    <th className="px-6 py-3">Bill # &amp; Date</th>
-                    <th className="px-4 py-3">Type</th>
-                    <th className="px-4 py-3">Client / Supplier Ledger</th>
-                    <th className="px-4 py-3 text-right">Amount</th>
-                    <th className="px-4 py-3 text-right">Balance Due</th>
-                    <th className="px-4 py-3">Status, Settlement &amp; PDF</th>
-                    <th className="px-6 py-3 text-right">Action</th>
+                    <th scope="col" className="px-6 py-3">
+                      Bill # &amp; Date
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Type
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Client / Supplier Ledger
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Amount
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Balance Due
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Status, Settlement &amp; PDF
+                    </th>
+                    <th scope="col" className="px-6 py-3 text-right">
+                      Action
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100 bg-white">
-                  {filteredVouchers.map((v) => {
+                  {pagedVouchers.map((v) => {
                     const isCancelled = v.paymentStatus === "cancelled";
                     const isBillType = v.voucherType === "Sales" || v.voucherType === "Purchase";
                     const balance =
@@ -659,11 +737,12 @@ export default async function TallySyncPage({
                           >
                             #{v.voucherNumber}
                           </ActionLink>
-                          <div className="text-[11px] text-zinc-500">
+                          <div className="text-xs text-zinc-500">
                             {new Date(v.voucherDate).toLocaleDateString("en-IN", {
                               day: "2-digit",
                               month: "short",
                               year: "numeric",
+                              timeZone: "Asia/Kolkata",
                             })}
                           </div>
                         </td>
@@ -712,7 +791,7 @@ export default async function TallySyncPage({
                           {formatInr(v.amountPaise)}
                         </td>
                         <td className="px-4 py-3.5 text-right font-bold tabular-nums text-slate-900">
-                          {isBillType ? formatInr(balance) : "—"}
+                          {isBillType ? formatInr(balance) : "-"}
                         </td>
                         <td className="px-4 py-3.5">
                           <div className="flex flex-wrap items-center gap-1.5">
@@ -858,6 +937,44 @@ export default async function TallySyncPage({
                   })}
                 </tbody>
               </table>
+              {totalBillPages > 1 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200/80 bg-zinc-50/60 px-6 py-3 text-xs text-zinc-600">
+                  <span className="tabular-nums">
+                    Showing {(currentBillsPage - 1) * BILLS_PAGE_SIZE + 1}–
+                    {Math.min(currentBillsPage * BILLS_PAGE_SIZE, filteredVouchers.length)} of{" "}
+                    {filteredVouchers.length.toLocaleString("en-IN")} vouchers (Page {currentBillsPage} of{" "}
+                    {totalBillPages})
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {currentBillsPage > 1 ? (
+                      <ActionLink
+                        href={`${currentBillsBaseReturnPath}&page=${currentBillsPage - 1}`}
+                        spinnerSize="xs"
+                        className="rsl-btn-secondary py-1 text-xs"
+                      >
+                        ← Previous
+                      </ActionLink>
+                    ) : (
+                      <span className="rounded-lg border border-zinc-200 px-3 py-1 text-zinc-400">
+                        ← Previous
+                      </span>
+                    )}
+                    {currentBillsPage < totalBillPages ? (
+                      <ActionLink
+                        href={`${currentBillsBaseReturnPath}&page=${currentBillsPage + 1}`}
+                        spinnerSize="xs"
+                        className="rsl-btn-secondary py-1 text-xs"
+                      >
+                        Next →
+                      </ActionLink>
+                    ) : (
+                      <span className="rounded-lg border border-zinc-200 px-3 py-1 text-zinc-400">
+                        Next →
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </SectionCard>
@@ -950,21 +1067,11 @@ export default async function TallySyncPage({
       {/* TAB 3: AUTOMATIC WHATSAPP RULES & OVERDUE REMINDERS */}
       {activeTab === "rules" && (
         <div className="space-y-6">
-          <div className="rounded-2xl border border-emerald-200/90 bg-emerald-50/75 p-4 text-xs text-emerald-950">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="font-bold">
-                  100% Exact Tally-Printed PDF Delivery — Zero Layout Modification
-                </div>
-                <p className="mt-1 text-emerald-900/90">
-                  Whenever Tally Prime exports a Sales Bill PDF (via local Port 9000 or the Windows
-                  Connector), RapidShift attaches your{" "}
-                  <strong>exact untouched Tally-printed PDF binary</strong> to the WhatsApp message —
-                  keeping your company logo, GSTIN, HSN/SAC columns, e-Invoice IRN/QR, bank details,
-                  and custom TDL print settings byte-for-byte identical to pressing{" "}
-                  <code className="font-mono">Ctrl+P</code> in Tally.
-                </p>
-              </div>
+          <div className="rsl-frost-surface flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3 text-xs">
+            <span className="font-semibold text-slate-900">
+              Untouched Tally-Printed PDF Invoices &amp; Automated Overdue Reminders
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
               {canManageTally && !hasNativePdfTemplate && (
                 <form action={installStarterTemplatesAction}>
                   <SubmitButton pendingText="Installing..." className="rsl-btn-primary text-xs">
@@ -972,6 +1079,36 @@ export default async function TallySyncPage({
                   </SubmitButton>
                 </form>
               )}
+              <GuideDrawerButton
+                label="Need help? • Auto-PDF Rules"
+                badgeText="3 steps"
+                guide={{
+                  eyebrow: "Automated Tally WhatsApp Delivery",
+                  title: "How Untouched Tally PDF & Reminder Rules Work",
+                  summary:
+                    "Send your exact Ctrl + P Tally Prime GST invoice PDF over WhatsApp automatically whenever a voucher is saved.",
+                  estimatedTime: "~2 min",
+                  steps: [
+                    {
+                      title: "Exact Byte-for-Byte Tally PDF Capture",
+                      detail:
+                        "When Tally Prime exports a Sales Bill via Port 9000 or the Windows Connector, RapidShift captures your untouched Tally-printed PDF binary - keeping your logo, GSTIN, HSN/SAC columns, e-Invoice IRN/QR, and bank details identical.",
+                    },
+                    {
+                      title: "Approve a Meta WhatsApp Template",
+                      detail:
+                        "Load or create a Meta-approved (APPROVED) WhatsApp template in WhatsApp & Templates. Wallet charges apply only after confirmed Meta delivery (₹0 on any error).",
+                    },
+                    {
+                      title: "Create Your Save-Trigger or Overdue Rule",
+                      detail:
+                        "Pick the voucher event (Sales Bill Created, Receipt Recorded, or Overdue Reminder) and select your approved template below.",
+                    },
+                  ],
+                  fullGuideHref: "/help?slug=tally-sync-and-import",
+                  fullGuideLabel: "Open Full Tally Guide",
+                }}
+              />
             </div>
           </div>
 
@@ -984,7 +1121,7 @@ export default async function TallySyncPage({
                 <InlineAddonPlanBanner plan={invoicingPlan} returnPath="/tally?tab=rules" />
               ) : !canManageTally ? (
                 <p className="rounded-xl border border-zinc-200 bg-zinc-50/70 p-3.5 text-xs text-zinc-600">
-                  Read-only view — Owner, Admin, or Manager permission is required to add or edit
+                  Read-only view - Owner, Admin, or Manager permission is required to add or edit
                   Tally-to-WhatsApp automation rules.
                 </p>
               ) : approvedTemplates.length === 0 ? (
@@ -1112,12 +1249,12 @@ export default async function TallySyncPage({
                               </form>
                               <form action={deleteTallyAutomationAction}>
                                 <input type="hidden" name="ruleId" value={rule.id} />
-                                <SubmitButton
-                                  spinnerSize="xs"
-                                  className="rsl-btn-secondary py-1 text-[11px] text-rose-700"
+                                <ConfirmSubmitButton
+                                  confirmMessage={`Remove automatic WhatsApp rule "${rule.name}"?`}
+                                  className="rsl-btn-secondary py-1 text-xs text-rose-700"
                                 >
                                   Remove
-                                </SubmitButton>
+                                </ConfirmSubmitButton>
                               </form>
                             </>
                           )}
@@ -1201,7 +1338,7 @@ export default async function TallySyncPage({
                     )
                   ) : (
                     <p className="rounded-xl border border-zinc-200 bg-zinc-50/70 p-3.5 text-xs text-zinc-600">
-                      Read-only view — Owner, Admin, or Manager permission is required to modify
+                      Read-only view - Owner, Admin, or Manager permission is required to modify
                       overdue reminder schedules.
                     </p>
                   )}
@@ -1225,13 +1362,12 @@ export default async function TallySyncPage({
                           {canManageTally && (
                             <form action={deleteReminderRuleAction}>
                               <input type="hidden" name="ruleId" value={r.id} />
-                              <SubmitButton
-                                spinnerSize="xs"
-                                pendingText="Removing..."
-                                className="rsl-btn-secondary py-1 text-[11px] text-rose-700"
+                              <ConfirmSubmitButton
+                                confirmMessage={`Remove overdue reminder schedule "${r.name}"?`}
+                                className="rsl-btn-secondary py-1 text-xs text-rose-700"
                               >
                                 Remove
-                              </SubmitButton>
+                              </ConfirmSubmitButton>
                             </form>
                           )}
                         </li>
@@ -1250,7 +1386,7 @@ export default async function TallySyncPage({
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <SectionCard
             title="Upload Tally Prime XML or CSV File"
-            subtitle="Export your Day Book or Sales Register from Tally Prime and upload it here — duplicate bills are merged automatically"
+            subtitle="Export your Day Book or Sales Register from Tally Prime and upload it here - duplicate bills are merged automatically"
           >
             <form action={importTallyFileAction} className="space-y-3 text-xs">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1402,7 +1538,7 @@ export default async function TallySyncPage({
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label className="mb-1 block font-semibold text-zinc-700">
-                    Settle Against Bill # (Optional — for Receipt / Payment / CN / DN)
+                    Settle Against Bill # (Optional - for Receipt / Payment / CN / DN)
                   </label>
                   <input
                     name="againstBillNumber"

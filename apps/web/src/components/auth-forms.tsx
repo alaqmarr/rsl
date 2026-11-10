@@ -3,10 +3,11 @@
 import React, { useActionState, useEffect, useState } from "react";
 import { Fingerprint } from "lucide-react";
 import { IosSpinner, PasswordInput, sileo, TurnstileWidget } from "@rsl/ui";
-import { ActionLink } from "@/components/ios-feedback";
+import { ActionLink, SubmitButton } from "@/components/ios-feedback";
 import {
   loginFormStateAction,
   registerFormStateAction,
+  resetPasswordAction,
   type WebAuthFormState,
 } from "@/lib/actions";
 
@@ -40,7 +41,11 @@ export function WebLoginForm({ turnstileSiteKey }: { turnstileSiteKey?: string |
   const [state, formAction, isPending] = useActionState(loginFormStateAction, INITIAL_AUTH_STATE);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [totpCode, setTotpCode] = useState("");
+  const [showTotpField, setShowTotpField] = useState(false);
   const [passkeyLoading, setPasskeyLoading] = useState(false);
+
+  const shouldRenderTotpInput = Boolean(state.requiresTotp || showTotpField);
 
   async function handlePasskeySignIn() {
     if (typeof window === "undefined" || !window.PublicKeyCredential) {
@@ -141,7 +146,7 @@ export function WebLoginForm({ turnstileSiteKey }: { turnstileSiteKey?: string |
   return (
     <form
       action={formAction}
-      className="space-y-4 rounded-2xl border border-zinc-200/90 bg-white p-7 shadow-[0_8px_30px_rgba(15,23,42,0.05)]"
+      className="rsl-frost-surface space-y-4 rounded-2xl p-7"
     >
       {state.error && (
         <div
@@ -193,6 +198,43 @@ export function WebLoginForm({ turnstileSiteKey }: { turnstileSiteKey?: string |
           className="rsl-input min-h-10"
         />
       </div>
+
+      {shouldRenderTotpInput ? (
+        <div className="rounded-xl border border-emerald-200/90 bg-emerald-50/70 p-3.5">
+          <label
+            htmlFor="login-totp-code"
+            className="mb-1.5 block text-xs font-semibold text-slate-900"
+          >
+            Authenticator 6-Digit Code or Recovery Code
+          </label>
+          <input
+            id="login-totp-code"
+            name="totpCode"
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={12}
+            required={Boolean(state.requiresTotp)}
+            value={totpCode}
+            onChange={(e) => setTotpCode(e.target.value)}
+            placeholder="123456 or ABCD-EFGH"
+            className="rsl-input min-h-10 font-mono tracking-widest uppercase"
+          />
+          <p className="mt-1 text-[11px] text-zinc-600">
+            Open Google Authenticator, 1Password, or Authy and enter your current 6-digit code.
+          </p>
+        </div>
+      ) : (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => setShowTotpField(true)}
+            className="text-[11px] font-semibold text-emerald-700 hover:underline"
+          >
+            Using an Authenticator App (2FA)? Enter 6-digit code
+          </button>
+        </div>
+      )}
 
       <TurnstileWidget siteKey={turnstileSiteKey} />
 
@@ -256,10 +298,13 @@ export function WebRegisterForm({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [businessName, setBusinessName] = useState("");
   const [industry, setIndustry] = useState("");
   const [stateCode, setStateCode] = useState("27");
   const [gstin, setGstin] = useState("");
+
+  const passwordMismatch = confirmPassword.length > 0 && password !== confirmPassword;
 
   useEffect(() => {
     if (state.error) {
@@ -317,21 +362,48 @@ export function WebRegisterForm({
         </div>
       </div>
 
-      <div>
-        <label htmlFor="reg-password" className="mb-1 block text-xs font-semibold text-zinc-700">
-          Password (minimum 8 characters)
-        </label>
-        <PasswordInput
-          id="reg-password"
-          name="password"
-          minLength={8}
-          required
-          autoComplete="new-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="At least 8 characters"
-          className="rsl-input min-h-10"
-        />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div>
+          <label htmlFor="reg-password" className="mb-1 block text-xs font-semibold text-zinc-700">
+            Password (minimum 8 characters)
+          </label>
+          <PasswordInput
+            id="reg-password"
+            name="password"
+            minLength={8}
+            required
+            showStrengthMeter
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="At least 8 characters"
+            className="rsl-input min-h-10"
+          />
+        </div>
+        <div>
+          <label
+            htmlFor="reg-confirm-password"
+            className="mb-1 block text-xs font-semibold text-zinc-700"
+          >
+            Confirm Password
+          </label>
+          <PasswordInput
+            id="reg-confirm-password"
+            name="confirmPassword"
+            minLength={8}
+            required
+            autoComplete="new-password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            placeholder="Re-enter password"
+            className="rsl-input min-h-10"
+          />
+          {passwordMismatch && (
+            <p role="alert" className="mt-1 text-xs font-medium text-rose-700">
+              Passwords do not match yet.
+            </p>
+          )}
+        </div>
       </div>
 
       <div className="border-t border-zinc-200/80 pt-4">
@@ -467,7 +539,7 @@ export function WebRegisterForm({
 
       <button
         type="submit"
-        disabled={isPending}
+        disabled={isPending || passwordMismatch}
         className="rsl-btn-primary min-h-11 w-full py-2.5 text-sm"
       >
         {isPending ? (
@@ -476,9 +548,133 @@ export function WebRegisterForm({
             <span>Creating Account &amp; Starting 7-Day Trial...</span>
           </span>
         ) : (
-          "Start 7-Day Free Trial — No Card Needed"
+          "Start 7-Day Free Trial - No Card Needed"
         )}
       </button>
+    </form>
+  );
+}
+
+export function WebResetPasswordForm({
+  initialEmail = "",
+  hasHandoffCookie = false,
+}: {
+  initialEmail?: string;
+  hasHandoffCookie?: boolean;
+}) {
+  const [email, setEmail] = useState(initialEmail);
+  const [token, setToken] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    const qsToken = url.searchParams.get("token");
+    const qsEmail = url.searchParams.get("email");
+    const hashParams = new URLSearchParams(url.hash.replace(/^#/, ""));
+    const fragmentToken = hashParams.get("token");
+
+    if (qsToken || fragmentToken) {
+      setToken(qsToken || fragmentToken || "");
+      url.searchParams.delete("token");
+      hashParams.delete("token");
+      url.hash = hashParams.toString() ? `#${hashParams.toString()}` : "";
+      window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+    }
+    if (qsEmail && !initialEmail) {
+      setEmail(qsEmail);
+    }
+  }, [initialEmail]);
+
+  const mismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
+
+  return (
+    <form action={resetPasswordAction} className="mt-4 space-y-4">
+      <div>
+        <label htmlFor="rp-email" className="rsl-label">
+          Work Email Address
+        </label>
+        <input
+          id="rp-email"
+          name="email"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          readOnly={Boolean(hasHandoffCookie && initialEmail)}
+          className="rsl-input"
+        />
+      </div>
+
+      {hasHandoffCookie && !token ? (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 px-3.5 py-2.5 text-xs font-medium text-emerald-900">
+          Verified one-time reset session active (valid for 30 minutes). Choose your new password
+          below.
+        </div>
+      ) : (
+        <div>
+          <label htmlFor="rp-token" className="rsl-label">
+            One-Time Reset Code
+          </label>
+          <input
+            id="rp-token"
+            name="token"
+            type="text"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            required={!hasHandoffCookie}
+            autoComplete="one-time-code"
+            className="rsl-input font-mono"
+          />
+        </div>
+      )}
+
+      <div>
+        <label htmlFor="rp-password" className="rsl-label">
+          New Password (8+ characters)
+        </label>
+        <PasswordInput
+          id="rp-password"
+          name="newPassword"
+          minLength={8}
+          required
+          showStrengthMeter
+          autoComplete="new-password"
+          value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
+          className="rsl-input"
+        />
+      </div>
+
+      <div>
+        <label htmlFor="rp-confirm-password" className="rsl-label">
+          Confirm New Password
+        </label>
+        <PasswordInput
+          id="rp-confirm-password"
+          name="confirmPassword"
+          minLength={8}
+          required
+          autoComplete="new-password"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          className="rsl-input"
+        />
+        {mismatch && (
+          <p role="alert" className="mt-1 text-xs font-medium text-rose-700">
+            New password and confirmation do not match.
+          </p>
+        )}
+      </div>
+
+      <SubmitButton
+        disabled={mismatch}
+        className="rsl-btn-primary w-full"
+        pendingText="Saving Password..."
+      >
+        Save New Password
+      </SubmitButton>
     </form>
   );
 }

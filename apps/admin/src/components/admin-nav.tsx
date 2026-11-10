@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  AlertTriangle,
   BookOpen,
   Building2,
   ClipboardList,
@@ -22,7 +21,13 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { BrandLogo, IosSpinner, useDialogFocusTrap } from "@rsl/ui";
+import {
+  BrandLogo,
+  GuideDrawer,
+  IosSpinner,
+  ThemeToggleButton,
+  useDialogFocusTrap,
+} from "@rsl/ui";
 import {
   ADMIN_NAV_SECTIONS_META,
   resolveAdminPageGuide,
@@ -76,79 +81,6 @@ const ADMIN_SECTIONS: AdminNavSection[] = ADMIN_NAV_SECTIONS_META.map((section) 
 
 const ALL_ADMIN_ITEMS = ADMIN_SECTIONS.flatMap((s) => s.items);
 
-interface AdminTonePalette {
-  activeRow: string;
-  activeIcon: string;
-  idleIcon: string;
-  dot: string;
-}
-
-const ADMIN_TONE_PALETTES: Record<
-  "indigo" | "sky" | "emerald" | "amber" | "teal" | "violet" | "copper" | "rose",
-  AdminTonePalette
-> = {
-  indigo: {
-    activeRow: "bg-indigo-50/95 font-semibold text-indigo-950 ring-1 ring-indigo-200/90 shadow-2xs",
-    activeIcon: "text-indigo-600",
-    idleIcon: "text-indigo-500/85 group-hover:text-indigo-700",
-    dot: "bg-indigo-600",
-  },
-  sky: {
-    activeRow: "bg-sky-50/95 font-semibold text-sky-950 ring-1 ring-sky-200/90 shadow-2xs",
-    activeIcon: "text-sky-600",
-    idleIcon: "text-sky-500/85 group-hover:text-sky-700",
-    dot: "bg-sky-600",
-  },
-  emerald: {
-    activeRow: "bg-emerald-50/95 font-semibold text-emerald-950 ring-1 ring-emerald-200/90 shadow-2xs",
-    activeIcon: "text-emerald-600",
-    idleIcon: "text-emerald-600/85 group-hover:text-emerald-700",
-    dot: "bg-emerald-600",
-  },
-  amber: {
-    activeRow: "bg-amber-50/95 font-semibold text-amber-950 ring-1 ring-amber-200/90 shadow-2xs",
-    activeIcon: "text-amber-600",
-    idleIcon: "text-amber-500/90 group-hover:text-amber-700",
-    dot: "bg-amber-500",
-  },
-  teal: {
-    activeRow: "bg-teal-50/95 font-semibold text-teal-950 ring-1 ring-teal-200/90 shadow-2xs",
-    activeIcon: "text-teal-600",
-    idleIcon: "text-teal-500/85 group-hover:text-teal-700",
-    dot: "bg-teal-600",
-  },
-  violet: {
-    activeRow: "bg-violet-50/95 font-semibold text-violet-950 ring-1 ring-violet-200/90 shadow-2xs",
-    activeIcon: "text-violet-600",
-    idleIcon: "text-violet-500/85 group-hover:text-violet-700",
-    dot: "bg-violet-600",
-  },
-  copper: {
-    activeRow: "bg-orange-50/95 font-semibold text-orange-950 ring-1 ring-orange-200/90 shadow-2xs",
-    activeIcon: "text-orange-600",
-    idleIcon: "text-orange-500/85 group-hover:text-orange-700",
-    dot: "bg-orange-600",
-  },
-  rose: {
-    activeRow: "bg-rose-50/95 font-semibold text-rose-950 ring-1 ring-rose-200/90 shadow-2xs",
-    activeIcon: "text-rose-600",
-    idleIcon: "text-rose-500/85 group-hover:text-rose-700",
-    dot: "bg-rose-600",
-  },
-};
-
-function getAdminNavPalette(href: string): AdminTonePalette {
-  if (href === "/") return ADMIN_TONE_PALETTES.indigo;
-  if (href.startsWith("/clients")) return ADMIN_TONE_PALETTES.sky;
-  if (href.startsWith("/invoices")) return ADMIN_TONE_PALETTES.emerald;
-  if (href.startsWith("/pricing")) return ADMIN_TONE_PALETTES.amber;
-  if (href.startsWith("/templates")) return ADMIN_TONE_PALETTES.teal;
-  if (href.startsWith("/queues") || href.startsWith("/inspector")) return ADMIN_TONE_PALETTES.violet;
-  if (href.startsWith("/credentials")) return ADMIN_TONE_PALETTES.copper;
-  if (href.startsWith("/staff")) return ADMIN_TONE_PALETTES.rose;
-  return ADMIN_TONE_PALETTES.indigo;
-}
-
 export function AdminSidebarNav({
   pendingApprovalsCount,
   allowedHrefs,
@@ -158,7 +90,7 @@ export function AdminSidebarNav({
   allowedHrefs?: string[];
   onNavigate?: () => void;
 }) {
-  const pathname = usePathname();
+  const pathname = usePathname() || "/";
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [pendingHref, setPendingHref] = useState<string | null>(null);
@@ -183,81 +115,98 @@ export function AdminSidebarNav({
   );
 
   return (
-    <div className="mt-4 space-y-5 pb-2">
-      {visibleSections.map((section) => (
-        <div key={section.heading}>
-          <div className="mb-1.5 px-3 text-[10px] font-bold tracking-[0.08em] text-zinc-500 uppercase">
-            {section.heading}
-          </div>
-          <nav className="space-y-0.5">
-            {section.items.map((item) => {
-              const Icon = item.icon;
-              const tone = getAdminNavPalette(item.href);
-              const active =
-                item.href === "/"
-                  ? pathname === "/"
-                  : pathname === item.href || pathname.startsWith(`${item.href}/`);
-              const isNavigatingHere = isPending && pendingHref === item.href;
+    <div className="mt-3 space-y-3.5 pb-2" aria-label="Staff control plane navigation">
+      {visibleSections.map((section) => {
+        const hasActiveChild = section.items.some((item) =>
+          item.href === "/"
+            ? pathname === "/"
+            : pathname === item.href || pathname.startsWith(`${item.href}/`)
+        );
 
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  prefetch
-                  onClick={(e) => {
-                    if (
-                      e.defaultPrevented ||
-                      e.button !== 0 ||
-                      e.metaKey ||
-                      e.ctrlKey ||
-                      e.shiftKey ||
-                      e.altKey
-                    ) {
-                      return;
-                    }
-                    onNavigate?.();
-                    if (pathname === item.href) return;
-                    e.preventDefault();
-                    setPendingHref(item.href);
-                    startTransition(() => {
-                      router.push(item.href);
-                    });
-                  }}
-                  aria-busy={isNavigatingHere}
-                  className={`group flex items-center justify-between gap-2.5 rounded-xl px-3 py-2 text-[13px] transition-all ${
-                    active
-                      ? tone.activeRow
-                      : isNavigatingHere
-                        ? "bg-slate-100 font-semibold text-slate-900"
-                        : "font-medium text-slate-600 hover:bg-slate-100/80 hover:text-slate-950"
-                  }`}
-                >
-                  <span className="inline-flex min-w-0 items-center gap-2.5">
-                    {isNavigatingHere ? (
-                      <IosSpinner size="xs" className="text-indigo-600" />
-                    ) : (
-                      <Icon
-                        className={`h-4 w-4 shrink-0 transition-colors ${
-                          active ? tone.activeIcon : tone.idleIcon
-                        }`}
-                      />
-                    )}
-                    <span className="truncate">{item.label}</span>
-                  </span>
+        return (
+          <div key={section.heading} className="rsl-nav-section">
+            <div
+              className={`rsl-nav-section-btn px-2.5 text-[10px] font-bold tracking-[0.08em] uppercase ${
+                hasActiveChild
+                  ? "rsl-nav-section-btn-active text-[var(--ink-strong)]"
+                  : "text-[var(--ink-muted)]"
+              }`}
+            >
+              <span className="truncate">{section.heading}</span>
+            </div>
 
-                  {item.showPendingBadge && pendingApprovalsCount > 0 ? (
-                    <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-bold text-white shadow-2xs tabular-nums">
-                      {pendingApprovalsCount}
+            <nav className="rsl-nav-group-rail mt-1 space-y-0.5">
+              {section.items.map((item) => {
+                const Icon = item.icon;
+                const active =
+                  item.href === "/"
+                    ? pathname === "/"
+                    : pathname === item.href || pathname.startsWith(`${item.href}/`);
+                const isNavigatingHere = isPending && pendingHref === item.href;
+
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    aria-current={active ? "page" : undefined}
+                    prefetch
+                    onClick={(e) => {
+                      if (
+                        e.defaultPrevented ||
+                        e.button !== 0 ||
+                        e.metaKey ||
+                        e.ctrlKey ||
+                        e.shiftKey ||
+                        e.altKey
+                      ) {
+                        return;
+                      }
+                      onNavigate?.();
+                      if (pathname === item.href) return;
+                      e.preventDefault();
+                      setPendingHref(item.href);
+                      startTransition(() => {
+                        router.push(item.href);
+                      });
+                    }}
+                    aria-busy={isNavigatingHere}
+                    className={`rsl-nav-item group flex w-full items-center justify-between gap-2.5 rounded-xl px-2.5 py-2 text-[13px] transition-all ${
+                      active
+                        ? "rsl-nav-item-active bg-[var(--forest-green)] font-semibold text-[var(--snow-white)] shadow-xs"
+                        : isNavigatingHere
+                          ? "rsl-nav-item-sunset font-semibold"
+                          : "font-medium text-[var(--ink-secondary)] hover:bg-[var(--surface-inset)] hover:text-[var(--ink)]"
+                    }`}
+                  >
+                    <span className="inline-flex min-w-0 items-center gap-2.5">
+                      {isNavigatingHere ? (
+                        <IosSpinner size="xs" className="text-[var(--sunset-orange)]" />
+                      ) : (
+                        <Icon
+                          className={`h-4 w-4 shrink-0 transition-colors ${
+                            active
+                              ? "text-[var(--sunset-orange)]"
+                              : "text-[var(--ink-muted)] group-hover:text-[var(--ink-strong)]"
+                          }`}
+                        />
+                      )}
+                      <span className="truncate">{item.label}</span>
                     </span>
-                  ) : active ? (
-                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} />
-                  ) : null}
-                </Link>
-              );
-            })}
-          </nav>
-        </div>
-      ))}
+
+                    {item.showPendingBadge && pendingApprovalsCount > 0 ? (
+                      <span className="rsl-pill rsl-pill-sunset !px-1.5 !py-0 font-mono text-[11px] font-bold tabular-nums">
+                        {pendingApprovalsCount}
+                      </span>
+                    ) : active ? (
+                      <span className="rsl-nav-dot h-2 w-2 shrink-0 rounded-full bg-[var(--sunset-orange)]" />
+                    ) : null}
+                  </Link>
+                );
+              })}
+            </nav>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -292,11 +241,9 @@ export function AdminTopBar({
 
   const mobileDrawerRef = React.useRef<HTMLElement>(null);
   const paletteDialogRef = React.useRef<HTMLDivElement>(null);
-  const helpDrawerRef = React.useRef<HTMLElement>(null);
 
   useDialogFocusTrap(mobileDrawerRef, drawerOpen, () => setDrawerOpen(false));
   useDialogFocusTrap(paletteDialogRef, paletteOpen, () => setPaletteOpen(false));
-  useDialogFocusTrap(helpDrawerRef, helpOpen, () => setHelpOpen(false));
 
   useEffect(() => {
     setActiveIndex(0);
@@ -362,7 +309,7 @@ export function AdminTopBar({
 
   return (
     <>
-      <header className="sticky top-0 z-20 shrink-0 border-b border-slate-200/90 bg-white/92 shadow-[0_4px_20px_-12px_rgba(15,23,42,0.09)] backdrop-blur-xl">
+      <header className="rsl-frost-header sticky top-0 z-20 shrink-0">
         <div className="flex w-full items-center justify-between gap-2 px-3.5 py-3 sm:gap-4 sm:px-5 lg:px-8 xl:px-10">
           <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
             <button
@@ -412,21 +359,23 @@ export function AdminTopBar({
                 }}
                 className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-1.5 font-semibold text-amber-800 tabular-nums transition hover:bg-amber-100/70 sm:px-3"
               >
-                <span style={{ width: 8, height: 8, flexShrink: 0 }} className="h-2 w-2 rounded-full bg-amber-500" />
+                <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
                 <span>
                   {totalPending} <span className="hidden sm:inline">waiting</span>
                 </span>
               </Link>
             )}
 
+            <ThemeToggleButton compact />
+
             <button
               type="button"
               onClick={() => setHelpOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50/80 px-2.5 py-1.5 text-xs font-semibold text-indigo-900 shadow-2xs transition hover:bg-indigo-100/80 sm:px-3"
+              className="rsl-guide-trigger"
               title="Open step-by-step Staff SOP guide for this screen"
             >
-              <HelpCircle className="h-3.5 w-3.5 text-indigo-600" />
-              <span className="hidden md:inline">Page Guide</span>
+              <HelpCircle className="h-3.5 w-3.5 text-amber-600" />
+              <span className="hidden md:inline">Need help?</span>
             </button>
 
             <a
@@ -453,7 +402,7 @@ export function AdminTopBar({
       {drawerOpen && (
         <div className="fixed inset-0 z-50 flex lg:hidden">
           <div
-            className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs"
+            className="rsl-hard-blur-scrim fixed inset-0"
             onClick={() => setDrawerOpen(false)}
           />
           <aside
@@ -461,10 +410,10 @@ export function AdminTopBar({
             role="dialog"
             aria-modal="true"
             aria-label="Staff portal navigation menu"
-            className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between overflow-y-auto bg-white p-4 shadow-2xl"
+            className="rsl-drawer-frost rsl-sidebar-scroll relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between overflow-y-auto border-r p-4"
           >
             <div>
-              <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
+              <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
                 <Link href="/" onClick={() => setDrawerOpen(false)}>
                   <BrandLogo variant="long" size="sm" subtitle={`Staff Portal • ${staffName}`} />
                 </Link>
@@ -472,21 +421,23 @@ export function AdminTopBar({
                   type="button"
                   onClick={() => setDrawerOpen(false)}
                   aria-label="Close staff menu"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100"
+                  className="rsl-icon-action-btn"
                 >
                   <X className="h-4 w-4" />
                 </button>
               </div>
-              {sidebarCardSlot}
               <AdminSidebarNav
                 pendingApprovalsCount={totalPending}
                 allowedHrefs={allowedHrefs}
                 onNavigate={() => setDrawerOpen(false)}
               />
             </div>
-            <div className="mt-4 flex items-center gap-2 border-t border-zinc-100 pt-3 text-[11px] text-zinc-500">
-              <BrandLogo variant="mark" size="xs" />
-              <span>© {new Date().getFullYear()} RapidShift Labs</span>
+            <div className="mt-4 space-y-3 border-t border-[var(--border)] pt-3">
+              {sidebarCardSlot}
+              <div className="flex items-center gap-2 text-[11px] text-[var(--ink-muted)]">
+                <BrandLogo variant="mark" size="xs" />
+                <span>© {new Date().getFullYear()} RapidShift Labs</span>
+              </div>
             </div>
           </aside>
         </div>
@@ -494,16 +445,16 @@ export function AdminTopBar({
 
       {/* Staff Command Palette (Ctrl+K / Cmd+K) */}
       {paletteOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/35 px-4 pt-[11vh] backdrop-blur-xs">
+        <div className="rsl-hard-blur-scrim fixed inset-0 z-50 flex items-start justify-center px-4 pt-[11vh]">
           <div
             ref={paletteDialogRef}
             role="dialog"
             aria-modal="true"
             aria-label="Staff command palette"
-            className="w-full max-w-xl overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl"
+            className="rsl-drawer-frost w-full max-w-xl overflow-hidden rounded-2xl border"
           >
-            <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-3.5">
-              <Search className="h-4 w-4 text-emerald-600" />
+            <div className="flex items-center gap-3 border-b border-zinc-200/70 px-4 py-3.5">
+              <Search className="h-4 w-4 text-emerald-700" />
               <label htmlFor="admin-cmdk-input" className="sr-only">
                 Search staff portal screens or client accounts
               </label>
@@ -551,7 +502,7 @@ export function AdminTopBar({
               </button>
             </div>
 
-            <div className="max-h-96 overflow-y-auto p-2" role="listbox">
+            <div className="rsl-custom-scrollbar max-h-96 overflow-y-auto p-2" role="listbox">
               {filteredClients.length > 0 && (
                 <div className="mb-2">
                   <div className="px-3 py-1.5 text-[10px] font-bold tracking-wider text-zinc-500 uppercase">
@@ -647,7 +598,7 @@ export function AdminTopBar({
                 })}
               </div>
             </div>
-            <div className="flex items-center justify-between border-t border-zinc-100 bg-zinc-50/75 px-4 py-2 text-[11px] text-zinc-500">
+            <div className="flex items-center justify-between border-t border-zinc-200/70 bg-zinc-50/75 px-4 py-2 text-[11px] text-zinc-500">
               <span>↑↓ Navigate • ↵ Open • Esc Close</span>
               <span className="font-mono">Ctrl+K / ⌘K</span>
             </div>
@@ -655,110 +606,25 @@ export function AdminTopBar({
         </div>
       )}
 
-      {/* Contextual Staff Page Guide Slide-Over Drawer */}
-      {helpOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div
-            className="fixed inset-0 bg-slate-950/35 backdrop-blur-xs"
-            onClick={() => setHelpOpen(false)}
-          />
-          <aside
-            ref={helpDrawerRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Staff screen SOP guide"
-            className="relative z-10 flex h-full w-full max-w-lg flex-col justify-between overflow-y-auto border-l border-zinc-200 bg-white p-6 shadow-2xl"
-          >
-            <div className="space-y-5">
-              <div className="flex items-start justify-between gap-3 border-b border-zinc-100 pb-4">
-                <div>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold tracking-wide text-emerald-800 uppercase ring-1 ring-emerald-200">
-                    Staff Screen SOP Guide
-                  </span>
-                  <h2 className="mt-2 text-base font-bold text-slate-900">
-                    {activePageGuide?.title ?? "Server Health Matrix & Staff SOP Runbooks"}
-                  </h2>
-                  <p className="mt-1 text-xs font-medium text-emerald-700">
-                    {activePageGuide?.roleNote ??
-                      "Available to all Staff roles — live port telemetry + complete Markdown SOP runbooks."}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setHelpOpen(false)}
-                  aria-label="Close guide"
-                  className="rounded-xl border border-zinc-200 p-1.5 text-zinc-500 transition hover:bg-zinc-100 hover:text-slate-900"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              <p className="text-xs leading-relaxed text-zinc-600">
-                {activePageGuide?.summary ??
-                  "Inspect live TCP/HTTP reachability of ports 4500–4503 at the top of this screen, and read the 4 complete Staff Standard Operating Procedure (SOP) runbooks below covering UTR verification, WhatsApp/Tally onboarding support, Oracle PM2/SSL deployment, and disaster recovery."}
-              </p>
-
-              {activePageGuide && activePageGuide.steps.length > 0 && (
-                <div className="space-y-2.5">
-                  <div className="text-[11px] font-bold tracking-wider text-zinc-400 uppercase">
-                    Step-by-Step Staff Procedure ({activePageGuide.steps.length} Steps)
-                  </div>
-                  <ol className="space-y-2.5">
-                    {activePageGuide.steps.map((step, idx) => (
-                      <li
-                        key={idx}
-                        className="flex gap-3 rounded-xl border border-zinc-200/85 bg-zinc-50/70 p-3.5 text-xs"
-                      >
-                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-bold text-white tabular-nums">
-                          {idx + 1}
-                        </span>
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <div className="font-semibold text-slate-900">{step.title}</div>
-                          <p className="leading-relaxed text-zinc-600">{step.detail}</p>
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-              )}
-
-              {activePageGuide && activePageGuide.cautions.length > 0 && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3.5 text-xs">
-                  <div className="flex items-center gap-1.5 text-[11px] font-bold tracking-wider text-amber-900 uppercase">
-                    <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
-                    <span>Important Finance &amp; Security Check</span>
-                  </div>
-                  <ul className="mt-1.5 space-y-1 text-amber-950/90">
-                    {activePageGuide.cautions.map((c, idx) => (
-                      <li key={idx} className="leading-relaxed">
-                        • {c}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-
-            <div className="mt-6 flex flex-col gap-2 border-t border-zinc-100 pt-4 sm:flex-row">
-              <Link
-                href="/runbooks"
-                onClick={() => setHelpOpen(false)}
-                className="adm-btn-primary flex-1 justify-center text-center text-xs"
-              >
-                All Staff SOP Runbooks →
-              </Link>
-              <a
-                href={docsUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="adm-btn-secondary flex-1 justify-center text-center text-xs"
-              >
-                Customer Help Center ↗
-              </a>
-            </div>
-          </aside>
-        </div>
-      )}
+      {/* Contextual Staff Page Guide Bottom Drawer */}
+      <GuideDrawer
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        guide={{
+          eyebrow: "Staff Screen SOP Guide",
+          title: activePageGuide?.title ?? "Server Health Matrix & Staff SOP Runbooks",
+          summary:
+            activePageGuide?.summary ??
+            "Inspect live TCP/HTTP reachability of ports 4500-4503 and review the complete Staff Standard Operating Procedure (SOP) runbooks covering UTR verification, WhatsApp/Tally onboarding support, PM2/SSL deployment, and disaster recovery.",
+          roleNote: activePageGuide?.roleNote ?? "Available to all Staff roles",
+          steps: activePageGuide?.steps ?? [],
+          cautions: activePageGuide?.cautions,
+          fullGuideHref: "/runbooks",
+          fullGuideLabel: "All Staff SOP Runbooks →",
+          externalHref: docsUrl,
+          externalLabel: "Customer Help Center",
+        }}
+      />
     </>
   );
 }

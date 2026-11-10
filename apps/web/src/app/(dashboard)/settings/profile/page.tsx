@@ -1,4 +1,4 @@
-import { listUserActiveSessions, listUserPasskeys } from "@rsl/auth";
+import { getUserTotpStatus, listUserActiveSessions, listUserPasskeys } from "@rsl/auth";
 import { listUserWebPushSubscriptions } from "@rsl/notifications";
 import { SYSTEM_ROLES } from "@rsl/rbac";
 import { PageHeader } from "@rsl/ui";
@@ -17,6 +17,7 @@ export default async function ClientProfilePage({
   const activeSessions = listUserActiveSessions(session.user.id, session.sessionId);
   const passkeys = listUserPasskeys(session.user.id);
   const pushSubscriptions = listUserWebPushSubscriptions(session.user.id, session.workspace.id);
+  const totpStatus = getUserTotpStatus(session.user.id);
   const currentRoleLabel =
     SYSTEM_ROLES.find((r) => r.slug === session.roleSlug)?.name ?? session.roleSlug;
 
@@ -25,7 +26,7 @@ export default async function ClientProfilePage({
       <PageHeader
         eyebrow="Settings & Account"
         title="My Profile & Account Security"
-        subtitle="Manage your personal identity, work email verification, account password, active device sessions, and linked business workspaces."
+        subtitle="Manage your personal identity, work email verification, authenticator QR 2FA, account password, active device sessions, and linked business workspaces."
       />
 
       <SettingsNav />
@@ -40,6 +41,8 @@ export default async function ClientProfilePage({
           phone: session.user.phone,
           jobTitle: session.user.jobTitle,
           emailVerified: session.user.emailVerified,
+          totpEnabled: totpStatus.totpEnabled,
+          backupCodesRemaining: totpStatus.backupCodesRemaining,
           createdAt: session.user.createdAt,
         }}
         currentRoleLabel={currentRoleLabel}

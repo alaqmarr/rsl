@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getEnv, verifyHmac } from "@rsl/core";
+import { verifyPurposeHmac } from "@rsl/core";
 import { readWorkspaceObjectBytes } from "@rsl/storage";
 
 export async function GET(
@@ -9,14 +9,15 @@ export async function GET(
   try {
     const { workspaceId, objectId } = await context.params;
     const sig = req.nextUrl.searchParams.get("sig") || "";
-    if (!workspaceId || !objectId || !sig) {
-      return NextResponse.json({ ok: false, error: "Missing signature." }, { status: 403 });
+    const exp = Number(req.nextUrl.searchParams.get("exp") || 0);
+    if (!workspaceId || !objectId || !sig || !Number.isFinite(exp) || exp <= Date.now()) {
+      return NextResponse.json({ ok: false, error: "Expired or missing media signature." }, { status: 403 });
     }
 
-    const valid = verifyHmac(
-      `media:${workspaceId}:${objectId}`,
-      sig,
-      getEnv().KMS_MASTER_KEY
+    const valid = verifyPurposeHmac(
+      "public-media-link:v1",
+      `media:${workspaceId}:${objectId}:${Math.trunc(exp)}`,
+      sig
     );
     if (!valid) {
       return NextResponse.json({ ok: false, error: "Invalid media signature." }, { status: 403 });
@@ -32,7 +33,7 @@ export async function GET(
       headers: {
         "Content-Type": meta.mimeType || "application/octet-stream",
         "Content-Length": String(bytes.length),
-        "Cache-Control": "public, max-age=86400, immutable",
+        "Cache-Control": "private, max-age=3600",
       },
     });
   } catch {

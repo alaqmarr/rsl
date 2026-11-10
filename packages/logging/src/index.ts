@@ -446,7 +446,7 @@ export function getCorrelationTimeline(workspaceId: string, correlationId: strin
       id: p.id,
       ts: p.ts,
       kind: "provider_call" as const,
-      title: `${p.provider.toUpperCase()} — ${p.operation}`,
+      title: `${p.provider.toUpperCase()} - ${p.operation}`,
       status: p.status >= 200 && p.status < 300 ? "success" : "error",
       durationMs: p.latencyMs,
       detail: `HTTP ${p.status}${p.providerRequestId ? ` • Trace ${p.providerRequestId}` : ""}`,
@@ -476,13 +476,15 @@ export function getCorrelationTimeline(workspaceId: string, correlationId: strin
 export function listRecentActionLogs(
   workspaceId: string,
   limit = 100,
-  filters?: { outcome?: string; category?: string }
+  filters?: { outcome?: string; category?: string; offset?: number }
 ) {
+  const offset = Math.max(0, filters?.offset ?? 0);
+  const fetchCap = Math.min(2000, Math.max(limit + offset, 250));
   const rows = tenantLogsDb({ workspaceId })
     .select()
     .from(tenantLogsSchema.actionLogs)
     .orderBy(desc(tenantLogsSchema.actionLogs.ts))
-    .limit(Math.max(limit, 250))
+    .limit(fetchCap)
     .all()
     .map((row) => ({
       ...row,
@@ -500,7 +502,33 @@ export function listRecentActionLogs(
       }
       return true;
     })
-    .slice(0, limit);
+    .slice(offset, offset + limit);
+}
+
+export function countActionLogs(
+  workspaceId: string,
+  filters?: { outcome?: string; category?: string }
+): number {
+  const raw = tenantLogsDb({ workspaceId }).$client;
+  if ((!filters?.outcome || filters.outcome === "all") && (!filters?.category || filters.category === "all")) {
+    const row = raw.prepare("SELECT COUNT(*) AS c FROM action_logs").get() as { c: number } | undefined;
+    return Number(row?.c ?? 0);
+  }
+  const rows = tenantLogsDb({ workspaceId })
+    .select({
+      action: tenantLogsSchema.actionLogs.action,
+      outcome: tenantLogsSchema.actionLogs.outcome,
+    })
+    .from(tenantLogsSchema.actionLogs)
+    .all();
+  let total = 0;
+  for (const r of rows) {
+    if (filters?.outcome && filters.outcome !== "all" && r.outcome !== filters.outcome) continue;
+    const cat = ACTION_CATALOG[r.action as keyof typeof ACTION_CATALOG]?.category ?? "General";
+    if (filters?.category && filters.category !== "all" && cat !== filters.category) continue;
+    total++;
+  }
+  return total;
 }
 
 function escapeCsvCell(val: unknown): string {
@@ -663,7 +691,7 @@ export function generateRedactedSupportBundle(params: {
 }
 
 /**
- * Structural Action Wrapper (Section 12.2):
+ * Action Wrapper:
  * Enforces permission check, service entitlement check, Zod validation, timing, error mapping,
  * and immutable hash-chained ActionLog capture.
  */
@@ -690,6 +718,8 @@ export function defineAction<TInputSchema extends z.ZodTypeAny, TOutput>(config:
       source: "web" as const,
       roleSlug: ctx.roleSlug,
       assetScope: ctx.assetScope,
+      apiKeyScopes: ctx.apiKeyScopes,
+      systemCapability: ctx.systemCapability,
     };
 
     return runWithContext(reqCtx, async () => {
@@ -793,7 +823,7 @@ export function registerApiRouteDoc(meta: RegisteredApiRoute): void {
 const pinoLoggers = new Map<string, Logger>();
 
 /**
- * Pino NDJSON diagnostic logger (Section 12.1 & 12.8)
+ * Pino NDJSON diagnostic logger:
  * Writes redacted structured JSON lines to LOG_DIR/<service>/YYYY-MM-DD.ndjson
  */
 export function getDiagnosticLogger(serviceName: "web" | "admin" | "docs" | "worker"): Logger {

@@ -23,6 +23,8 @@ import {
   registerTallyCompaniesForWorkspace,
   saveNativeTallyVoucherPdf,
   unwrapTallyMultiPartJson,
+  verifyAgentSignedRequest,
+  verifyTallyWebhookSignedPayload,
 } from "@rsl/tally";
 import { controlDb, ingressDb } from "@rsl/tenancy";
 import {
@@ -40,12 +42,6 @@ function isTallyTdlUserAgent(userAgent?: string | null): boolean {
   return Boolean(userAgent && userAgent.includes("TallyPrime-RSL-TDL/"));
 }
 
-/**
- * Tally Prime's `HTTP JSON` transport discards any response body whose HTTP status != 200,
- * causing `##RSLPingStatus` to be blank (`""`) and triggering a generic "Could not reach..." dialog.
- * Returning HTTP 200 with `{ ok: false, tallyResult: [{ RSLOkStatus: "Error", RSLMessage }] }`
- * ONLY for `TallyPrime-RSL-TDL/*` lets Tally Prime display the exact actionable error message!
- */
 function resolveHttpStatusForCaller(httpStatus: number, userAgent?: string | null): number {
   return isTallyTdlUserAgent(userAgent) ? 200 : httpStatus;
 }
@@ -74,21 +70,54 @@ function buildTallyResultFields(
   };
 }
 
-async function resolveWebhookCaller(req: NextRequest): Promise<{
+interface ResolvedTallyCaller {
   workspaceId: string | null;
   endpointId: string | null;
   webhookToken: string | null;
-  actorType: "webhook" | "api_key";
+  actorType: "webhook" | "api_key" | "agent";
   actorId: string;
   paused: boolean;
   hasCredentials: boolean;
-}> {
-  const token = (
-    req.headers.get("x-tally-webhook-token") ||
-    req.nextUrl.searchParams.get("token") ||
-    ""
-  ).trim();
+  authenticatedBy: "device_hmac" | "webhook_token" | "api_key" | "none";
+}
 
+async function resolveWebhookCaller(
+  req: NextRequest,
+  rawBodyBuffer?: Buffer
+): Promise<ResolvedTallyCaller> {
+  if (req.nextUrl.searchParams.has("token")) {
+    throw new RslError(
+      "RSL-TALLY-1002",
+      "Query-string ?token= authentication is disabled for security. Send X-Tally-Webhook-Token in the request header."
+    );
+  }
+
+  const deviceId = (req.headers.get("x-rsl-device-id") || "").trim();
+  const timestampHeader = (req.headers.get("x-rsl-timestamp") || "").trim();
+  const signatureHex = (req.headers.get("x-rsl-signature") || "").trim();
+
+  if (deviceId && timestampHeader && signatureHex) {
+    const rawStr = rawBodyBuffer ? rawBodyBuffer.toString("utf8") : "";
+    const verified = verifyAgentSignedRequest({
+      deviceId,
+      timestampHeader,
+      signatureHex,
+      rawBody: rawStr,
+    });
+    const ep = getOrCreateTallyWebhookEndpoint(verified.workspaceId);
+    return {
+      workspaceId: verified.workspaceId,
+      endpointId: ep.id,
+      webhookToken: ep.webhookToken,
+      actorType: "agent",
+      actorId: verified.deviceId,
+      paused: !ep.enabled,
+      hasCredentials: true,
+      authenticatedBy: "device_hmac",
+    };
+  }
+
+  const token = (req.headers.get("x-tally-webhook-token") || "").trim();
   if (token) {
     const endpoint = lookupTallyWebhookEndpointByToken(token);
     if (!endpoint) {
@@ -100,6 +129,7 @@ async function resolveWebhookCaller(req: NextRequest): Promise<{
         actorId: "tally_webhook",
         paused: false,
         hasCredentials: true,
+        authenticatedBy: "webhook_token",
       };
     }
     if (!endpoint.enabled) {
@@ -111,6 +141,7 @@ async function resolveWebhookCaller(req: NextRequest): Promise<{
         actorId: endpoint.id,
         paused: true,
         hasCredentials: true,
+        authenticatedBy: "webhook_token",
       };
     }
     return {
@@ -121,6 +152,7 @@ async function resolveWebhookCaller(req: NextRequest): Promise<{
       actorId: endpoint.id,
       paused: false,
       hasCredentials: true,
+      authenticatedBy: "webhook_token",
     };
   }
 
@@ -140,6 +172,7 @@ async function resolveWebhookCaller(req: NextRequest): Promise<{
       actorId: auth.keyId,
       paused: !ep.enabled,
       hasCredentials: true,
+      authenticatedBy: "api_key",
     };
   }
 
@@ -151,6 +184,7 @@ async function resolveWebhookCaller(req: NextRequest): Promise<{
     actorId: "tally_webhook",
     paused: false,
     hasCredentials: false,
+    authenticatedBy: "none",
   };
 }
 
@@ -208,28 +242,27 @@ export async function GET(req: NextRequest) {
   try {
     const caller = await resolveWebhookCaller(req);
 
-    // Unauthenticated browser / health check -> return helpful endpoint specification
     if (!caller.hasCredentials) {
-      const msg = "RapidShift Labs — Tally Prime Cloud Sync Ingress is online.";
+      const msg = "RapidShift Labs - Tally Prime Cloud Sync Ingress is online.";
       return NextResponse.json({
         ...buildTallyResultFields("Connected", msg, userAgent),
-        service: "RapidShift Labs — Tally Prime Cloud Sync Ingress",
+        service: "RapidShift Labs - Tally Prime Cloud Sync Ingress",
         primaryDomain: endpoints.primaryDomain,
         latestTdlVersion: LATEST_TALLY_TDL_VERSION,
         endpoint: endpoints.tallyWebhookUrl,
         endpointUrl: endpoints.tallyWebhookUrl,
-        pingUrlTemplate: `${endpoints.tallyWebhookUrl}?mode=ping&token=<tlwh_token>`,
-        otaManifestUrlTemplate: `${endpoints.tallyWebhookUrl}?mode=tdl-manifest&token=<tlwh_token>`,
-        otaLatestTdlUrlTemplate: `${endpoints.tallyWebhookUrl}?mode=tdl-latest&token=<tlwh_token>`,
+        pingUrlTemplate: `${endpoints.tallyWebhookUrl}?mode=ping`,
+        otaManifestUrlTemplate: `${endpoints.tallyWebhookUrl}?mode=tdl-manifest`,
+        otaLatestTdlUrlTemplate: `${endpoints.tallyWebhookUrl}?mode=tdl-latest`,
         authentication: [
-          "Header: X-Tally-Webhook-Token: tlwh_<workspace_token>",
-          "Query: ?token=tlwh_<workspace_token>",
+          "Header: X-Tally-Webhook-Token + X-RSL-Timestamp + X-RSL-Signature (HMAC-SHA256)",
+          "Header: X-RSL-Device-Id + X-RSL-Timestamp + X-RSL-Signature (paired Tally PC)",
           "Header: Authorization: Bearer rsl_live_<api_key> (scope: vouchers:write)",
         ],
         acceptedPayloads: [
           "application/json (RSL Tally Prime .tdl add-on or custom ERP JSON)",
           "text/xml or application/xml (Tally Prime <ENVELOPE> / <VOUCHER> XML)",
-          "application/pdf (?mode=voucher-pdf exact native Tally printed PDF)",
+          "application/pdf (?mode=voucher-pdf native Tally printed PDF)",
         ],
       });
     }
@@ -260,7 +293,6 @@ export async function GET(req: NextRequest) {
     const mode = req.nextUrl.searchParams.get("mode");
     const epRow = getOrCreateTallyWebhookEndpoint(caller.workspaceId);
 
-    // Over-The-Air (OTA) .tdl manifest & auto-update endpoints run even before plan unlock so setup is frictionless
     if (mode === "tdl-manifest") {
       const built = buildLatestWorkspaceTdl(req, caller.workspaceId, epRow.webhookToken);
       const sha256 = crypto.createHash("sha256").update(built.tdlBody, "utf8").digest("hex");
@@ -305,7 +337,7 @@ export async function GET(req: NextRequest) {
         manifestHmac,
         ...(deviceHmac ? { deviceHmac } : {}),
         byteLength: Buffer.byteLength(built.tdlBody, "utf8"),
-        downloadUrl: `${endpoints.tallyWebhookUrl}?mode=tdl-latest&token=${encodeURIComponent(epRow.webhookToken)}`,
+        downloadUrl: `${endpoints.tallyWebhookUrl}?mode=tdl-latest`,
       });
     }
 
@@ -382,12 +414,13 @@ export async function POST(req: NextRequest) {
   const inboxId = newId();
 
   try {
-    const caller = await resolveWebhookCaller(req);
+    const rawBodyBuffer = Buffer.from(await req.arrayBuffer());
+    const caller = await resolveWebhookCaller(req, rawBodyBuffer);
     endpointIdForError = caller.endpointId;
 
     if (!caller.hasCredentials) {
       const errMsg =
-        "Provide your Tally webhook token (Header X-Tally-Webhook-Token or ?token=tlwh_...) or Authorization Bearer API key.";
+        "Provide X-Tally-Webhook-Token + X-RSL-Timestamp + X-RSL-Signature, paired X-RSL-Device-Id headers, or Authorization Bearer API key.";
       return NextResponse.json(
         {
           ...buildTallyResultFields("Error", errMsg, userAgent),
@@ -420,10 +453,45 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Enforce timestamp + HMAC-SHA256 + replay protection on webhook-token and device-signed POSTs
+    if (caller.authenticatedBy === "webhook_token" && caller.webhookToken) {
+      verifyTallyWebhookSignedPayload({
+        workspaceId: caller.workspaceId,
+        signingSecret: caller.webhookToken,
+        timestampHeader: req.headers.get("x-rsl-timestamp") || "",
+        signatureHex: req.headers.get("x-rsl-signature") || "",
+        nonceHeader: req.headers.get("x-rsl-nonce"),
+        rawBody: rawBodyBuffer,
+      });
+    } else if (caller.authenticatedBy === "device_hmac") {
+      // Also guard against replay of an identical device-signed POST within the 5-minute window
+      const devSig = (req.headers.get("x-rsl-signature") || "").trim().toLowerCase();
+      const devTs = (req.headers.get("x-rsl-timestamp") || "").trim();
+      const replayInserted = controlDb()
+        .insert(controlSchema.idempotencyRecords)
+        .values({
+          id: newId(),
+          workspaceId: caller.workspaceId,
+          idempotencyKey: `tally_agent_replay:${caller.actorId}:${devTs}:${devSig.slice(0, 32)}`,
+          method: "POST",
+          path: "/api/webhooks/tally",
+          requestHash: devSig,
+          statusCode: 200,
+          responseJson: "{}",
+          expiresAt: now + 10 * 60 * 1000,
+          createdAt: now,
+        })
+        .onConflictDoNothing()
+        .run();
+      if (replayInserted.changes === 0) {
+        throw new RslError("RSL-TALLY-1002", "Duplicate or replayed agent webhook signature rejected.");
+      }
+    }
+
     requireEntitlement(caller.workspaceId, "tally.sync");
     ensureTallyAutomationProcessorRegistered();
 
-    // Direct Native Tally Printed PDF Upload (?mode=voucher-pdf or raw application/pdf)
+    // Direct Native Tally Printed PDF Upload (?mode=voucher-pdf or raw application/pdf), idempotent by voucherGuid + sha256
     if (modeParam === "voucher-pdf" || contentType.includes("application/pdf")) {
       let pdfBuffer: Buffer;
       let voucherGuid = req.nextUrl.searchParams.get("guid") || req.headers.get("x-tally-voucher-guid") || "";
@@ -434,7 +502,7 @@ export async function POST(req: NextRequest) {
       let masterId = req.nextUrl.searchParams.get("masterId") || null;
 
       if (contentType.includes("application/json")) {
-        const bodyJson = (await req.json()) as Record<string, unknown>;
+        const bodyJson = JSON.parse(rawBodyBuffer.toString("utf8")) as Record<string, unknown>;
         voucherGuid = String(bodyJson.guid ?? voucherGuid).trim();
         voucherNumber = String(bodyJson.voucherNumber ?? voucherNumber).trim();
         voucherType = String(bodyJson.voucherType ?? voucherType).trim();
@@ -443,7 +511,7 @@ export async function POST(req: NextRequest) {
         masterId = bodyJson.masterId ? String(bodyJson.masterId) : masterId;
         pdfBuffer = Buffer.from(String(bodyJson.pdfBase64 ?? ""), "base64");
       } else {
-        pdfBuffer = Buffer.from(await req.arrayBuffer());
+        pdfBuffer = rawBodyBuffer;
       }
 
       const savedPdf = saveNativeTallyVoucherPdf({
@@ -460,7 +528,7 @@ export async function POST(req: NextRequest) {
 
       await flushInlineTallyOutboxIfNoRedis(caller.workspaceId);
 
-      const okPdfMsg = `Stored exact native Tally PDF (${savedPdf.filename}) for Bill #${savedPdf.voucherNumber}.`;
+      const okPdfMsg = `Stored native Tally PDF (${savedPdf.filename}) for Bill #${savedPdf.voucherNumber}.`;
       return NextResponse.json(
         {
           ...buildTallyResultFields("Connected", okPdfMsg, userAgent),
@@ -471,11 +539,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const rawBody = await req.text();
-    const eventId = `tally_${crypto.createHash("sha256").update(`${now}:${rawBody}`).digest("hex").slice(0, 24)}`;
+    const rawBody = rawBodyBuffer.toString("utf8");
 
-    // Tally Prime HTTP JSON collections send a 0-byte preflight POST probe right before
-    // streaming the RemoteRequest payload. Acknowledge it cleanly without recording an error.
     if (rawBody.trim() === "" && modeParam !== "ping") {
       const preflightMsg = "Tally Prime HTTP preflight ready.";
       return NextResponse.json(
@@ -490,7 +555,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Parse JSON metadata if body is JSON
     let isPingPayload = modeParam === "ping";
     let pingCompanyName = "";
     let pingOpenCompanies: Array<string | { name?: string; guid?: string; startingFrom?: string }> = [];
@@ -581,7 +645,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Reconcile Day Book batch deletions (including when 0 vouchers remain in Tally!)
     if (reconcilePayload) {
       const rec = reconcileTallySyncBatch({
         workspaceId: caller.workspaceId,
@@ -611,7 +674,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    ingressDb()
+    const explicitIdemKey = (req.headers.get("idempotency-key") || req.headers.get("x-rsl-event-id") || "").trim();
+    const eventId = explicitIdemKey
+      ? `tally_${caller.workspaceId}_${crypto.createHash("sha256").update(explicitIdemKey).digest("hex").slice(0, 24)}`
+      : `tally_${caller.workspaceId}_${crypto.createHash("sha256").update(`${req.headers.get("x-rsl-timestamp") || ""}:${rawBody}`).digest("hex").slice(0, 24)}`;
+
+    const inserted = ingressDb()
       .insert(ingressSchema.webhookInbox)
       .values({
         id: inboxId,
@@ -630,6 +698,19 @@ export async function POST(req: NextRequest) {
       })
       .onConflictDoNothing()
       .run();
+
+    if (inserted.changes === 0) {
+      const dedupeMsg = "Duplicate Tally webhook payload already processed.";
+      return NextResponse.json(
+        {
+          ...buildTallyResultFields("Connected", dedupeMsg, userAgent),
+          deduplicated: true,
+          workspaceId: caller.workspaceId,
+          message: dedupeMsg,
+        },
+        { status: 200 }
+      );
+    }
     inboxInserted = true;
 
     const result = await ingestTallyBillEventAndEnqueueAutomation({
@@ -667,8 +748,6 @@ export async function POST(req: NextRequest) {
       result.vouchers.some((v) => Boolean(v.masterId) && v.paymentStatus !== "cancelled");
 
     if (shouldCaptureLocalPort9000PdfAsync) {
-      // Return HTTP 200 immediately so single-threaded tally.exe finishes Form Accept,
-      // then export the 100% genuine native Tally PDF from 127.0.0.1:9000 and dispatch WhatsApp!
       const wsIdForAsync = caller.workspaceId;
       const vouchersForAsync = result.vouchers;
       setTimeout(() => {

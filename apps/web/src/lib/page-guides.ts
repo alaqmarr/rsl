@@ -22,7 +22,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
     exact: true,
     title: "How to Use Your Business Overview & Daily Cashflow Pulse",
     summary:
-      "Every rupee and message count on this screen comes directly from your real Tally Prime bills, payment receipts, and customer chats — never sample data.",
+      "Every rupee and message count on this screen comes directly from your real Tally Prime bills, payment receipts, and customer chats - never sample data.",
     estimatedTime: "3 min review",
     guideSlug: "getting-started",
     prerequisites: [
@@ -58,7 +58,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       },
     ],
     commonMistakes: [
-      "Expecting demo numbers on a brand-new account — figures remain ₹0 until you sync Tally Prime bills, import XML/CSV, or connect WhatsApp.",
+      "Expecting demo numbers on a brand-new account - figures remain ₹0 until you sync Tally Prime bills, import XML/CSV, or connect WhatsApp.",
       "Sending WhatsApp reminders before syncing at least one APPROVED template in WhatsApp & Templates.",
     ],
   },
@@ -96,7 +96,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       },
     ],
     commonMistakes: [
-      "Viewing the 7d window when looking for bills dated last month — switch to 90d, 365d, or All Time to include older Tally voucher dates.",
+      "Viewing the 7d window when looking for bills dated last month - switch to 90d, 365d, or All Time to include older Tally voucher dates.",
     ],
   },
   {
@@ -124,7 +124,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       {
         title: "Check the 24-Hour Customer Service Window Indicator Before Replying",
         detail:
-          "When green ('24-Hour Window Open'), type any free-form reply and click Send. When amber ('24-Hour Window Closed'), Meta blocks plain text — switch to 'Send Approved Template', pick an APPROVED template, fill {{1}}..{{4}}, and send.",
+          "When green ('24-Hour Window Open'), type any free-form reply and click Send. When amber ('24-Hour Window Closed'), Meta blocks plain text - switch to 'Send Approved Template', pick an APPROVED template, fill {{1}}..{{4}}, and send.",
         tip: "Use Saved Quick Replies in the composer to insert your bank details, GSTIN, or store address in 1 click.",
       },
       {
@@ -139,7 +139,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       },
     ],
     commonMistakes: [
-      "Trying to send plain-text WhatsApp messages when more than 24 hours have passed since the customer's last incoming reply — always select an APPROVED template instead.",
+      "Trying to send plain-text WhatsApp messages when more than 24 hours have passed since the customer's last incoming reply - always select an APPROVED template instead.",
       "Forgetting to subscribe to the 'messages' webhook field in Meta App Dashboard -> WhatsApp -> Configuration (required for incoming replies to appear).",
     ],
   },
@@ -177,14 +177,14 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       },
     ],
     commonMistakes: [
-      "Expecting an invoice paid in Tally to stay unpaid — ensure F11 -> Enable Bill-wise entry = Yes and Receipts/Payments use 'Agst Ref' against the bill number (or same party ledger for automatic FIFO settlement).",
+      "Expecting an invoice paid in Tally to stay unpaid - ensure F11 -> Enable Bill-wise entry = Yes and Receipts/Payments use 'Agst Ref' against the bill number (or same party ledger for automatic FIFO settlement).",
     ],
   },
   {
     routePrefix: "/tally",
     title: "Connecting Tally Prime (.tdl v2.9 + Port 9000), Products, Multi-Company & Paid Sync",
     summary:
-      "Sync Tally Prime Bills, Products (Stock Items), Client Ledgers, and Multiple Companies live — with zero bill overwrites, automatic Paid-in-Tally settlements, and 100% untouched Tally-printed PDF invoices.",
+      "Sync Tally Prime Bills, Products (Stock Items), Client Ledgers, and Multiple Companies live - with zero bill overwrites, automatic Paid-in-Tally settlements, and 100% untouched Tally-printed PDF invoices.",
     estimatedTime: "8 min setup",
     guideSlug: "tally-sync-and-import",
     prerequisites: [
@@ -193,41 +193,41 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
     ],
     steps: [
       {
-        title: "Step 1 — Verify Your Dedicated *.tally.rapidshiftlabs.in Endpoint",
+        title: "Step 1 - Verify Your Dedicated *.tally.rapidshiftlabs.in Endpoint",
         detail:
           "Open the 'Connect Tally Prime' tab on this page, confirm SSL Status shows Active, and click 'Run Live Endpoint Check' to send a safe test ping without adding fake bills.",
       },
       {
-        title: "Step 2 — Enable F12 Contact Details & Standard Product Rates in Tally Prime",
+        title: "Step 2 - Enable F12 Contact Details & Standard Product Rates in Tally Prime",
         detail:
           "Inside Customer/Supplier Ledgers (Alter -> Ledger), press F12 -> set 'Provide Contact Details' = Yes and enter their 10-digit Mobile no. Inside Stock Items (Create/Alter -> Stock Item), press F12 -> set 'Provide Standard Buying and Selling Rates' = Yes so Selling Price, HSN, and GST % sync automatically.",
       },
       {
-        title: "Step 3 — Enable Local XML Server Port 9000 Inside Tally Prime",
+        title: "Step 3 - Enable Local XML Server Port 9000 Inside Tally Prime",
         detail:
           "In Tally Prime on your Windows PC, press F1 (Help) -> Settings -> Connectivity -> Client/Server Configuration. Set 'TallyPrime acts as' = Both, 'Enable ODBC' = Yes, and 'Port' = 9000, then press Ctrl + A (restart Tally if prompted). Test http://127.0.0.1:9000 in Chrome.",
         tip: "Port 9000 lets RapidShift export Tally Prime's exact native printed Voucher PDF (%PDF-1.x) AND sync multi-company masters continuously via Windows Connector v2.6.",
       },
       {
-        title: "Step 4 — Download & Load '<business>-rsl-sync.tdl' (v2.9) via F1 -> TDLs -> F4",
+        title: "Step 4 - Download & Load '<business>-rsl-sync.tdl' (v2.9) via F1 -> TDLs -> F4",
         detail:
           "Save C:\\TallyPrime\\<your-business>-rsl-sync.tdl (overwriting any older copy without ' (1)'). In Tally Prime, press F1 -> TDLs & Add-Ons -> F4 (Manage Local TDLs), set 'Load selected TDL files on startup' = Yes, enter the path, set 'Load TDL' = Yes, and press Ctrl + A.",
       },
       {
-        title: "Step 5 — Open All Companies (F3) & Click '<Your Business> & RSL Sync - Sync All Now'",
+        title: "Step 5 - Open All Companies (F3) & Click '<Your Business> & RSL Sync - Sync All Now'",
         detail:
           "If you manage multiple Tally companies, open them via F3 (Company) -> Select Company. On Gateway of Tally, click '<Your Business> & RSL Sync - Connection Test' and then '<Your Business> & RSL Sync - Sync All Now' to import all Godowns, Products, Party Ledgers, and Bills across every open company.",
       },
       {
-        title: "Step 6 — Create Your 'tally_tax_invoice_pdf' Instant WhatsApp Rule",
+        title: "Step 6 - Create Your 'tally_tax_invoice_pdf' Instant WhatsApp Rule",
         detail:
           "Load & sync starter templates in WhatsApp & Templates first, then create an Instant Rule: Trigger = 'Sales', Template = 'tally_tax_invoice_pdf' (DOCUMENT PDF header), and click Create Rule. Scheduled Overdue Reminder rules automatically cancel as soon as a bill is marked Paid in Tally!",
       },
     ],
     commonMistakes: [
-      "Leaving an older .tdl (v2.8 or earlier) loaded in Tally Prime RAM — always press F1 -> TDLs & Add-Ons -> F4 -> Ctrl + A after overwriting <business>-rsl-sync.tdl so v2.9 loads.",
-      "Expecting closed Tally companies to sync — press F3 -> Select Company in Tally Prime so every active company is open in memory before clicking Sync All Now.",
-      "Leaving 'Mobile no.' blank inside the customer's Party Ledger in Tally Prime — without a mobile number on the party ledger, WhatsApp has no phone number to message.",
+      "Leaving an older .tdl (v2.8 or earlier) loaded in Tally Prime RAM - always press F1 -> TDLs & Add-Ons -> F4 -> Ctrl + A after overwriting <business>-rsl-sync.tdl so v2.9 loads.",
+      "Expecting closed Tally companies to sync - press F3 -> Select Company in Tally Prime so every active company is open in memory before clicking Sync All Now.",
+      "Leaving 'Mobile no.' blank inside the customer's Party Ledger in Tally Prime - without a mobile number on the party ledger, WhatsApp has no phone number to message.",
     ],
   },
   {
@@ -266,7 +266,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
     ],
     commonMistakes: [
       "Forgetting to enable F12 -> 'Provide Standard Buying and Selling Rates = Yes' in Tally's Stock Item screen when you want pre-filled Selling & Cost rates synced before the first invoice.",
-      "Importing only Sales Vouchers without syncing Masters — click '<Your Business> & RSL Sync - Sync All Now' once so Opening Stock balances match Tally's Stock Summary.",
+      "Importing only Sales Vouchers without syncing Masters - click '<Your Business> & RSL Sync - Sync All Now' once so Opening Stock balances match Tally's Stock Summary.",
     ],
   },
   {
@@ -311,7 +311,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
     commonMistakes: [
       "Using capital letters, spaces, or hyphens in Template Name (Meta strictly requires lowercase_with_underscores).",
       "Submitting discount/promotional copy under the UTILITY category instead of MARKETING.",
-      "Leaving Sample Variable examples empty — Meta rejects templates without sample values.",
+      "Leaving Sample Variable examples empty - Meta rejects templates without sample values.",
     ],
   },
   {
@@ -381,7 +381,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       },
     ],
     commonMistakes: [
-      "Sharing private customer invoice numbers or phone numbers inside a public Google Maps review reply — invite them to message your WhatsApp support number instead.",
+      "Sharing private customer invoice numbers or phone numbers inside a public Google Maps review reply - invite them to message your WhatsApp support number instead.",
     ],
   },
   {
@@ -399,7 +399,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       {
         title: "Click 'Connect All with Facebook' for Meta Business Channels",
         detail:
-          "Approve permissions once on Facebook to automatically discover your WhatsApp Business numbers, Instagram Business account, Facebook Page, and Meta Ad Accounts & Pixels — webhooks subscribe automatically.",
+          "Approve permissions once on Facebook to automatically discover your WhatsApp Business numbers, Instagram Business account, Facebook Page, and Meta Ad Accounts & Pixels - webhooks subscribe automatically.",
       },
       {
         title: "Click 'Connect All with Google' for Google Business & Workspace",
@@ -441,7 +441,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       {
         title: "Inspect or Rotate Your Workspace Tally Webhook Token (tlwh_...)",
         detail:
-          "View live Tally event/ping counters. Only rotate the Tally token if compromised — after rotating, re-download .tdl v2.9 in Tally Prime -> F4 so Tally uses the new token.",
+          "View live Tally event/ping counters. Only rotate the Tally token if compromised - after rotating, re-download .tdl v2.9 in Tally Prime -> F4 so Tally uses the new token.",
       },
       {
         title: "Issue Scoped Live (rsl_live_) or Test (rsl_test_) REST API Keys",
@@ -455,7 +455,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       },
     ],
     commonMistakes: [
-      "Closing the page before copying a newly created 'rsl_live_...' API key — for security only its SHA-256 hash is stored, so generate a fresh key if missed.",
+      "Closing the page before copying a newly created 'rsl_live_...' API key - for security only its SHA-256 hash is stored, so generate a fresh key if missed.",
     ],
   },
   {
@@ -518,7 +518,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       },
     ],
     commonMistakes: [
-      "Leaving Browser Print 'Headers and footers' ticked in Chrome's print dialog — uncheck 'Headers and footers' for the cleanest A4 layout.",
+      "Leaving Browser Print 'Headers and footers' ticked in Chrome's print dialog - uncheck 'Headers and footers' for the cleanest A4 layout.",
     ],
   },
   {
@@ -572,7 +572,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       {
         title: "Enter Legal Trade Name & Match State Code to Your 15-Digit GSTIN",
         detail:
-          "Select the exact Indian State Code matching the first 2 digits of your GSTIN (e.g. '27 — Maharashtra' for 9% CGST + 9% SGST; any other state applies 18% IGST). Enter your 15-character GSTIN in uppercase with no spaces.",
+          "Select the exact Indian State Code matching the first 2 digits of your GSTIN (e.g. '27 - Maharashtra' for 9% CGST + 9% SGST; any other state applies 18% IGST). Enter your 15-character GSTIN in uppercase with no spaces.",
       },
       {
         title: "Set Billing Address, Accounts Email & Optional Default Tally Company",
@@ -586,14 +586,14 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       },
     ],
     commonMistakes: [
-      "Selecting State Code 27 while entering a GSTIN starting with 24 (Gujarat) — always match the first 2 digits of your GSTIN.",
+      "Selecting State Code 27 while entering a GSTIN starting with 24 (Gujarat) - always match the first 2 digits of your GSTIN.",
     ],
   },
   {
     routePrefix: "/settings/team",
     title: "Inviting Colleagues, Sharing 7-Day Invite Links & Managing Role Permissions",
     summary:
-      "Add your accountant, support agents, or marketing manager with granular role permissions — without ever sharing your owner password.",
+      "Add your accountant, support agents, or marketing manager with granular role permissions - without ever sharing your owner password.",
     estimatedTime: "3 min",
     guideSlug: "team-roles-security-and-business-settings",
     prerequisites: ["Requires Business Owner or Admin role."],
@@ -644,7 +644,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       },
     ],
     commonMistakes: [
-      "Staying logged in on a cybercafe or shared warehouse PC — use 'Revoke All Other Sessions' from your phone or main laptop anytime.",
+      "Staying logged in on a cybercafe or shared warehouse PC - use 'Revoke All Other Sessions' from your phone or main laptop anytime.",
     ],
   },
   {
@@ -671,7 +671,7 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       {
         title: "Connect Google Drive in 1 Click for Automatic Off-Site Backups",
         detail:
-          "Click 'Connect Google Drive with Google' on the Google Drive card (no Service Account JSON or Folder ID required!). Approve on Google's official RapidShift Labs screen — we automatically create 'RapidShift Labs Backups' using the privacy-safe drive.file scope and upload every .rslbackup snapshot automatically.",
+          "Click 'Connect Google Drive with Google' on the Google Drive card (no Service Account JSON or Folder ID required!). Approve on Google's official RapidShift Labs screen - we automatically create 'RapidShift Labs Backups' using the privacy-safe drive.file scope and upload every .rslbackup snapshot automatically.",
       },
       {
         title: "Download Instant CSV / Tally XML / JSON Exports or Encrypted .rslbackup",
@@ -685,8 +685,8 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       },
     ],
     commonMistakes: [
-      "Adding '/bucket-name' at the end of the Cloudflare R2 Endpoint URL — keep the endpoint strictly as 'https://<32_char_account_id>.r2.cloudflarestorage.com' and put the bucket name in 'Bucket Name'.",
-      "Forgetting your backup passphrase — AES-256-GCM archives cannot be decrypted without the passphrase used at creation.",
+      "Adding '/bucket-name' at the end of the Cloudflare R2 Endpoint URL - keep the endpoint strictly as 'https://<32_char_account_id>.r2.cloudflarestorage.com' and put the bucket name in 'Bucket Name'.",
+      "Forgetting your backup passphrase - AES-256-GCM archives cannot be decrypted without the passphrase used at creation.",
     ],
   },
   {

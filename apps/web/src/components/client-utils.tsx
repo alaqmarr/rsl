@@ -77,7 +77,7 @@ export function InboxReplyComposer({
       {cannedReplies.length > 0 && (
         <div className="space-y-1.5">
           <div className="text-[11px] font-semibold tracking-wider text-zinc-500 uppercase">
-            Quick Replies — Click to Insert
+            Quick Replies - Click to Insert
           </div>
           <div className="flex flex-wrap gap-1.5">
             {cannedReplies.map((cr) => (
@@ -122,5 +122,39 @@ export function InboxReplyComposer({
         </SubmitButton>
       </div>
     </form>
+  );
+}
+
+export function InboxToolsDisclosure({
+  defaultOpen = false,
+  summaryLabel,
+  children,
+}: {
+  defaultOpen?: boolean;
+  summaryLabel: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className="rounded-2xl border border-zinc-200/90 bg-white shadow-2xs">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls="inbox-contact-tools-panel"
+        onClick={() => setOpen((prev) => !prev)}
+        className="flex w-full flex-wrap items-center justify-between gap-2 px-5 py-3.5 text-left text-[13px] font-semibold text-slate-900 transition hover:bg-zinc-50/70"
+      >
+        <span>{summaryLabel}</span>
+        <span className="text-xs font-medium text-emerald-700">
+          {open ? "Hide Tools" : "Expand Tools"}
+        </span>
+      </button>
+      {open && (
+        <div id="inbox-contact-tools-panel" className="space-y-5 border-t border-zinc-100 p-5">
+          {children}
+        </div>
+      )}
+    </div>
   );
 }

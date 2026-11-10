@@ -317,7 +317,7 @@ export function ClientPlansEntitlementsTab({
       {/* ROW 2: Bundles & Complete Software Package */}
       <SectionCard
         title="Bundles & Complete Software Package (Unlock & Customize Per Client)"
-        subtitle="Unlock any bundle on Monthly, Quarterly, or Yearly billing — or customize included tools and negotiated rates specifically for this client."
+        subtitle="Unlock any bundle on Monthly, Quarterly, or Yearly billing - or customize included tools and negotiated rates specifically for this client."
       >
         <div className="space-y-5">
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -392,9 +392,9 @@ export function ClientPlansEntitlementsTab({
                   >
                     <summary className="cursor-pointer text-[11px] font-semibold text-emerald-800 select-none">
                       {bundle.isFullyUnlocked
-                        ? `All ${bundle.totalServicesCount} tools active — Record Paid Renewal / Convert Bundle`
+                        ? `All ${bundle.totalServicesCount} tools active - Record Paid Renewal / Convert Bundle`
                         : bundle.pendingRequest
-                          ? `Client Requested Unlock (${bundle.pendingRequest.billingCycle}) — Verify & Unlock`
+                          ? `Client Requested Unlock (${bundle.pendingRequest.billingCycle}) - Verify & Unlock`
                           : "Record Payment & Unlock Bundle →"}
                     </summary>
                     <form
@@ -671,7 +671,7 @@ export function ClientPlansEntitlementsTab({
         </div>
       </SectionCard>
 
-      {/* ROW 3: Individual Plans — Clean Summary Rows with Expand-on-Demand Controls */}
+      {/* ROW 3: Individual Plans - Clean Summary Rows with Expand-on-Demand Controls */}
       <SectionCard
         title="Individual Plans & Negotiated Client Pricing (Monthly / Quarterly / Yearly)"
         subtitle="Click 'Edit Rates' on any row to set custom negotiated Rupee prices, or click 'Unlock Plan' to record payment."
@@ -762,8 +762,7 @@ export function ClientPlansEntitlementsTab({
                             defaultValue={effectiveMonthly}
                             title="Monthly (₹)"
                             aria-label={`${p.name} Custom Monthly Rupees`}
-                            className="adm-input py-1 text-xs tabular-nums"
-                            style={{ width: "5rem" }}
+                            className="adm-input !w-20 py-1 text-xs tabular-nums"
                           />
                           <input
                             name="customQuarterlyRupees"
@@ -773,8 +772,7 @@ export function ClientPlansEntitlementsTab({
                             defaultValue={effectiveQuarterly}
                             title="Quarterly (₹)"
                             aria-label={`${p.name} Custom Quarterly Rupees`}
-                            className="adm-input py-1 text-xs tabular-nums"
-                            style={{ width: "5.5rem" }}
+                            className="adm-input !w-22 py-1 text-xs tabular-nums"
                           />
                           <input
                             name="customYearlyRupees"
@@ -784,8 +782,7 @@ export function ClientPlansEntitlementsTab({
                             defaultValue={effectiveYearly}
                             title="Yearly (₹)"
                             aria-label={`${p.name} Custom Yearly Rupees`}
-                            className="adm-input py-1 text-xs tabular-nums"
-                            style={{ width: "5.75rem" }}
+                            className="adm-input !w-24 py-1 text-xs tabular-nums"
                           />
                           <SubmitButton
                             name="mode"
@@ -849,8 +846,7 @@ export function ClientPlansEntitlementsTab({
                               name="billingCycle"
                               aria-label={`${p.name} billing cycle`}
                               defaultValue={p.pendingRequest?.billingCycle ?? "monthly"}
-                              className="adm-input py-1 text-xs"
-                              style={{ width: "6.5rem" }}
+                              className="adm-input !w-26 py-1 text-xs"
                             >
                               <option value="monthly">Monthly</option>
                               <option value="quarterly">Quarterly</option>
@@ -862,8 +858,7 @@ export function ClientPlansEntitlementsTab({
                               min="1"
                               required
                               defaultValue={Math.max(1, effectiveMonthly)}
-                              className="adm-input py-1 text-xs tabular-nums"
-                              style={{ width: "5rem" }}
+                              className="adm-input !w-20 py-1 text-xs tabular-nums"
                               title="Amount Received (₹)"
                               aria-label={`${p.name} amount received in rupees`}
                             />
@@ -874,8 +869,7 @@ export function ClientPlansEntitlementsTab({
                               defaultValue={p.pendingRequest?.customerPaymentRef ?? ""}
                               placeholder="UTR / Ref #"
                               aria-label={`${p.name} payment UTR reference`}
-                              className="adm-input py-1 font-mono text-xs"
-                              style={{ width: "6.75rem" }}
+                              className="adm-input !w-28 py-1 font-mono text-xs"
                             />
                             <SubmitButton
                               className="adm-btn-primary py-1 text-xs"

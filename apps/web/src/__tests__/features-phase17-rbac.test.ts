@@ -322,7 +322,12 @@ describe("Phase 17 Suite (Client SSL Queue, -₹200 Overdraft, Native Tally PDF 
     // Verify Over-The-Air TDL manifest & latest download endpoints + self-updating connector v2.2
     const manifestRes = await tallyWebhookGet(
       new NextRequest(
-        `https://zerocolon.tally.rapidshiftlabs.in/api/webhooks/tally?mode=tdl-manifest&token=${encodeURIComponent(ep.webhookToken)}`
+        "https://zerocolon.tally.rapidshiftlabs.in/api/webhooks/tally?mode=tdl-manifest",
+        {
+          headers: {
+            "x-tally-webhook-token": ep.webhookToken,
+          },
+        }
       )
     );
     expect(manifestRes.status).toBe(200);
@@ -337,7 +342,12 @@ describe("Phase 17 Suite (Client SSL Queue, -₹200 Overdraft, Native Tally PDF 
 
     const latestTdlRes = await tallyWebhookGet(
       new NextRequest(
-        `https://zerocolon.tally.rapidshiftlabs.in/api/webhooks/tally?mode=tdl-latest&token=${encodeURIComponent(ep.webhookToken)}`
+        "https://zerocolon.tally.rapidshiftlabs.in/api/webhooks/tally?mode=tdl-latest",
+        {
+          headers: {
+            "x-tally-webhook-token": ep.webhookToken,
+          },
+        }
       )
     );
     expect(latestTdlRes.status).toBe(200);
@@ -490,7 +500,7 @@ describe("Phase 17 Suite (Client SSL Queue, -₹200 Overdraft, Native Tally PDF 
     expect(snap.ignoredCompany).toBe(true);
   });
 
-  it("enforces Customer Web RBAC across all 6 roles, prevents non-owner privilege escalation, and enforces Staff Console RBAC across super_admin / finance / support", () => {
+  it("enforces Customer Web RBAC across all system roles, prevents non-owner privilege escalation, and enforces Staff Console RBAC across super_admin / finance / support", () => {
     const { session } = createTestWorkspace("RbacMatrix");
     const wsId = session.workspace.id;
 
@@ -498,6 +508,8 @@ describe("Phase 17 Suite (Client SSL Queue, -₹200 Overdraft, Native Tally PDF 
       "owner",
       "admin",
       "manager",
+      "accountant",
+      "marketing",
       "agent",
       "analyst",
       "billing",
@@ -506,9 +518,34 @@ describe("Phase 17 Suite (Client SSL Queue, -₹200 Overdraft, Native Tally PDF 
     const ownerPerms = getPermissionsForRole("owner", wsId);
     const adminPerms = getPermissionsForRole("admin", wsId);
     const managerPerms = getPermissionsForRole("manager", wsId);
+    const accountantPerms = getPermissionsForRole("accountant", wsId);
+    const marketingPerms = getPermissionsForRole("marketing", wsId);
     const agentPerms = getPermissionsForRole("agent", wsId);
     const analystPerms = getPermissionsForRole("analyst", wsId);
     const billingPerms = getPermissionsForRole("billing", wsId);
+
+    // Marketing has ZERO Tally/Accounts/Inventory/Billing permissions
+    expect(marketingPerms.has("tally:view")).toBe(false);
+    expect(marketingPerms.has("tally:sync.manage")).toBe(false);
+    expect(marketingPerms.has("tally:invoice.send")).toBe(false);
+    expect(marketingPerms.has("billing:view")).toBe(false);
+    expect(canPermissionsAccessWebRoute(marketingPerms, "/tally")).toBe(false);
+    expect(canPermissionsAccessWebRoute(marketingPerms, "/tally/parties")).toBe(false);
+    expect(canPermissionsAccessWebRoute(marketingPerms, "/inventory")).toBe(false);
+    expect(canPermissionsAccessWebRoute(marketingPerms, "/billing")).toBe(false);
+    expect(canPermissionsAccessWebRoute(marketingPerms, "/campaigns")).toBe(true);
+    expect(canPermissionsAccessWebRoute(marketingPerms, "/reviews")).toBe(true);
+
+    // Accountant has Tally/Billing/Backups, ZERO Ads/Social/Reviews permissions
+    expect(accountantPerms.has("tally:view")).toBe(true);
+    expect(accountantPerms.has("tally:sync.manage")).toBe(true);
+    expect(accountantPerms.has("ads:view")).toBe(false);
+    expect(accountantPerms.has("posts:view")).toBe(false);
+    expect(canPermissionsAccessWebRoute(accountantPerms, "/tally")).toBe(true);
+    expect(canPermissionsAccessWebRoute(accountantPerms, "/tally/parties")).toBe(true);
+    expect(canPermissionsAccessWebRoute(accountantPerms, "/inventory")).toBe(true);
+    expect(canPermissionsAccessWebRoute(accountantPerms, "/campaigns")).toBe(false);
+    expect(canPermissionsAccessWebRoute(accountantPerms, "/reviews")).toBe(false);
 
     // Customer route matrix verification
     expect(canPermissionsAccessWebRoute(ownerPerms, "/settings/api-keys")).toBe(true);

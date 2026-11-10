@@ -1,7 +1,9 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { ADMIN_SESSION_COOKIE, resolveStaffSessionFromToken } from "@rsl/auth";
-import { getEnv } from "@rsl/core";
+import { encodeSignedFlashToast, getEnv, verifySignedFlashToast } from "@rsl/core";
+
+export const ADMIN_FLASH_TOAST_COOKIE = "rsl_admin_toast";
 
 export async function getIncomingRequestHostname(): Promise<string> {
   const hdrs = await headers();
@@ -35,26 +37,62 @@ export async function getOptionalStaffSession() {
   return resolveStaffSessionFromToken(raw);
 }
 
+export async function getPendingMfaStaffSession() {
+  const jar = await cookies();
+  const raw = jar.get(ADMIN_SESSION_COOKIE)?.value;
+  return resolveStaffSessionFromToken(raw, { allowPendingMfa: true });
+}
+
 export async function requireStaffSession() {
   if (await isSetupSubdomainHost()) {
     redirect("/setup");
   }
-  const sess = await getOptionalStaffSession();
-  if (!sess) redirect("/login");
-  return sess;
+  const jar = await cookies();
+  const raw = jar.get(ADMIN_SESSION_COOKIE)?.value;
+  const sess = resolveStaffSessionFromToken(raw);
+  if (sess) return sess;
+
+  const pendingMfa = resolveStaffSessionFromToken(raw, { allowPendingMfa: true });
+  if (pendingMfa) {
+    redirect("/mfa");
+  }
+  redirect("/login");
 }
 
 export async function setStaffCookie(rawToken: string) {
   const jar = await cookies();
-  // Security (SEC-02): strictly host-only cookie (omit `domain`) so `rsl_staff_session`
-  // is never sent to customer/public/wildcard subdomains.
+  // Host-only cookie so `rsl_staff_session` is never sent to customer or wildcard subdomains.
   jar.set(ADMIN_SESSION_COOKIE, rawToken, {
     httpOnly: true,
-    sameSite: "lax",
+    sameSite: "strict",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 12 * 60 * 60,
+    maxAge: 8 * 60 * 60,
   });
+}
+
+export async function setSignedAdminFlashToast(
+  type: "success" | "error" | "info" | "warning",
+  message: string
+): Promise<void> {
+  const clean = message.trim();
+  if (!clean) return;
+  const jar = await cookies();
+  jar.set(ADMIN_FLASH_TOAST_COOKIE, encodeSignedFlashToast({ type, message: clean }), {
+    httpOnly: false,
+    sameSite: "strict",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 30,
+  });
+}
+
+export async function readVerifiedAdminFlashToast() {
+  const jar = await cookies();
+  const raw = jar.get(ADMIN_FLASH_TOAST_COOKIE)?.value;
+  const verified = verifySignedFlashToast(raw);
+  if (!verified) return null;
+  return { id: verified.id, type: verified.type, message: verified.message };
 }
 
 export async function clearStaffCookie() {
@@ -63,7 +101,7 @@ export async function clearStaffCookie() {
   jar.delete(ADMIN_SESSION_COOKIE);
   jar.set(ADMIN_SESSION_COOKIE, "", {
     httpOnly: true,
-    sameSite: "lax",
+    sameSite: "strict",
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: 0,

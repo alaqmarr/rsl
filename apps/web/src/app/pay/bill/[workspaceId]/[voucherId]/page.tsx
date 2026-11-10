@@ -4,8 +4,9 @@ import { getPublicTallyBillPaymentView } from "@rsl/tally";
 export const dynamic = "force-dynamic";
 
 function formatShortDate(epochMs: number | null): string {
-  if (!epochMs) return "—";
-  return new Date(epochMs + 5.5 * 3600_000).toLocaleDateString("en-IN", {
+  if (!epochMs) return "-";
+  return new Date(epochMs).toLocaleDateString("en-IN", {
+    timeZone: "Asia/Kolkata",
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -150,20 +151,23 @@ export default async function PublicTallyBillPaymentPage({
               {voucher.lineItems.length > 0 && (
                 <div className="mt-6 overflow-x-auto">
                   <table className="w-full text-left text-xs">
+                    <caption className="sr-only">
+                      Line items for bill {voucher.voucherNumber}
+                    </caption>
                     <thead>
-                      <tr className="border-b border-gray-200 text-[11px] font-semibold uppercase tracking-wider text-gray-500">
-                        <th className="py-2.5 pr-3">Item / Particular</th>
-                        <th className="px-3 py-2.5">HSN/SAC</th>
-                        <th className="px-3 py-2.5 text-right">Qty</th>
-                        <th className="px-3 py-2.5 text-right">Rate</th>
-                        <th className="pl-3 py-2.5 text-right">Amount</th>
+                      <tr className="border-b border-gray-200 text-xs font-semibold uppercase tracking-wider text-gray-500">
+                        <th scope="col" className="py-2.5 pr-3">Item / Particular</th>
+                        <th scope="col" className="px-3 py-2.5">HSN/SAC</th>
+                        <th scope="col" className="px-3 py-2.5 text-right">Qty</th>
+                        <th scope="col" className="px-3 py-2.5 text-right">Rate</th>
+                        <th scope="col" className="pl-3 py-2.5 text-right">Amount</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {voucher.lineItems.map((li) => (
                         <tr key={li.id}>
                           <td className="py-3 pr-3 font-medium text-gray-900">{li.itemName}</td>
-                          <td className="px-3 py-3 font-mono text-gray-600">{li.hsnCode || "—"}</td>
+                          <td className="px-3 py-3 font-mono text-gray-600">{li.hsnCode || "-"}</td>
                           <td className="px-3 py-3 text-right text-gray-700">
                             {li.billedQty} {li.uom}
                           </td>
@@ -211,7 +215,6 @@ export default async function PublicTallyBillPaymentPage({
               ) : upiQrDataUrl && upiUri ? (
                 <div className="mt-4 flex flex-col items-center text-center">
                   <div className="rounded-2xl border-2 border-gray-900/10 bg-white p-3 shadow-xs">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={upiQrDataUrl}
                       alt={`Scan to pay ${formatInr(voucher.balancePaise)} via UPI`}
@@ -258,7 +261,7 @@ export default async function PublicTallyBillPaymentPage({
                     <div className="flex justify-between gap-2 border-b border-gray-100 pb-2">
                       <dt className="text-gray-500">Bank & Branch</dt>
                       <dd className="font-semibold text-gray-900">
-                        {[workspace.bankName, workspace.bankBranch].filter(Boolean).join(" — ")}
+                        {[workspace.bankName, workspace.bankBranch].filter(Boolean).join(" - ")}
                       </dd>
                     </div>
                   )}

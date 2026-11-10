@@ -1,17 +1,16 @@
 import QRCode from "qrcode";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   formatInr,
-  getEnv,
   newEntityId,
   paiseToRupees,
   resolvePublicEndpoints,
   RslError,
   rupeesToPaise,
-  signHmac,
+  signPurposeHmac,
   validateIndianGstin,
-  verifyHmac,
+  verifyPurposeHmac,
 } from "@rsl/core";
 import { controlSchema, tenantDataSchema } from "@rsl/database";
 import { defineAction } from "@rsl/logging";
@@ -28,24 +27,50 @@ import {
   recordTallyVoucher,
 } from "./index";
 
+const DEFAULT_PUBLIC_BILL_LINK_TTL_MS = 72 * 3600_000;
+
+function getWorkspacePublicLinkEpoch(workspaceId: string): { slug: string | null; epoch: number } {
+  const ws = controlDb()
+    .select({
+      slug: controlSchema.workspaces.slug,
+      publicLinkEpoch: controlSchema.workspaces.publicLinkEpoch,
+    })
+    .from(controlSchema.workspaces)
+    .where(eq(controlSchema.workspaces.id, workspaceId))
+    .get();
+  return {
+    slug: ws?.slug ?? null,
+    epoch: Number(ws?.publicLinkEpoch ?? 1),
+  };
+}
+
+export function rotateWorkspacePublicBillLinks(workspaceId: string): { publicLinkEpoch: number } {
+  const db = controlDb();
+  db.update(controlSchema.workspaces)
+    .set({
+      publicLinkEpoch: sql`coalesce(${controlSchema.workspaces.publicLinkEpoch}, 1) + 1`,
+      updatedAt: Date.now(),
+    })
+    .where(eq(controlSchema.workspaces.id, workspaceId))
+    .run();
+  const updated = getWorkspacePublicLinkEpoch(workspaceId);
+  return { publicLinkEpoch: updated.epoch };
+}
+
 export function buildSignedPublicTallyBillPayUrl(params: {
   workspaceId: string;
   voucherId: string;
   baseUrl?: string;
   ttlMs?: number;
 }): string {
-  const expiresAt = Date.now() + (params.ttlMs ?? 30 * 24 * 3600_000);
-  const canonical = `pay.${params.workspaceId}.${params.voucherId}.${expiresAt}`;
-  const sig = signHmac(canonical, getEnv().KMS_MASTER_KEY);
+  const { slug, epoch } = getWorkspacePublicLinkEpoch(params.workspaceId);
+  const expiresAt = Date.now() + (params.ttlMs ?? DEFAULT_PUBLIC_BILL_LINK_TTL_MS);
+  const canonical = `pay.${params.workspaceId}.${params.voucherId}.e${epoch}.${expiresAt}`;
+  const sig = signPurposeHmac("public-bill-link:v1", canonical);
 
   let resolvedBase = params.baseUrl?.trim().replace(/\/+$/, "") ?? "";
   if (!resolvedBase) {
-    const ws = controlDb()
-      .select({ slug: controlSchema.workspaces.slug })
-      .from(controlSchema.workspaces)
-      .where(eq(controlSchema.workspaces.id, params.workspaceId))
-      .get();
-    const endpoints = resolvePublicEndpoints({ workspaceSlug: ws?.slug ?? null });
+    const endpoints = resolvePublicEndpoints({ workspaceSlug: slug });
     resolvedBase = endpoints.effectiveAppBaseUrl || endpoints.cloudBaseUrl;
   }
 
@@ -64,8 +89,9 @@ export function verifySignedPublicTallyBillPayToken(params: {
   if (!params.sig || params.sig.length < 32) {
     return false;
   }
-  const canonical = `pay.${params.workspaceId}.${params.voucherId}.${Math.trunc(params.expiresAt)}`;
-  return verifyHmac(canonical, params.sig, getEnv().KMS_MASTER_KEY);
+  const { epoch } = getWorkspacePublicLinkEpoch(params.workspaceId);
+  const canonical = `pay.${params.workspaceId}.${params.voucherId}.e${epoch}.${Math.trunc(params.expiresAt)}`;
+  return verifyPurposeHmac("public-bill-link:v1", canonical, params.sig);
 }
 
 /**
@@ -233,6 +259,14 @@ export async function getPublicTallyBillPaymentView(params: {
     .filter(Boolean)
     .join(", ");
 
+  const rawBankAcct = (ws.bankAccountNumber || "").trim();
+  const maskedBankAccount =
+    rawBankAcct.length >= 4
+      ? `••••${rawBankAcct.slice(-4)}`
+      : rawBankAcct
+        ? "••••"
+        : null;
+
   return {
     workspace: {
       id: ws.id,
@@ -241,12 +275,12 @@ export async function getPublicTallyBillPaymentView(params: {
       gstin: ws.gstin ?? null,
       addressLine: ws.addressLine ?? null,
       cityStatePin: cityStateParts || null,
-      phone: ws.businessPhone ?? null,
+      phone: null,
       upiVpa,
       upiPayeeName,
       bankName: ws.bankName ?? null,
       bankBranch: ws.bankBranch ?? null,
-      bankAccountNumber: ws.bankAccountNumber ?? null,
+      bankAccountNumber: maskedBankAccount,
       bankIfsc: ws.bankIfsc ?? null,
     },
     voucher: {
@@ -320,13 +354,13 @@ function parseInboundSupplierInvoiceHeuristics(params: {
 
   const billMatch =
     combined.match(
-      /(?:invoice|inv|bill|voucher)\s*(?:no\.?|number|#|:|-)\s*([A-Z0-9][A-Z0-9\/_-]{1,28})/i
+      /(?:invoice|inv|bill|voucher)\s*(?:no\.?|number|#|:|-)\s*([A-Z0-9][A-Z0-9/_-]{1,28})/i
     ) ?? combined.match(/#([A-Z]{2,6}-\d{2,10})/i);
   const billNumber = billMatch?.[1]?.trim() || `PUR-${Date.now().toString().slice(-6)}`;
 
   let billDateIso = new Date().toISOString().slice(0, 10);
   const isoDateMatch = combined.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
-  const dmyMatch = combined.match(/\b(\d{2})[\/-](\d{2})[\/-](20\d{2})\b/);
+  const dmyMatch = combined.match(/\b(\d{2})[/-](\d{2})[/-](20\d{2})\b/);
   if (isoDateMatch?.[1]) {
     billDateIso = isoDateMatch[1];
   } else if (dmyMatch?.[1] && dmyMatch[2] && dmyMatch[3]) {
@@ -390,6 +424,7 @@ export async function ingestInboundSupplierEmailBill(params: {
   billNumber: string;
   billDateIso: string;
   totalAmountPaise: number;
+  extractionMethod: "cloudflare_workers_ai" | "deterministic_parser";
 }> {
   const heuristic = parseInboundSupplierInvoiceHeuristics({
     senderEmail: params.senderEmail,
@@ -403,6 +438,7 @@ export async function ingestInboundSupplierEmailBill(params: {
   let billNumber = heuristic.billNumber;
   let billDateIso = heuristic.billDateIso;
   let totalRupees = heuristic.totalRupees;
+  let extractionMethod: "cloudflare_workers_ai" | "deterministic_parser" = "deterministic_parser";
   let lineItems: Array<{
     itemName: string;
     billedQty: number;
@@ -411,7 +447,6 @@ export async function ingestInboundSupplierEmailBill(params: {
     gstRatePct?: number;
   }> = [];
 
-  // Optional Cloudflare Workers AI refinement when configured (10,000 free Neurons/day)
   const aiRes = await runCloudflareWorkersAiText({
     systemPrompt:
       "Extract Indian GST supplier invoice fields strictly as compact JSON with keys: supplierName, supplierGstin, billNumber, billDateIso (YYYY-MM-DD), totalRupees (number), itemName, qty (number). Return JSON only.",
@@ -425,6 +460,7 @@ export async function ingestInboundSupplierEmailBill(params: {
     if (jsonBlock) {
       try {
         const parsed = JSON.parse(jsonBlock) as Record<string, unknown>;
+        extractionMethod = "cloudflare_workers_ai";
         if (typeof parsed.supplierName === "string" && parsed.supplierName.trim().length >= 2) {
           supplierName = parsed.supplierName.trim().slice(0, 120);
         }
@@ -493,6 +529,7 @@ export async function ingestInboundSupplierEmailBill(params: {
       hsnCode: heuristic.hsnCode ?? null,
       gstRateBps: 1800,
       rawExtractSummary: JSON.stringify({
+        extractionMethod,
         lineItems,
         bodySnippet: params.bodyText.slice(0, 1200),
       }),
@@ -520,6 +557,7 @@ export async function ingestInboundSupplierEmailBill(params: {
     billNumber,
     billDateIso,
     totalAmountPaise,
+    extractionMethod,
   };
 }
 

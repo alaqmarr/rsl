@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState, useTransition } from "reac
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
-import { IosSpinner, sileo, useDialogFocusTrap } from "@rsl/ui";
+import { GuideDrawerButton, IosSpinner, sileo, useDialogFocusTrap } from "@rsl/ui";
 import {
   instantActivateFromWalletAction,
   submitActivationModalAction,
@@ -229,14 +229,17 @@ export function PlanActivationModal({
   useEffect(() => {
     if (!open) return;
     let active = true;
+    const rootStyle = getComputedStyle(document.documentElement);
+    const qrDark = rootStyle.getPropertyValue("--midnight-black").trim();
+    const qrLight = rootStyle.getPropertyValue("--snow-white").trim();
     QRCode.toString(upiUri, {
       type: "svg",
       margin: 1,
       width: 180,
       errorCorrectionLevel: "M",
       color: {
-        dark: "#0F172A",
-        light: "#FFFFFF",
+        dark: qrDark,
+        light: qrLight,
       },
     })
       .then((svg) => {
@@ -395,7 +398,7 @@ export function PlanActivationModal({
         open &&
         createPortal(
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-3 backdrop-blur-[3px] sm:p-5 animate-fadeIn"
+            className="rsl-hard-blur-scrim fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 animate-fadeIn"
             onClick={(e) => {
               if (e.target === e.currentTarget && !isSubmitting) {
                 setOpen(false);
@@ -407,10 +410,10 @@ export function PlanActivationModal({
               role="dialog"
               aria-modal="true"
               aria-labelledby={`modal-title-${targetKey}`}
-              className="max-h-[92vh] w-full max-w-[920px] overflow-x-hidden overflow-y-auto rounded-2xl border border-zinc-200/90 bg-white shadow-[0_28px_72px_-12px_rgba(15,23,42,0.28)]"
+              className="rsl-drawer-frost max-h-[92vh] w-full max-w-[920px] overflow-x-hidden overflow-y-auto rounded-2xl border"
             >
               {/* Clean Top Header */}
-              <div className="flex items-start justify-between gap-4 border-b border-zinc-100 px-5 py-4 sm:px-6">
+              <div className="flex items-start justify-between gap-4 border-b border-zinc-200/70 px-5 py-4 sm:px-6">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-md border border-emerald-200/80 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
@@ -435,14 +438,43 @@ export function PlanActivationModal({
                   )}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  disabled={isSubmitting}
-                  className="rsl-btn-secondary shrink-0 px-3 py-1.5 text-xs"
-                >
-                  Close
-                </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  <GuideDrawerButton
+                    drawerId="upi-checkout-scanner-guide"
+                    label="Need help?"
+                    guide={{
+                      eyebrow: "UPI QR & Bank Transfer Help",
+                      title: "How to Pay via UPI QR or NEFT/IMPS & Get Your GST Invoice",
+                      summary:
+                        "Every activation generates an official 18% GST tax invoice (SAC 998314) matched to the exact paisa.",
+                      steps: [
+                        {
+                          title: "Scan the UPI QR or tap Pay in UPI App",
+                          detail:
+                            "Both the exact GST-inclusive amount and your workspace reference note are pre-filled automatically.",
+                        },
+                        {
+                          title: "If using Bank-over-UPI (@IFSC.ifsc.npci)",
+                          detail:
+                            "Some consumer UPI camera scanners only resolve VPA handles (@okhdfcbank, @ybl, etc.). If your camera asks for a UPI ID, tap 'Pay Bank / IFSC' inside GPay or PhonePe using the Beneficiary Account & IFSC shown on the right.",
+                        },
+                        {
+                          title: "Paste your 12-digit UTR (optional for faster verification)",
+                          detail:
+                            "Enter your 12-digit UPI or NEFT UTR reference and click Submit Activation Request - or unlock instantaneously if your Prepaid Wallet already has sufficient balance.",
+                        },
+                      ],
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    disabled={isSubmitting}
+                    className="rsl-btn-secondary shrink-0 px-3 py-1.5 text-xs"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
 
               {/* Balanced Two-Pane Checkout Body */}
@@ -514,7 +546,7 @@ export function PlanActivationModal({
                               onClick={() => setCycle(opt.key)}
                               className={`flex min-w-0 flex-col items-start rounded-xl border px-3 py-2.5 text-left transition ${
                                 active
-                                  ? "border-emerald-600 bg-emerald-50/45 shadow-[0_0_0_1px_rgba(5,150,105,0.22)]"
+                                  ? "border-emerald-700 bg-emerald-50/60 ring-1 ring-emerald-700/30"
                                   : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50/60"
                               }`}
                             >
@@ -543,7 +575,7 @@ export function PlanActivationModal({
                     </div>
 
                     {/* Crisp Tax & Payable Summary */}
-                    <div className="rounded-xl border border-zinc-200/80 bg-[#F8F9FB] px-4 py-3.5 text-xs">
+                    <div className="rounded-xl border border-zinc-200/80 bg-zinc-50 px-4 py-3.5 text-xs">
                       <div className="flex items-center justify-between gap-3 text-zinc-600">
                         <span className="min-w-0 truncate">
                           Plan Subtotal ({selectedCycleLabel})
@@ -620,7 +652,7 @@ export function PlanActivationModal({
                   {/* Confirmation Form */}
                   <form
                     onSubmit={handleSubmit}
-                    className="space-y-3.5 border-t border-zinc-100 pt-4"
+                    className="space-y-3.5 border-t border-zinc-200/70 pt-4"
                   >
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <div className="min-w-0">
@@ -690,7 +722,7 @@ export function PlanActivationModal({
                 </div>
 
                 {/* RIGHT PANE: Scannable UPI QR & Bank Account Details */}
-                <div className="flex min-w-0 flex-col justify-between gap-4 border-t border-zinc-200/80 bg-[#F8F9FB] p-5 sm:p-6 lg:border-t-0 lg:border-l">
+                <div className="flex min-w-0 flex-col justify-between gap-4 border-t border-zinc-200/80 bg-zinc-50 p-5 sm:p-6 lg:border-t-0 lg:border-l">
                   <div>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="text-xs font-semibold text-slate-900">
@@ -737,7 +769,7 @@ export function PlanActivationModal({
                           data-testid="upi-qr-svg"
                           data-upi-uri={upiUri}
                           data-upi-mode={useBankAccountQr ? "bank_account" : "upi_id"}
-                          className="h-[168px] w-[168px] [&>svg]:h-full [&>svg]:w-full"
+                          className="h-[168px] w-[168px] rounded-lg bg-[var(--snow-white)] p-1 [&>svg]:h-full [&>svg]:w-full"
                           dangerouslySetInnerHTML={{ __html: qrSvg }}
                         />
                       ) : (
@@ -755,22 +787,15 @@ export function PlanActivationModal({
                         </a>
                       </div>
 
-                      <p className="mt-1 text-[11px] leading-snug text-zinc-500">
+                      <p className="mt-1.5 text-[11px] leading-snug text-zinc-500">
                         {useBankAccountQr
-                          ? "Direct Bank-over-UPI QR (@IFSC.ifsc.npci). If GPay/PhonePe camera asks for a UPI ID, use 'Pay Bank / IFSC' with the account details below."
+                          ? "Direct Bank-over-UPI QR (@IFSC.ifsc.npci) - or tap 'Need help?' above if your scanner asks for a VPA."
                           : `Scan with GPay, PhonePe, Paytm, BHIM, or any UPI app (${cleanUpiId})`}
                       </p>
-
-                      {useBankAccountQr && isDemoBankDetails && (
-                        <div className="mt-2 w-full rounded-lg border border-amber-200 bg-amber-50/90 px-2.5 py-1.5 text-left text-[10.5px] leading-snug text-amber-950">
-                          <strong>Setup Note:</strong> Demo account (<code className="font-mono">50200091827364</code>) is active. Save your live UPI ID or Bank Account in <strong>Staff Admin → Pricing</strong> so UPI scanners fetch your Banking Name.
-                        </div>
-                      )}
-
-                      {useBankAccountQr && !isDemoBankDetails && !hasValidVpa && (
-                        <div className="mt-2 w-full rounded-lg border border-amber-200/90 bg-amber-50/80 px-2.5 py-1.5 text-left text-[10.5px] leading-snug text-amber-950">
-                          <strong>Scanner Tip:</strong> Most UPI cameras cannot resolve Banking Name on <code className="font-mono">@IFSC.ifsc.npci</code> QRs. Use <strong>Pay Bank / IFSC</strong> in your UPI app with the account below, or add your UPI ID (VPA) in <strong>Staff Admin → Pricing</strong>.
-                        </div>
+                      {isDemoBankDetails && useBankAccountQr && (
+                        <p className="mt-1 text-[10.5px] font-medium text-amber-800">
+                          Demo receiving account active ({billingSettings.accountNumber}).
+                        </p>
                       )}
                     </div>
                   </div>

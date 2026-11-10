@@ -4,7 +4,7 @@ import { ShieldCheck } from "lucide-react";
 import { countPlatformStaff } from "@rsl/auth";
 import { resolveEndpointsFromHeaders } from "@rsl/core";
 import { getPlatformCloudflareTurnstileConfig } from "@rsl/tenancy";
-import { BrandLogo, FlashBanner } from "@rsl/ui";
+import { BrandLogo, FlashBanner, ThemeToggleButton } from "@rsl/ui";
 import { AdminLoginForm } from "@/components/admin-auth-forms";
 import { getOptionalStaffSession, isSetupSubdomainHost } from "@/lib/session";
 
@@ -29,28 +29,21 @@ export default async function AdminLoginPage({
   const turnstile = getPlatformCloudflareTurnstileConfig();
 
   return (
-    <div
-      className="flex min-h-screen flex-col items-center justify-center bg-[#EEF2F7] p-6"
-      style={{
-        backgroundImage:
-          "radial-gradient(50% 420px at 20% 0%, rgba(67, 56, 202, 0.10) 0%, transparent 72%), radial-gradient(50% 420px at 80% 0%, rgba(15, 23, 42, 0.08) 0%, transparent 72%)",
-      }}
-    >
-      <div className="w-full max-w-[430px] overflow-hidden rounded-2xl border border-slate-200/95 bg-white shadow-[0_24px_55px_-16px_rgba(15,23,42,0.16)]">
-        <div className="grid h-1.5 w-full grid-cols-12">
-          <div className="col-span-5 bg-[#0B1220]" />
-          <div className="col-span-4 bg-[#4338CA]" />
-          <div className="col-span-3 bg-[#D97706]" />
-        </div>
+    <div className="rsl-ambient-canvas flex min-h-screen flex-col items-center justify-center p-6">
+      <div className="rsl-frost-card w-full max-w-[430px] overflow-hidden rounded-2xl">
+        <div className="rsl-top-seam h-1.5 w-full" />
 
         <div className="p-8">
           <div className="flex items-start justify-between gap-3">
             <BrandLogo variant="long" size="sm" subtitle="Staff Operations & Billing" />
 
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-[10px] font-bold text-indigo-900 uppercase">
-              <ShieldCheck className="h-3 w-3 text-indigo-600" />
-              <span>Staff Only</span>
-            </span>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <span className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-[10px] font-bold text-indigo-900 uppercase">
+                <ShieldCheck className="h-3 w-3 text-indigo-600" />
+                <span>Staff Only</span>
+              </span>
+              <ThemeToggleButton compact />
+            </div>
           </div>
 
           {isUninitialized ? (

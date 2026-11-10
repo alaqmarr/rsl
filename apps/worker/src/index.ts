@@ -4,28 +4,49 @@ import * as Sentry from "@sentry/node";
 import { Worker } from "bullmq";
 import { Cron } from "croner";
 import { eq, sql } from "drizzle-orm";
+import { refreshWorkspaceAnalyticsRollups } from "@rsl/analytics";
+import {
+  ensureOutboundWebhookProcessorRegistered,
+  flushApiKeyUsageStats,
+} from "@rsl/api-keys";
 import { createSignedEncryptedBackup, optimizeTenantDatabase } from "@rsl/backup";
 import { hasActiveEntitlement, sweepAutomaticBillingReminders } from "@rsl/billing";
 import { uploadFileToWorkspaceGoogleDrive } from "@rsl/connections";
 import { getEnv } from "@rsl/core";
 import { controlSchema, tenantDataSchema } from "@rsl/database";
+import {
+  ensureInboundWebhookProcessorsRegistered,
+  processWebhookInboxRecord,
+  sweepPendingWebhookInbox,
+} from "@rsl/inbox";
 import { anchorTenantLogsForToday, appendActionLog, getDiagnosticLogger } from "@rsl/logging";
 import {
   sweepDueScheduledPostsAsync,
   syncAllWorkspaceAdCampaignsInsights,
 } from "@rsl/meta";
 import {
+  assertRegisteredJobTypes,
+  closeQueueConnectionsForShutdown,
   ensureSslProvisionProcessorRegistered,
   getRedisConnection,
   isRedisConfigured,
   JobEnvelopeSchema,
+  listDueOutboxTenantIds,
   processDueSqliteOutboxForTenant,
   QUEUE_REGISTRY,
+  refreshPlatformQueueSummaryCache,
   registerJobProcessor,
   sweepDueSslProvisioningJobs,
+  type QueueName,
   type WorkerLane,
 } from "@rsl/queue";
 import { putWorkspaceObject } from "@rsl/storage";
+import {
+  buildSignedTallyVoucherPdfUrl,
+  getNativeTallyVoucherPdf,
+  runWorkspaceDataRetentionSweep,
+  sweepDueTallyPaymentReminders,
+} from "@rsl/tally";
 import {
   closeAllHandlesForShutdown,
   controlDb,
@@ -33,11 +54,6 @@ import {
   refreshTenantDiskMetrics,
   tenantDataDb,
 } from "@rsl/tenancy";
-import {
-  buildSignedTallyVoucherPdfUrl,
-  getNativeTallyVoucherPdf,
-  sweepDueTallyPaymentReminders,
-} from "@rsl/tally";
 import {
   ensureWhatsAppBroadcastProcessorRegistered,
   executeWhatsAppTemplateSend,
@@ -55,6 +71,10 @@ if (env.SENTRY_DSN_WORKER) {
 }
 
 const logger = getDiagnosticLogger("worker");
+
+function yieldEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
 
 function parseSelectedLanes(): Set<WorkerLane> {
   const arg = process.argv.find((a) => a.startsWith("--lane="));
@@ -87,7 +107,7 @@ async function createAndUploadOffsiteWorkspaceBackup(params: {
       workspaceId: params.workspaceId,
       actorType: params.actorType,
       actorId: params.actorId,
-      roleSlug: "owner",
+      systemCapability: "backup:manage",
       correlationId: params.correlationId,
       requestId: params.requestId,
     },
@@ -107,22 +127,44 @@ async function createAndUploadOffsiteWorkspaceBackup(params: {
     mimeType: "application/json",
     bytes: bundleBytes,
     actorId: params.actorId,
-  }).catch(() => undefined);
+  }).catch((err) => {
+    logger.warn({ workspaceId: params.workspaceId, err: String(err) }, "Backup R2 archive upload failed");
+  });
 
   await uploadFileToWorkspaceGoogleDrive({
     workspaceId: params.workspaceId,
     fileName,
     mimeType: "application/json",
     bytes: bundleBytes,
-  }).catch(() => undefined);
+  }).catch((err) => {
+    logger.warn({ workspaceId: params.workspaceId, err: String(err) }, "Backup Google Drive upload failed");
+  });
 }
+
+const REQUIRED_BOOT_JOB_TYPES = [
+  "ssl.certificate.provision",
+  "whatsapp.broadcast.chunk",
+  "webhooks.outbound.deliver",
+  "webhooks.whatsapp.ingest",
+  "webhooks.meta.ingest",
+  "tally.reminder.dispatch",
+  "tally.whatsapp.automation",
+  "whatsapp.send.template",
+  "whatsapp.send",
+  "backup.snapshot",
+  "db.optimize",
+  "logs.anchor",
+  "tenant.migrate.all",
+] as const;
 
 function registerStandardJobHandlers() {
   ensureSslProvisionProcessorRegistered();
   ensureWhatsAppBroadcastProcessorRegistered();
+  ensureOutboundWebhookProcessorRegistered();
+  ensureInboundWebhookProcessorsRegistered();
 
-  // 1. Automatic Tally-to-WhatsApp Bill & Receipt Worker Processor
   registerJobProcessor("tally.whatsapp.automation", async (envelope) => {
+    const startedAt = Date.now();
     const payload = envelope.payload as {
       voucherId?: string;
       voucherGuid?: string;
@@ -137,7 +179,10 @@ function registerStandardJobHandlers() {
     const templateTarget = payload.templateId || payload.templateName || "";
     const recipientPhone = payload.recipientPhone || "";
     if (!templateTarget || !recipientPhone) {
-      logger.warn({ tenantId: envelope.tenantId }, "Skipped tally.whatsapp.automation with missing phone/template");
+      logger.warn(
+        { tenantId: envelope.tenantId },
+        "Skipped tally.whatsapp.automation due to missing phone or template"
+      );
       return;
     }
 
@@ -208,10 +253,10 @@ function registerStandardJobHandlers() {
         outcome: "success",
         requestId: envelope.requestId,
         correlationId: envelope.correlationId,
-        durationMs: 12,
-        summary: `Automatically sent WhatsApp template '${payload.templateName || templateTarget}'${
-          nativePdf ? ` with native Tally PDF (${nativePdf.filename})` : ""
-        } for Tally bill to ${payload.recipientName || "customer"}`,
+        durationMs: Date.now() - startedAt,
+        summary: `Sent WhatsApp template '${payload.templateName || templateTarget}'${
+          nativePdf ? ` with Tally PDF (${nativePdf.filename})` : ""
+        } to ${payload.recipientName || "customer"}`,
       });
     } else if (!res.deduplicated) {
       appendActionLog({
@@ -223,16 +268,16 @@ function registerStandardJobHandlers() {
         outcome: "skipped",
         requestId: envelope.requestId,
         correlationId: envelope.correlationId,
-        durationMs: 12,
-        summary: `WhatsApp automation skipped for '${payload.templateName || templateTarget}' (${
+        durationMs: Date.now() - startedAt,
+        summary: `WhatsApp template '${payload.templateName || templateTarget}' skipped (${
           res.skippedReason || "provider error"
-        }) — ₹0.00 deducted`,
+        })`,
       });
     }
   });
 
-  // 2. Direct API / Webhook WhatsApp Template Dispatcher
   registerJobProcessor("whatsapp.send.template", async (envelope) => {
+    const startedAt = Date.now();
     const payload = envelope.payload as {
       templateIdOrName?: string;
       recipientPhone?: string;
@@ -264,15 +309,14 @@ function registerStandardJobHandlers() {
         outcome: "skipped",
         requestId: envelope.requestId,
         correlationId: envelope.correlationId,
-        durationMs: 10,
-        summary: `WhatsApp API template send skipped for '${payload.templateIdOrName}' (${
+        durationMs: Date.now() - startedAt,
+        summary: `WhatsApp API template '${payload.templateIdOrName}' skipped (${
           res.skippedReason || "provider error"
-        }) — ₹0.00 deducted`,
+        })`,
       });
     }
   });
 
-  // 3. Direct 24h WhatsApp Text Worker Processor (Live Cloud API)
   registerJobProcessor("whatsapp.send", async (envelope) => {
     const recipient = String(envelope.payload.to ?? envelope.payload.phoneE164 ?? "");
     const body = String(envelope.payload.body ?? envelope.payload.text ?? "");
@@ -286,7 +330,6 @@ function registerStandardJobHandlers() {
     });
   });
 
-  // 4. Signed Encrypted Backup + Off-Site R2 & Google Drive Sync
   registerJobProcessor("backup.snapshot", async (envelope) => {
     await createAndUploadOffsiteWorkspaceBackup({
       workspaceId: envelope.tenantId,
@@ -297,7 +340,7 @@ function registerStandardJobHandlers() {
       actorId: envelope.actor.id,
       correlationId: envelope.correlationId,
       requestId: envelope.requestId,
-      label: String(envelope.payload.label ?? "Scheduled Nightly Cloud & Google Drive Backup"),
+      label: String(envelope.payload.label ?? "Scheduled Cloud & Google Drive Backup"),
     });
   });
 
@@ -307,7 +350,7 @@ function registerStandardJobHandlers() {
         workspaceId: envelope.tenantId,
         actorType: envelope.actor.type,
         actorId: envelope.actor.id,
-        roleSlug: "owner",
+        systemCapability: "backup:manage",
         correlationId: envelope.correlationId,
         requestId: envelope.requestId,
       },
@@ -322,33 +365,41 @@ function registerStandardJobHandlers() {
   registerJobProcessor("tenant.migrate.all", async () => {
     migrateAllTenantsWithCanary();
   });
+
+  assertRegisteredJobTypes(REQUIRED_BOOT_JOB_TYPES);
 }
 
-async function sweepActiveTenantOutboxes() {
-  const activeTenants = controlDb()
-    .select()
-    .from(controlSchema.tenantRegistry)
-    .where(eq(controlSchema.tenantRegistry.status, "active"))
-    .all();
-
-  for (const tenant of activeTenants) {
+async function sweepActiveTenantOutboxes(lanes: Set<WorkerLane>) {
+  if (lanes.has("realtime")) {
     try {
-      await processDueSqliteOutboxForTenant(tenant.tenantId);
+      await sweepPendingWebhookInbox(50);
     } catch (error) {
-      Sentry.captureException(error, { tags: { tenantId: tenant.tenantId } });
-      logger.error({ tenantId: tenant.tenantId, err: String(error) }, "Tenant outbox sweep error");
+      Sentry.captureException(error, { tags: { job: "ingress.webhook.sweep" } });
+      logger.error({ err: String(error) }, "Inbound webhook inbox sweep error");
     }
+  }
+
+  const dueTenantIds = listDueOutboxTenantIds(Date.now(), 100);
+  for (const tenantId of dueTenantIds) {
+    try {
+      await processDueSqliteOutboxForTenant(tenantId, { lanes });
+    } catch (error) {
+      Sentry.captureException(error, { tags: { tenantId } });
+      logger.error({ tenantId, err: String(error) }, "Tenant outbox sweep error");
+    }
+    await yieldEventLoop();
   }
 }
 
 async function sweepDueSocialPostsAcrossTenants() {
   const activeTenants = controlDb()
-    .select()
+    .select({ tenantId: controlSchema.tenantRegistry.tenantId })
     .from(controlSchema.tenantRegistry)
     .where(eq(controlSchema.tenantRegistry.status, "active"))
     .all();
 
   for (const tenant of activeTenants) {
+    const startedAt = Date.now();
     try {
       const publishedCount = await sweepDueScheduledPostsAsync(tenant.tenantId);
       if (publishedCount > 0) {
@@ -359,21 +410,24 @@ async function sweepDueSocialPostsAcrossTenants() {
           source: "worker",
           action: "posts.published",
           outcome: "success",
-          requestId: `post_sweep_${Date.now()}`,
-          correlationId: `post_sweep_${Date.now()}`,
-          durationMs: 25,
-          summary: `Published ${publishedCount} scheduled social post(s) live on schedule`,
+          requestId: `post_sweep_${startedAt}`,
+          correlationId: `post_sweep_${startedAt}`,
+          durationMs: Date.now() - startedAt,
+          summary: `Published ${publishedCount} scheduled social post(s)`,
         });
       }
     } catch (error) {
-      Sentry.captureException(error, { tags: { tenantId: tenant.tenantId, job: "social.posts.sweep" } });
+      Sentry.captureException(error, {
+        tags: { tenantId: tenant.tenantId, job: "social.posts.sweep" },
+      });
     }
+    await yieldEventLoop();
   }
 }
 
 async function syncAdCampaignSpendAndVaultCapsAcrossTenants() {
   const activeTenants = controlDb()
-    .select()
+    .select({ tenantId: controlSchema.tenantRegistry.tenantId })
     .from(controlSchema.tenantRegistry)
     .where(eq(controlSchema.tenantRegistry.status, "active"))
     .all();
@@ -382,14 +436,17 @@ async function syncAdCampaignSpendAndVaultCapsAcrossTenants() {
     try {
       await syncAllWorkspaceAdCampaignsInsights(tenant.tenantId);
     } catch (error) {
-      Sentry.captureException(error, { tags: { tenantId: tenant.tenantId, job: "ads.insights.sync" } });
+      Sentry.captureException(error, {
+        tags: { tenantId: tenant.tenantId, job: "ads.insights.sync" },
+      });
     }
+    await yieldEventLoop();
   }
 }
 
 async function runNightlyOffsiteBackups() {
   const activeTenants = controlDb()
-    .select()
+    .select({ tenantId: controlSchema.tenantRegistry.tenantId })
     .from(controlSchema.tenantRegistry)
     .where(eq(controlSchema.tenantRegistry.status, "active"))
     .all();
@@ -406,14 +463,17 @@ async function runNightlyOffsiteBackups() {
         label: "Nightly Automated R2 & Google Drive Backup",
       });
     } catch (error) {
-      Sentry.captureException(error, { tags: { tenantId: tenant.tenantId, job: "nightly.backup" } });
+      Sentry.captureException(error, {
+        tags: { tenantId: tenant.tenantId, job: "nightly.backup" },
+      });
     }
+    await yieldEventLoop();
   }
 }
 
 async function runScheduledMaintenance() {
   const activeTenants = controlDb()
-    .select()
+    .select({ tenantId: controlSchema.tenantRegistry.tenantId })
     .from(controlSchema.tenantRegistry)
     .where(eq(controlSchema.tenantRegistry.status, "active"))
     .all();
@@ -425,21 +485,23 @@ async function runScheduledMaintenance() {
           workspaceId: tenant.tenantId,
           actorType: "system",
           actorId: "worker_maintenance",
-          roleSlug: "owner",
+          systemCapability: "backup:manage",
           correlationId: `maint_${Date.now()}`,
           requestId: `maint_${Date.now()}`,
         },
         {}
       );
       refreshTenantDiskMetrics(tenant.tenantId);
+      refreshWorkspaceAnalyticsRollups(tenant.tenantId);
+      runWorkspaceDataRetentionSweep(tenant.tenantId);
       await sweepDueTallyPaymentReminders({
         workspaceId: tenant.tenantId,
         actorId: "worker_reminders",
       });
-      await sweepDueScheduledPostsAsync(tenant.tenantId);
     } catch (error) {
       Sentry.captureException(error, { tags: { tenantId: tenant.tenantId } });
     }
+    await yieldEventLoop();
   }
 
   try {
@@ -449,15 +511,15 @@ async function runScheduledMaintenance() {
   }
 
   try {
-    sweepDueSslProvisioningJobs();
+    await sweepDueSslProvisioningJobs();
   } catch (error) {
     Sentry.captureException(error, { tags: { job: "ssl.provision.sweep" } });
   }
 }
 
-function runDailyHashAnchoring() {
+async function runDailyHashAnchoring() {
   const activeTenants = controlDb()
-    .select()
+    .select({ tenantId: controlSchema.tenantRegistry.tenantId })
     .from(controlSchema.tenantRegistry)
     .where(eq(controlSchema.tenantRegistry.status, "active"))
     .all();
@@ -468,7 +530,20 @@ function runDailyHashAnchoring() {
     } catch (error) {
       Sentry.captureException(error, { tags: { tenantId: tenant.tenantId } });
     }
+    await yieldEventLoop();
   }
+}
+
+function verifyInternalSecretHeader(providedSecret: string): boolean {
+  if (!providedSecret) return false;
+  const candidates = [getEnv().INTERNAL_SERVICE_SECRET, getEnv().ADMIN_AUTH_SECRET].filter(
+    (s) => Boolean(s && s.length > 0)
+  );
+  const providedBuf = Buffer.from(providedSecret, "utf8");
+  return candidates.some((expected) => {
+    const expBuf = Buffer.from(expected, "utf8");
+    return expBuf.length === providedBuf.length && crypto.timingSafeEqual(providedBuf, expBuf);
+  });
 }
 
 async function startWorker() {
@@ -477,19 +552,10 @@ async function startWorker() {
   const healthPort = resolveWorkerHealthPort();
   let isDraining = false;
 
-  // Bind loopback health endpoint immediately so PM2 / ops:verify probes never time out during queue attach
   const healthServer = http.createServer((req, res) => {
     if (req.url === "/health" || req.url === "/api/health") {
       const providedSecret = String(req.headers["x-rsl-internal-secret"] || "");
-      const expectedSecret = getEnv().ADMIN_AUTH_SECRET;
-      const isInternalCaller =
-        providedSecret.length > 0 &&
-        expectedSecret.length > 0 &&
-        providedSecret.length === expectedSecret.length &&
-        crypto.timingSafeEqual(
-          Buffer.from(providedSecret, "utf8"),
-          Buffer.from(expectedSecret, "utf8")
-        );
+      const isInternalCaller = verifyInternalSecretHeader(providedSecret);
 
       try {
         const row = controlDb().$client.prepare("SELECT 1 AS ok").get() as { ok: number };
@@ -542,6 +608,7 @@ async function startWorker() {
   });
 
   registerStandardJobHandlers();
+  refreshPlatformQueueSummaryCache();
 
   const bullWorkers: Worker[] = [];
   const redisConn = getRedisConnection();
@@ -553,7 +620,17 @@ async function startWorker() {
         def.name,
         async (job) => {
           const parsed = JobEnvelopeSchema.parse(job.data);
-          await processDueSqliteOutboxForTenant(parsed.tenantId);
+          if (parsed.tenantId === "ingress") {
+            const inboxId = String(parsed.payload.inboxId ?? "").trim();
+            if (inboxId) {
+              await processWebhookInboxRecord(inboxId);
+            }
+            return;
+          }
+          await processDueSqliteOutboxForTenant(parsed.tenantId, {
+            queueName: def.name as QueueName,
+            idempotencyKey: parsed.idempotencyKey,
+          });
         },
         {
           connection: redisConn,
@@ -575,56 +652,56 @@ async function startWorker() {
 
   const jobs: Cron[] = [];
 
-  // Sweep durable outbox every 3 seconds so Tally bills trigger WhatsApp messages immediately
   jobs.push(
     new Cron("*/3 * * * * *", { protect: true }, async () => {
-      await sweepActiveTenantOutboxes();
+      await sweepActiveTenantOutboxes(lanes);
     })
   );
 
-  // Publish due scheduled Facebook, Instagram & Google Business posts every minute
-  if (lanes.has("realtime") || lanes.has("maintenance")) {
+  jobs.push(
+    new Cron("*/15 * * * * *", { protect: true }, () => {
+      try {
+        refreshPlatformQueueSummaryCache();
+      } catch {
+        // Non-fatal summary refresh
+      }
+    })
+  );
+
+  if (lanes.has("bulk")) {
     jobs.push(
       new Cron("* * * * *", { protect: true }, async () => {
         await sweepDueSocialPostsAcrossTenants();
       })
     );
-  }
 
-  if (lanes.has("maintenance")) {
-    setImmediate(() => {
-      try {
-        sweepDueSslProvisioningJobs();
-      } catch {
-        // Non-blocking startup SSL check
-      }
-    });
-
-    // Hourly live Meta & Google Ads insights sync + 0-overdraft Managed Vault auto-pause guard
     jobs.push(
       new Cron("15 * * * *", { protect: true }, async () => {
         await syncAdCampaignSpendAndVaultCapsAcrossTenants();
       })
     );
 
-    // Checkpoint WAL & refresh disk usage every 30 minutes
+    jobs.push(
+      new Cron("30 2 * * *", { timezone: "Asia/Kolkata", protect: true }, async () => {
+        await runNightlyOffsiteBackups();
+      })
+    );
+  }
+
+  if (lanes.has("maintenance")) {
+    setImmediate(() => {
+      void sweepDueSslProvisioningJobs().catch(() => undefined);
+    });
+
     jobs.push(
       new Cron("*/30 * * * *", { protect: true }, async () => {
         await runScheduledMaintenance();
       })
     );
 
-    // Nightly encrypted off-site backups to Cloudflare R2 & Google Drive at 02:30 IST
     jobs.push(
-      new Cron("30 2 * * *", { timezone: "Asia/Kolkata", protect: true }, async () => {
-        await runNightlyOffsiteBackups();
-      })
-    );
-
-    // Anchor tenant audit log chains daily at 00:05 IST
-    jobs.push(
-      new Cron("5 0 * * *", { timezone: "Asia/Kolkata", protect: true }, () => {
-        runDailyHashAnchoring();
+      new Cron("5 0 * * *", { timezone: "Asia/Kolkata", protect: true }, async () => {
+        await runDailyHashAnchoring();
       })
     );
   }
@@ -643,8 +720,10 @@ async function startWorker() {
     isDraining = true;
     console.log(`[rsl-worker] Received ${signal}, draining cleanly...`);
     for (const c of jobs) c.stop();
+    flushApiKeyUsageStats();
     await new Promise<void>((resolve) => healthServer.close(() => resolve()));
     await Promise.allSettled(bullWorkers.map((w) => w.close()));
+    await closeQueueConnectionsForShutdown();
     closeAllHandlesForShutdown();
     await Sentry.close(2000);
     process.exit(0);

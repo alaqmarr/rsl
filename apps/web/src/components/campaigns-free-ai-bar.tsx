@@ -77,7 +77,7 @@ export function CampaignsFreeAiBar({
             type="text"
             value={offer}
             onChange={(e) => setOffer(e.target.value)}
-            placeholder="e.g. Wholesale TMT Steel Bars — Same-day dispatch"
+            placeholder="e.g. Wholesale TMT Steel Bars - Same-day dispatch"
             className="rsl-input flex-1 py-1.5 text-xs"
           />
           <select
@@ -101,8 +101,19 @@ export function CampaignsFreeAiBar({
 
         {adDraft && (
           <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/40 p-3 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-bold text-slate-900">Headline: {adDraft.headline}</span>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-bold text-slate-900">Headline: {adDraft.headline}</span>
+                <StatusPill
+                  label={
+                    adDraft.provider === "cloudflare_workers_ai"
+                      ? "Cloudflare Workers AI"
+                      : "Local Starter Draft"
+                  }
+                  tone={adDraft.provider === "cloudflare_workers_ai" ? "emerald" : "amber"}
+                  showDot={false}
+                />
+              </div>
               <CopyTextButton text={adDraft.headline} label="Copy Headline" copiedLabel="Copied" />
             </div>
             <p className="text-slate-700">{adDraft.primaryText}</p>
@@ -124,7 +135,7 @@ export function CampaignsFreeAiBar({
           <div className="flex items-center gap-2">
             <Globe className="h-4 w-4 text-indigo-700" />
             <span className="font-bold text-slate-900">
-              Google Search Console — Free Organic Keywords (28d)
+              Google Search Console - Free Organic Keywords (28d)
             </span>
           </div>
           {gscConnected ? (
@@ -178,7 +189,7 @@ export function CampaignsFreeAiBar({
           )
         ) : (
           <p className="text-[11.5px] text-zinc-500">
-            Connect Google Search Console free to discover which exact keywords bring organic buyers to your website — and turn top queries into high-ROAS ads in 1 click.
+            Connect Google Search Console free to discover which exact keywords bring organic buyers to your website - and turn top queries into high-ROAS ads in 1 click.
           </p>
         )}
       </div>

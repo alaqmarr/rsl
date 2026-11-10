@@ -1,3 +1,5 @@
+import { fetchWithRetry } from "@rsl/core";
+import { resolveWorkspaceClientCloudflareAiCredentials } from "./client-cloudflare";
 import {
   getPlatformBhashiniConfig,
   getPlatformCloudflareAiConfig,
@@ -11,6 +13,7 @@ import {
 export interface TurnstileVerificationResult {
   allowed: boolean;
   skipped: boolean;
+  warning?: string;
   error?: string;
 }
 
@@ -20,8 +23,13 @@ export async function verifyCloudflareTurnstileToken(params: {
   surface: "login" | "register" | "public_form";
 }): Promise<TurnstileVerificationResult> {
   const cfg = getPlatformTurnstileConfig();
+  const isTest = process.env.NODE_ENV === "test";
+
   if (!cfg.isReady) {
-    return { allowed: true, skipped: true };
+    return {
+      allowed: true,
+      skipped: true,
+    };
   }
 
   const enforced =
@@ -44,11 +52,8 @@ export async function verifyCloudflareTurnstileToken(params: {
     };
   }
 
-  // Official Cloudflare Always-Passes test secret key support for offline test suites
-  if (
-    cfg.secretKey === "1x0000000000000000000000000000000AA" ||
-    responseToken === "XXXX.DUMMY.TOKEN.XXXX"
-  ) {
+  // Cloudflare's official test secret key is permitted strictly inside automated test runs
+  if (isTest && cfg.secretKey === "1x0000000000000000000000000000000AA") {
     return { allowed: true, skipped: false };
   }
 
@@ -60,12 +65,15 @@ export async function verifyCloudflareTurnstileToken(params: {
       body.set("remoteip", params.remoteIp.trim());
     }
 
-    const resp = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString(),
-      signal: AbortSignal.timeout(6000),
-    });
+    const resp = await fetchWithRetry(
+      "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      },
+      { maxAttempts: 2, timeoutMs: 6000 }
+    );
 
     if (!resp.ok) {
       return {
@@ -97,50 +105,90 @@ export async function verifyCloudflareTurnstileToken(params: {
 }
 
 /* ============================================================================
- * 2. Cloudflare Workers AI Free Inference (`10,000 Neurons/day`)
+ * 2. Cloudflare Workers AI Inference (Client Account First, Platform Fallback)
  * ============================================================================ */
 
 export interface CloudflareAiTextResult {
   ok: boolean;
   text: string;
-  provider: "cloudflare_workers_ai" | "fallback";
+  provider: "cloudflare_workers_ai" | "unconfigured";
+  billingOwner?: "client_cloudflare" | "platform_cloudflare";
   model?: string;
   error?: string;
 }
 
 export async function runCloudflareWorkersAiText(params: {
+  workspaceId?: string | null;
   systemPrompt: string;
   userPrompt: string;
   maxTokens?: number;
   temperature?: number;
 }): Promise<CloudflareAiTextResult> {
-  const cfg = getPlatformCloudflareAiConfig();
-  if (!cfg.isReady) {
+  const clientCfg = resolveWorkspaceClientCloudflareAiCredentials(params.workspaceId);
+  const platformCfg = getPlatformCloudflareAiConfig();
+
+  const useClient = Boolean(clientCfg && clientCfg.active);
+  const accountId = useClient ? clientCfg!.accountId : platformCfg.accountId;
+  const apiToken = useClient ? clientCfg!.apiToken : platformCfg.apiToken;
+  const textModel = useClient ? clientCfg!.textModel : platformCfg.textModel;
+  const aiGatewaySlug = useClient ? clientCfg!.aiGatewaySlug : "";
+  const billingOwner: "client_cloudflare" | "platform_cloudflare" = useClient
+    ? "client_cloudflare"
+    : "platform_cloudflare";
+
+  if (!useClient && !platformCfg.isReady) {
     return {
       ok: false,
       text: "",
-      provider: "fallback",
-      error: "Cloudflare Workers AI credentials are not configured yet.",
+      provider: "unconfigured",
+      error: "Cloudflare Workers AI credentials are not configured.",
+    };
+  }
+
+  if (useClient && clientCfg?.isSandbox) {
+    // Deterministic sandbox inference for client-connected Cloudflare Workers AI in test/sandbox mode
+    const lowerSys = params.systemPrompt.toLowerCase();
+    let simulatedText = `Client Workers AI (${textModel}) processed: ${params.userPrompt.slice(0, 120)}`;
+    if (lowerSys.includes("headline") && lowerSys.includes("primarytext")) {
+      simulatedText = JSON.stringify({
+        headline: "Direct GST Wholesale & Fast Dispatch",
+        primaryText:
+          "Connect directly for verified GST billing, ready stock, and priority dispatch from our warehouse.",
+      });
+    } else if (lowerSys.includes("translator") || lowerSys.includes("translate")) {
+      simulatedText = `नमस्ते, ${params.userPrompt}`;
+    }
+    return {
+      ok: true,
+      text: simulatedText,
+      provider: "cloudflare_workers_ai",
+      billingOwner: "client_cloudflare",
+      model: textModel,
     };
   }
 
   try {
-    const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cfg.accountId)}/ai/run/${cfg.textModel}`;
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${cfg.apiToken}`,
-        "Content-Type": "application/json",
+    const url = aiGatewaySlug
+      ? `https://gateway.ai.cloudflare.com/v1/${encodeURIComponent(accountId)}/${encodeURIComponent(aiGatewaySlug)}/workers-ai/${textModel}`
+      : `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${textModel}`;
+    const resp = await fetchWithRetry(
+      url,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messages: [
+            { role: "system", content: params.systemPrompt },
+            { role: "user", content: params.userPrompt },
+          ],
+          max_tokens: params.maxTokens ?? 320,
+        }),
       },
-      body: JSON.stringify({
-        messages: [
-          { role: "system", content: params.systemPrompt },
-          { role: "user", content: params.userPrompt },
-        ],
-        max_tokens: params.maxTokens ?? 320,
-      }),
-      signal: AbortSignal.timeout(12000),
-    });
+      { maxAttempts: 2, timeoutMs: 12000 }
+    );
 
     const json = (await resp.json().catch(() => ({}))) as {
       success?: boolean;
@@ -154,59 +202,90 @@ export async function runCloudflareWorkersAiText(params: {
         ok: true,
         text: output,
         provider: "cloudflare_workers_ai",
-        model: cfg.textModel,
+        billingOwner,
+        model: textModel,
       };
     }
 
     return {
       ok: false,
       text: "",
-      provider: "fallback",
+      provider: "unconfigured",
+      billingOwner,
       error: json.errors?.[0]?.message || `Workers AI HTTP ${resp.status}`,
     };
   } catch (err) {
     return {
       ok: false,
       text: "",
-      provider: "fallback",
+      provider: "unconfigured",
+      billingOwner,
       error: err instanceof Error ? err.message : "Workers AI request failed",
     };
   }
 }
 
 export async function transcribeCloudflareWorkersAiAudio(params: {
+  workspaceId?: string | null;
   audioBytes: Uint8Array | Buffer;
   mimeType?: string;
-}): Promise<{ ok: boolean; transcript: string; error?: string }> {
-  const cfg = getPlatformCloudflareAiConfig();
-  if (!cfg.isReady) {
+}): Promise<{
+  ok: boolean;
+  transcript: string;
+  billingOwner?: "client_cloudflare" | "platform_cloudflare";
+  error?: string;
+}> {
+  const clientCfg = resolveWorkspaceClientCloudflareAiCredentials(params.workspaceId);
+  const platformCfg = getPlatformCloudflareAiConfig();
+
+  const useClient = Boolean(clientCfg && clientCfg.active);
+  const accountId = useClient ? clientCfg!.accountId : platformCfg.accountId;
+  const apiToken = useClient ? clientCfg!.apiToken : platformCfg.apiToken;
+  const whisperModel = useClient ? clientCfg!.whisperModel : platformCfg.whisperModel;
+  const billingOwner: "client_cloudflare" | "platform_cloudflare" = useClient
+    ? "client_cloudflare"
+    : "platform_cloudflare";
+
+  if (!useClient && !platformCfg.isReady) {
     return { ok: false, transcript: "", error: "Cloudflare Workers AI not configured." };
   }
 
+  if (useClient && clientCfg?.isSandbox) {
+    return {
+      ok: true,
+      transcript: "Transcribed via Client Cloudflare Workers AI Whisper model.",
+      billingOwner: "client_cloudflare",
+    };
+  }
+
   try {
-    const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cfg.accountId)}/ai/run/${cfg.whisperModel}`;
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${cfg.apiToken}`,
-        "Content-Type": "application/octet-stream",
+    const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${whisperModel}`;
+    const resp = await fetchWithRetry(
+      url,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          "Content-Type": "application/octet-stream",
+        },
+        body: Buffer.from(params.audioBytes),
       },
-      body: Buffer.from(params.audioBytes),
-      signal: AbortSignal.timeout(15000),
-    });
+      { maxAttempts: 2, timeoutMs: 15000 }
+    );
     const json = (await resp.json().catch(() => ({}))) as {
       success?: boolean;
       result?: { text?: string };
     };
     const transcript = (json.result?.text || "").trim();
     if (resp.ok && transcript) {
-      return { ok: true, transcript };
+      return { ok: true, transcript, billingOwner };
     }
-    return { ok: false, transcript: "", error: `Whisper HTTP ${resp.status}` };
+    return { ok: false, transcript: "", billingOwner, error: `Whisper HTTP ${resp.status}` };
   } catch (err) {
     return {
       ok: false,
       transcript: "",
+      billingOwner,
       error: err instanceof Error ? err.message : "Whisper transcription failed",
     };
   }
@@ -237,10 +316,12 @@ export interface IndianTranslationResult {
   translatedText: string;
   targetLanguage: string;
   metaLocale: string;
-  provider: "bhashini" | "cloudflare_workers_ai" | "local_phrasebook";
+  provider: "bhashini" | "cloudflare_workers_ai" | "identity" | "unconfigured";
+  error?: string;
 }
 
 export async function translateIndianBusinessText(params: {
+  workspaceId?: string | null;
   text: string;
   targetLanguage: string;
   sourceLanguage?: string;
@@ -260,7 +341,7 @@ export async function translateIndianBusinessText(params: {
       translatedText: sourceText,
       targetLanguage: targetLang,
       metaLocale: langMeta.metaLocale,
-      provider: "local_phrasebook",
+      provider: "identity",
     };
   }
 
@@ -278,7 +359,7 @@ export async function translateIndianBusinessText(params: {
   const bhashini = getPlatformBhashiniConfig();
   if (bhashini.isReady && bhashini.inferenceApiKey) {
     try {
-      const resp = await fetch(
+      const resp = await fetchWithRetry(
         "https://dhruva-api.bhashini.gov.in/services/inference/pipeline",
         {
           method: "POST",
@@ -302,8 +383,8 @@ export async function translateIndianBusinessText(params: {
               input: [{ source: maskedInput }],
             },
           }),
-          signal: AbortSignal.timeout(9000),
-        }
+        },
+        { maxAttempts: 2, timeoutMs: 9000 }
       );
       if (resp.ok) {
         const json = (await resp.json()) as {
@@ -323,13 +404,14 @@ export async function translateIndianBusinessText(params: {
         }
       }
     } catch {
-      // Fall back to Cloudflare Workers AI
+      // Fall back to Cloudflare Workers AI if configured
     }
   }
 
-  // 2. Try Cloudflare Workers AI if configured in control.db
+  // 2. Try Cloudflare Workers AI (Client's connected Cloudflare account first, then platform fallback)
   const aiRes = await runCloudflareWorkersAiText({
-    systemPrompt: `You are an expert Indian business translator. Translate the user's business message from English into polite, natural ${langMeta.label} script. Keep every __VAR0__, __VAR1__ token and ₹ symbol untouched. Output ONLY the translated text with no quotes or explanation.`,
+    workspaceId: params.workspaceId,
+    systemPrompt: `You are an Indian business translator. Translate the user's business message from English into natural ${langMeta.label} script. Keep every __VAR0__, __VAR1__ token and ₹ symbol untouched. Output ONLY the translated text with no quotes or explanation.`,
     userPrompt: maskedInput,
     maxTokens: 350,
   });
@@ -343,35 +425,21 @@ export async function translateIndianBusinessText(params: {
     };
   }
 
-  // 3. Deterministic Business Greeting Prefix / Template Fallback when offline/unseeded
-  const regionalPrefixes: Record<string, { hello: string; thanks: string }> = {
-    hi: { hello: "नमस्ते", thanks: "धन्यवाद।" },
-    gu: { hello: "નમસ્તે", thanks: "આભાર." },
-    mr: { hello: "नमस्कार", thanks: "धन्यवाद." },
-    ta: { hello: "வணக்கம்", thanks: "நன்றி." },
-    te: { hello: "నమస్కారం", thanks: "ధన్యవాదాలు." },
-    kn: { hello: "ನಮಸ್ಕಾರ", thanks: "ಧನ್ಯವಾದಗಳು." },
-    bn: { hello: "নমস্কার", thanks: "ধন্যবাদ।" },
-    ml: { hello: "നമസ്കാരം", thanks: "നന്ദി." },
-    pa: { hello: "ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ", thanks: "ਧੰਨਵਾਦ।" },
-  };
-  const pref = regionalPrefixes[targetLang] ?? regionalPrefixes.hi!;
-  const adapted = sourceText
-    .replace(/^(Dear|Hello|Hi)\b/i, pref.hello)
-    .replace(/Thank you!?\.?$/i, pref.thanks);
-
+  // Honest unconfigured failure: never return untranslated English disguised as regional translation
   return {
-    ok: true,
-    translatedText:
-      adapted !== sourceText ? adapted : `${pref.hello}, ${sourceText} ${pref.thanks}`,
+    ok: false,
+    translatedText: "",
     targetLanguage: targetLang,
     metaLocale: langMeta.metaLocale,
-    provider: "local_phrasebook",
+    provider: "unconfigured",
+    error:
+      aiRes.error ||
+      `Regional translation into ${langMeta.label} requires MeitY BHASHINI or Cloudflare Workers AI credentials to be configured by a Platform Administrator.`,
   };
 }
 
 /* ============================================================================
- * 4. WhatsApp Meta Approval Risk Linter & AI Ad Copywriter
+ * 4. WhatsApp Meta Approval Risk Linter & Ad Copy Helper
  * ============================================================================ */
 
 export interface TemplateLintFinding {
@@ -384,6 +452,7 @@ export interface WhatsAppTemplateLintReport {
   recommendedCategory: "utility" | "marketing" | "authentication";
   findings: TemplateLintFinding[];
   aiSuggestedRewrite: string | null;
+  rewriteProvider: "cloudflare_workers_ai" | null;
 }
 
 const PROMO_WORDS_IN_UTILITY = [
@@ -401,6 +470,7 @@ const PROMO_WORDS_IN_UTILITY = [
 ];
 
 export async function lintWhatsAppTemplateForMeta(params: {
+  workspaceId?: string | null;
   category: string;
   headerText?: string;
   bodyText: string;
@@ -419,26 +489,25 @@ export async function lintWhatsAppTemplateForMeta(params: {
       recommendedCategory: cat,
       findings: [{ severity: "blocker", message: "Template body text cannot be empty." }],
       aiSuggestedRewrite: null,
+      rewriteProvider: null,
     };
   }
 
-  // Rule 1: Meta rejects templates starting or ending directly with {{n}}
   if (/^\{\{\d+\}\}/.test(body)) {
     findings.push({
       severity: "blocker",
       message:
-        "Meta immediately rejects templates that START with a variable (e.g. '{{1}}, your bill...'). Add static text before '{{1}}' such as 'Hello {{1}},'.",
+        "Meta rejects templates that start with a variable (e.g. '{{1}}, your bill...'). Add static text before '{{1}}' such as 'Hello {{1}},'.",
     });
   }
   if (/\{\{\d+\}\}[.!?]*$/.test(body)) {
     findings.push({
       severity: "blocker",
       message:
-        "Meta rejects templates that END with a variable. Add closing text after the last variable (e.g. 'Thank you for your business.').",
+        "Meta rejects templates that end with a variable. Add closing text after the last variable (e.g. 'Thank you for your business.').",
     });
   }
 
-  // Rule 2: Sequential numbering {{1}}, {{2}}, ... without gaps
   const nums = Array.from(body.matchAll(/\{\{(\d+)\}\}/g)).map((m) => Number(m[1]));
   const uniqueNums = Array.from(new Set(nums)).sort((a, b) => a - b);
   for (let i = 0; i < uniqueNums.length; i++) {
@@ -451,26 +520,23 @@ export async function lintWhatsAppTemplateForMeta(params: {
     }
   }
 
-  // Rule 3: Variable-to-word density check
   const plainWords = body.replace(/\{\{\d+\}\}/g, "").trim().split(/\s+/).filter(Boolean);
   if (uniqueNums.length > 0 && plainWords.length < uniqueNums.length * 2 + 2) {
     findings.push({
       severity: "warning",
       message:
-        "Too many variables relative to static words. Meta often rejects short templates packed with placeholders — add 4–6 clear context words.",
+        "Too many variables relative to static words. Meta often rejects short templates packed with placeholders; add 4 to 6 clear context words.",
     });
   }
 
-  // Rule 4: URL shorteners
   if (/\b(bit\.ly|tinyurl\.com|t\.co|cutt\.ly|rb\.gy)\b/i.test(body)) {
     findings.push({
       severity: "blocker",
       message:
-        "Meta blocks public URL shorteners (bit.ly, tinyurl) in templates. Use your verified business domain or rapidshiftlabs.in link.",
+        "Meta blocks public URL shorteners (bit.ly, tinyurl) in templates. Use your verified business domain.",
     });
   }
 
-  // Rule 5: Promotional keywords inside UTILITY templates
   let recommendedCategory = cat;
   const lowerBody = body.toLowerCase();
   const matchedPromo = PROMO_WORDS_IN_UTILITY.filter((w) => lowerBody.includes(w));
@@ -478,7 +544,7 @@ export async function lintWhatsAppTemplateForMeta(params: {
     recommendedCategory = "marketing";
     findings.push({
       severity: "warning",
-      message: `Contains promotional terms (${matchedPromo.join(", ")}) inside a UTILITY template. Meta will reclassify or reject this unless reworded neutrally or submitted as MARKETING.`,
+      message: `Contains promotional terms (${matchedPromo.join(", ")}) inside a UTILITY template. Meta may reclassify or reject this unless reworded neutrally or submitted as MARKETING.`,
     });
   }
 
@@ -490,15 +556,18 @@ export async function lintWhatsAppTemplateForMeta(params: {
       : "low";
 
   let aiSuggestedRewrite: string | null = null;
+  let rewriteProvider: "cloudflare_workers_ai" | null = null;
   if (findings.length > 0) {
     const ai = await runCloudflareWorkersAiText({
+      workspaceId: params.workspaceId,
       systemPrompt:
-        "Rewrite this WhatsApp Business template so it passes Meta's strict UTILITY/MARKETING template review: never start or end with {{1}}, keep sequential {{1}}..{{n}} placeholders intact, remove URL shorteners, and keep a polite Indian business tone. Return ONLY the rewritten template body.",
+        "Rewrite this WhatsApp Business template so it passes Meta's UTILITY/MARKETING template review: never start or end with {{1}}, keep sequential {{1}}..{{n}} placeholders intact, remove URL shorteners, and keep a clear Indian business tone. Return ONLY the rewritten template body.",
       userPrompt: `Category: ${cat}\nOriginal Body: ${body}`,
       maxTokens: 220,
     });
     if (ai.ok && ai.text) {
       aiSuggestedRewrite = ai.text;
+      rewriteProvider = "cloudflare_workers_ai";
     }
   }
 
@@ -507,10 +576,12 @@ export async function lintWhatsAppTemplateForMeta(params: {
     recommendedCategory,
     findings,
     aiSuggestedRewrite,
+    rewriteProvider,
   };
 }
 
 export async function generateSmartAdCopy(params: {
+  workspaceId?: string | null;
   businessName: string;
   offerSummary: string;
   channel: "meta_ads" | "google_ads";
@@ -518,14 +589,17 @@ export async function generateSmartAdCopy(params: {
 }): Promise<{
   headline: string;
   primaryText: string;
-  provider: "cloudflare_workers_ai" | "template_engine";
+  isAiGenerated: boolean;
+  provider: "cloudflare_workers_ai" | "starter_draft";
+  billingOwner?: "client_cloudflare" | "platform_cloudflare";
 }> {
   const biz = (params.businessName || "Our Store").trim();
-  const offer = (params.offerSummary || "GST-billed products & fast delivery").trim();
+  const offer = (params.offerSummary || "GST-billed products and prompt dispatch").trim();
 
   const ai = await runCloudflareWorkersAiText({
+    workspaceId: params.workspaceId,
     systemPrompt:
-      'You write high-converting ad copy for Indian SMBs. Return valid JSON only with keys "headline" (max 40 chars) and "primaryText" (max 180 chars, clear Indian commercial value, no fake claims).',
+      'You write clear ad copy for Indian SMBs. Return valid JSON only with keys "headline" (max 40 chars) and "primaryText" (max 180 chars, clear Indian commercial value, no exaggerated claims).',
     userPrompt: `Business: ${biz}\nChannel: ${params.channel}\nObjective: ${params.objective || "leads"}\nOffer/Product: ${offer}`,
     maxTokens: 200,
   });
@@ -542,18 +616,21 @@ export async function generateSmartAdCopy(params: {
           return {
             headline: parsed.headline.trim().slice(0, 60),
             primaryText: parsed.primaryText.trim().slice(0, 320),
+            isAiGenerated: true,
             provider: "cloudflare_workers_ai",
+            billingOwner: ai.billingOwner,
           };
         }
       }
     } catch {
-      // fall back below
+      // fall through to deterministic starter draft
     }
   }
 
   return {
-    headline: `${biz} — Enquire Now`.slice(0, 40),
-    primaryText: `Looking for ${offer}? Connect directly with ${biz} for verified GST billing, wholesale rates, and prompt dispatch across India.`,
-    provider: "template_engine",
+    headline: `${biz} | Direct Enquiry`.slice(0, 40),
+    primaryText: `Looking for ${offer}? Contact ${biz} directly for GST invoices, wholesale pricing, and scheduled dispatch.`,
+    isAiGenerated: false,
+    provider: "starter_draft",
   };
 }

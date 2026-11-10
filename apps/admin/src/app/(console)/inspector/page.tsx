@@ -14,10 +14,10 @@ import { SubmitButton } from "@/components/ios-feedback";
 import { requireStaffSession } from "@/lib/session";
 
 function formatCellValue(col: string, val: unknown): string {
-  if (val === null || val === undefined || val === "") return "—";
+  if (val === null || val === undefined || val === "") return "-";
   if (typeof val === "number") {
     if (col.endsWith("_at") && val > 1_000_000_000_000) {
-      return new Date(val).toLocaleString("en-IN");
+      return new Date(val).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
     }
     if (col.endsWith("_paise")) {
       return `₹${(val / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -221,7 +221,7 @@ export default async function ClientRecordsAndLogPage({
 
       <SectionCard
         title="Download Redacted Support Bundle (.json)"
-        subtitle="Exports hash-chain verification, active plans, connection health, and redacted recent actions & jobs for escalation — with zero raw tokens or customer phone/email PII."
+        subtitle="Exports hash-chain verification, active plans, connection health, and redacted recent actions & jobs for escalation - with zero raw tokens or customer phone/email PII."
       >
         <form
           action="/api/support-bundle"
@@ -245,7 +245,7 @@ export default async function ClientRecordsAndLogPage({
               defaultValue={sp.ticket || ""}
               required
               minLength={3}
-              placeholder="e.g. SUP-1042 — WhatsApp sync check"
+              placeholder="e.g. SUP-1042 - WhatsApp sync check"
               className="adm-input"
             />
           </div>
@@ -294,14 +294,14 @@ export default async function ClientRecordsAndLogPage({
                   return (
                     <tr key={l.id} className="hover:bg-zinc-50/60">
                       <td className="px-5 py-3 whitespace-nowrap text-xs text-zinc-500 tabular-nums sm:px-6">
-                        {new Date(l.ts).toLocaleString("en-IN")}
+                        {new Date(l.ts).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <StatusPill label={badge.label} tone={badge.tone} />
                       </td>
                       <td className="px-4 py-3 text-slate-800">{l.summary}</td>
                       <td className="px-5 py-3 font-mono text-xs text-zinc-500 sm:px-6">
-                        {l.ticketReference || "—"}
+                        {l.ticketReference || "-"}
                       </td>
                     </tr>
                   );

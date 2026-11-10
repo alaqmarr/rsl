@@ -3144,7 +3144,7 @@ export function getWorkspaceInventorySummary(
       return {
         ...m,
         signedQty,
-        voucherNumber: voucherNoMap.get(m.voucherId)?.voucherNumber ?? "—",
+        voucherNumber: voucherNoMap.get(m.voucherId)?.voucherNumber ?? "-",
         companyName: companyMap.get(m.companyId) ?? "Primary Tally Company",
       };
     });

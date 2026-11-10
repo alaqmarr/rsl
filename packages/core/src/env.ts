@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { createRequire } from "node:module";
 import { z } from "zod";
 
 function findMonorepoRoot(startDir: string): string {
@@ -19,26 +20,13 @@ function findMonorepoRoot(startDir: string): string {
 const REPO_ROOT = findMonorepoRoot(process.cwd());
 
 function loadDotEnvIfNeeded(): void {
-  const envPath = path.join(REPO_ROOT, ".env");
-  if (!fs.existsSync(envPath)) return;
-  const content = fs.readFileSync(envPath, "utf8");
-  for (const rawLine of content.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const eqIdx = line.indexOf("=");
-    if (eqIdx <= 0) continue;
-    const key = line.slice(0, eqIdx).trim();
-    let val = line.slice(eqIdx + 1).trim();
-    if (
-      (val.startsWith('"') && val.endsWith('"')) ||
-      (val.startsWith("'") && val.endsWith("'"))
-    ) {
-      val = val.slice(1, -1);
-    }
-    if (process.env[key] === undefined) {
-      process.env[key] = val;
-    }
-  }
+  const loaderPath = path.join(REPO_ROOT, "scripts", "load-root-env.cjs");
+  if (!fs.existsSync(loaderPath)) return;
+  const requireFromRoot = createRequire(path.join(REPO_ROOT, "package.json"));
+  const { loadMonorepoRootEnv } = requireFromRoot(loaderPath) as {
+    loadMonorepoRootEnv: (opts?: { rootDir?: string }) => Record<string, string>;
+  };
+  loadMonorepoRootEnv({ rootDir: REPO_ROOT });
 }
 
 loadDotEnvIfNeeded();
@@ -91,6 +79,7 @@ const EnvSchema = z.object({
   BETTER_AUTH_SECRET: z.string().default(""),
   BETTER_AUTH_URL: z.string().url().default("http://localhost:4500"),
   ADMIN_AUTH_SECRET: z.string().default(""),
+  INTERNAL_SERVICE_SECRET: z.string().optional().default(""),
   GOOGLE_CLIENT_ID: z.string().optional().default(""),
   GOOGLE_CLIENT_SECRET: z.string().optional().default(""),
 
@@ -171,11 +160,40 @@ export type AppEnv = z.infer<typeof EnvSchema> & {
 
 let cachedEnv: AppEnv | null = null;
 
-export function getEnv(): AppEnv {
-  if (cachedEnv) return cachedEnv;
+function isLocalUrlOrHost(urlOrHost: string): boolean {
+  const cleaned = String(urlOrHost || "").trim().toLowerCase();
+  if (!cleaned) return true;
+  try {
+    const host = cleaned.includes("://") ? new URL(cleaned).hostname : cleaned.split(":")[0] || "";
+    return (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "::1" ||
+      host.endsWith(".localhost") ||
+      host.endsWith(".local") ||
+      host.endsWith(".test")
+    );
+  } catch {
+    return false;
+  }
+}
 
-  const parsed = EnvSchema.parse(process.env);
+export function verifyBootSecurityAssertions(parsed: z.infer<typeof EnvSchema>): void {
   const isProd = parsed.NODE_ENV === "production";
+  const isTest = parsed.NODE_ENV === "test";
+
+  // Hard boot guard: never allow deterministic dev secrets when targeting a non-local URL/host
+  if (!isProd && !isTest) {
+    const nonLocalSurface =
+      !isLocalUrlOrHost(parsed.APP_URL) ||
+      !isLocalUrlOrHost(parsed.ADMIN_URL) ||
+      parsed.DATA_DIR.trim() === "/var/lib/rsl";
+    if (nonLocalSurface) {
+      throw new Error(
+        `Refusing to start with NODE_ENV=${parsed.NODE_ENV} while APP_URL (${parsed.APP_URL}) or DATA_DIR targets a production host (${parsed.PRIMARY_DOMAIN}). Set NODE_ENV=production and configure explicit cryptographic secrets.`
+      );
+    }
+  }
 
   if (isProd) {
     const requiredInProd: Array<keyof typeof parsed> = [
@@ -185,6 +203,7 @@ export function getEnv(): AppEnv {
       "BACKUP_SIGNING_KEY",
       "API_KEY_PEPPER",
     ];
+    const seenSecrets = new Set<string>();
     for (const key of requiredInProd) {
       const val = String(parsed[key] || "").trim();
       if (!val) {
@@ -195,8 +214,35 @@ export function getEnv(): AppEnv {
           `Production environment variable ${key} must be at least 16 characters of high-entropy secret material.`
         );
       }
+      if (
+        val === deterministicDevSecret("auth") ||
+        val === deterministicDevSecret("admin-auth") ||
+        val === deterministicDevSecret("kms") ||
+        val === deterministicDevSecret("backup") ||
+        val === deterministicDevSecret("pepper")
+      ) {
+        throw new Error(`Production environment variable ${key} must not use deterministic development secrets.`);
+      }
+      seenSecrets.add(val);
+    }
+    if (seenSecrets.size < requiredInProd.length) {
+      throw new Error(
+        "Production cryptographic secrets (BETTER_AUTH_SECRET, ADMIN_AUTH_SECRET, KMS_MASTER_KEY, BACKUP_SIGNING_KEY, API_KEY_PEPPER) must be distinct values."
+      );
     }
   }
+}
+
+export function getEnv(): AppEnv {
+  if (cachedEnv) return cachedEnv;
+
+  const parsed = EnvSchema.parse(process.env);
+  verifyBootSecurityAssertions(parsed);
+
+  const resolvedAdminSecret = parsed.ADMIN_AUTH_SECRET || deterministicDevSecret("admin-auth");
+  const resolvedInternalSecret =
+    parsed.INTERNAL_SERVICE_SECRET ||
+    crypto.createHmac("sha256", resolvedAdminSecret).update("rsl-internal-probe-v1").digest("base64url");
 
   cachedEnv = {
     ...parsed,
@@ -206,7 +252,8 @@ export function getEnv(): AppEnv {
     BACKUP_STAGING_DIR: resolveStorageDir(parsed.BACKUP_STAGING_DIR, ".rsl-data/staging"),
     SSL_CERT_DIR: resolveStorageDir(parsed.SSL_CERT_DIR, ".rsl-data/ssl"),
     BETTER_AUTH_SECRET: parsed.BETTER_AUTH_SECRET || deterministicDevSecret("auth"),
-    ADMIN_AUTH_SECRET: parsed.ADMIN_AUTH_SECRET || deterministicDevSecret("admin-auth"),
+    ADMIN_AUTH_SECRET: resolvedAdminSecret,
+    INTERNAL_SERVICE_SECRET: resolvedInternalSecret,
     KMS_MASTER_KEY: parsed.KMS_MASTER_KEY || deterministicDevSecret("kms"),
     BACKUP_SIGNING_KEY: parsed.BACKUP_SIGNING_KEY || deterministicDevSecret("backup"),
     API_KEY_PEPPER: parsed.API_KEY_PEPPER || deterministicDevSecret("pepper"),

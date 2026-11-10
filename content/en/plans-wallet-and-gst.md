@@ -18,10 +18,10 @@ RapidShift Labs separates **predictable software access** from **pay-as-you-go p
 
 ---
 
-## Step 1 — Requesting a Plan or Value Bundle Activation (Minute-by-Minute)
+## Step 1 - Requesting a Plan or Value Bundle Activation (Minute-by-Minute)
 
 1. Click **Plans & Wallet** (`/billing`) in the left sidebar *(or click **Activate Plan** on any locked feature screen)*.
-2. **Check Value Bundles First**: If you need both Tally Prime + WhatsApp + Shared Inbox (or the full Growth Suite), compare the **Value Bundles** row at the top — unlocking a bundle activates all included tools together at a lower combined rate.
+2. **Check Value Bundles First**: If you need both Tally Prime + WhatsApp + Shared Inbox (or the full Growth Suite), compare the **Value Bundles** row at the top - unlocking a bundle activates all included tools together at a lower combined rate.
 3. Click **Activate Plan** (or **Unlock Bundle**) to open the **Payment & Activation Modal**:
    - **Select Billing Cycle**: Click `Monthly`, `Quarterly`, or `Yearly` and review the live **Subtotal**, **18% GST**, and **Grand Total Payable (₹)**.
    - **Pay the Grand Total**:
@@ -33,9 +33,9 @@ RapidShift Labs separates **predictable software access** from **pay-as-you-go p
 
 ---
 
-## Step 2 — Exact Steps to Find Your 12-Digit UTR Number in Every Payment App
+## Step 2 - Exact Steps to Find Your 12-Digit UTR Number in Every Payment App
 
-Never paste your phone number or UPI ID (`name@okicici`) as the payment reference — finance verification checks the **12-digit bank UTR / RRN**:
+Never paste your phone number or UPI ID (`name@okicici`) as the payment reference - finance verification checks the **12-digit bank UTR / RRN**:
 
 - **Google Pay (GPay)**: Open **Google Pay -> See transaction history** -> tap the payment to RapidShift Labs -> copy the **12-digit `UPI transaction ID`** (for example `430718294012`).
 - **PhonePe**: Open **PhonePe -> History** (bottom right) -> tap the transaction -> under **Transfer Details**, tap the copy icon next to the **12-digit `UTR`** number.
@@ -44,7 +44,7 @@ Never paste your phone number or UPI ID (`name@okicici`) as the payment referenc
 
 ---
 
-## Step 3 — Recharging Your Prepaid Wallet & How `-₹200.00` Overdraft Works
+## Step 3 - Recharging Your Prepaid Wallet & How `-₹200.00` Overdraft Works
 
 1. Open **Plans & Wallet** (`/billing?tab=wallet`) and scroll to **Recharge Prepaid Wallet**.
 2. Enter your desired **Top-Up Amount (₹)** (for example `1000`, `2500`, or `5000`).
@@ -59,7 +59,7 @@ Never paste your phone number or UPI ID (`name@okicici`) as the payment referenc
 
 ---
 
-## Step 4 — Downloading & Printing Rule 46 GST Tax Invoices (`SAC 998314`)
+## Step 4 - Downloading & Printing Rule 46 GST Tax Invoices (`SAC 998314`)
 
 1. Open **Plans & Wallet** (`/billing`) and scroll to **Official GST Tax Invoices**.
 2. Make sure your **15-character GSTIN** and **State Code** were saved in **Business Settings** (`/settings/business`):

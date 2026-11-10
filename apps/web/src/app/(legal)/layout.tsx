@@ -2,7 +2,7 @@ import React from "react";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { getEnv } from "@rsl/core";
-import { BrandLogo, PlatformFooter } from "@rsl/ui";
+import { BrandLogo, PlatformFooter, ThemeToggleButton } from "@rsl/ui";
 import { getOptionalWebSession } from "@/lib/session";
 
 export default async function LegalPublicLayout({
@@ -14,8 +14,8 @@ export default async function LegalPublicLayout({
   const docsUrl = getEnv().DOCS_URL;
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#F8F9FB] text-slate-900">
-      <header className="no-print sticky top-0 z-30 border-b border-zinc-200/85 bg-white/95 backdrop-blur-md">
+    <div className="rsl-ambient-canvas flex min-h-screen flex-col text-slate-900">
+      <header className="no-print rsl-frost-header sticky top-0 z-30">
         <div className="flex w-full items-center justify-between gap-4 px-5 py-3.5 sm:px-8 lg:px-10 xl:px-14">
           <div className="flex min-w-0 items-center gap-4">
             <Link href="/" className="min-w-0 shrink-0">
@@ -51,6 +51,7 @@ export default async function LegalPublicLayout({
           </nav>
 
           <div className="flex shrink-0 items-center gap-2.5">
+            <ThemeToggleButton compact />
             {session ? (
               <Link
                 href="/"

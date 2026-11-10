@@ -11,6 +11,8 @@ export const users = sqliteTable("users", {
   passwordHash: text("password_hash"),
   totpSecretEncrypted: text("totp_secret_encrypted"),
   totpEnabled: integer("totp_enabled", { mode: "boolean" }).notNull().default(false),
+  failedLoginAttempts: integer("failed_login_attempts").notNull().default(0),
+  lockedUntil: integer("locked_until"),
   activeWorkspaceId: text("active_workspace_id"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
@@ -29,6 +31,8 @@ export const sessions = sqliteTable(
     impersonationReason: text("impersonation_reason"),
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
+    lastActiveAt: integer("last_active_at"),
+    stepUpAt: integer("step_up_at"),
     expiresAt: integer("expires_at").notNull(),
     createdAt: integer("created_at").notNull(),
   },
@@ -64,6 +68,11 @@ export const platformStaff = sqliteTable("platform_staff", {
   passwordHash: text("password_hash").notNull(),
   staffRole: text("staff_role").notNull(), // super_admin | support | finance
   totpEnabled: integer("totp_enabled", { mode: "boolean" }).notNull().default(false),
+  totpSecretEncrypted: text("totp_secret_encrypted"),
+  totpBackupCodesJson: text("totp_backup_codes_json").notNull().default("[]"),
+  totpEnrolledAt: integer("totp_enrolled_at"),
+  failedLoginAttempts: integer("failed_login_attempts").notNull().default(0),
+  lockedUntil: integer("locked_until"),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
   createdAt: integer("created_at").notNull(),
 });
@@ -76,6 +85,9 @@ export const platformStaffSessions = sqliteTable("platform_staff_sessions", {
   tokenHash: text("token_hash").notNull().unique(),
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
+  mfaVerifiedAt: integer("mfa_verified_at"),
+  stepUpAt: integer("step_up_at"),
+  lastActiveAt: integer("last_active_at"),
   expiresAt: integer("expires_at").notNull(),
   createdAt: integer("created_at").notNull(),
 });
@@ -112,6 +124,9 @@ export const workspaces = sqliteTable("workspaces", {
   freeAccessGrantedBy: text("free_access_granted_by"),
   autoBillingReminders: integer("auto_billing_reminders", { mode: "boolean" }).notNull().default(true),
   allowManualCredentials: integer("allow_manual_credentials", { mode: "boolean" }).notNull().default(false),
+  publicLinkEpoch: integer("public_link_epoch").notNull().default(1),
+  storageQuotaBytes: integer("storage_quota_bytes").notNull().default(5368709120),
+  deletedAt: integer("deleted_at"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });
@@ -169,20 +184,25 @@ export const invitations = sqliteTable("invitations", {
   createdAt: integer("created_at").notNull(),
 });
 
-export const tenantRegistry = sqliteTable("tenant_registry", {
-  tenantId: text("tenant_id").primaryKey(), // matches workspaces.id
-  host: text("host").notNull().default("local"),
-  dataDbPath: text("data_db_path").notNull(),
-  logsDbPath: text("logs_db_path").notNull(),
-  status: text("status").notNull().default("active"), // active | restoring | migrating | suspended | migration_failed | deleted
-  dataSchemaVersion: integer("data_schema_version").notNull().default(1),
-  logsSchemaVersion: integer("logs_schema_version").notNull().default(1),
-  dataSizeBytes: integer("data_size_bytes").notNull().default(0),
-  logsSizeBytes: integer("logs_size_bytes").notNull().default(0),
-  lastBackupAt: integer("last_backup_at"),
-  createdAt: integer("created_at").notNull(),
-  updatedAt: integer("updated_at").notNull(),
-});
+export const tenantRegistry = sqliteTable(
+  "tenant_registry",
+  {
+    tenantId: text("tenant_id").primaryKey(), // matches workspaces.id
+    host: text("host").notNull().default("local"),
+    dataDbPath: text("data_db_path").notNull(),
+    logsDbPath: text("logs_db_path").notNull(),
+    status: text("status").notNull().default("active"), // active | restoring | migrating | suspended | migration_failed | deleted
+    dataSchemaVersion: integer("data_schema_version").notNull().default(1),
+    logsSchemaVersion: integer("logs_schema_version").notNull().default(1),
+    dataSizeBytes: integer("data_size_bytes").notNull().default(0),
+    logsSizeBytes: integer("logs_size_bytes").notNull().default(0),
+    lastBackupAt: integer("last_backup_at"),
+    nextOutboxAt: integer("next_outbox_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [index("idx_tenant_registry_next_outbox").on(t.status, t.nextOutboxAt)]
+);
 
 export const assetRouting = sqliteTable(
   "asset_routing",
@@ -302,6 +322,7 @@ export const payments = sqliteTable("payments", {
   provider: text("provider").notNull().default("razorpay"),
   externalOrderId: text("external_order_id"),
   externalPaymentId: text("external_payment_id"),
+  externalRefUtr: text("external_ref_utr"),
   amountPaise: integer("amount_paise").notNull(),
   currency: text("currency").notNull().default("INR"),
   purpose: text("purpose").notNull(), // wallet_topup | plan_activation | invoice_payment
@@ -868,6 +889,55 @@ export const webPushSubscriptions = sqliteTable(
   (t) => [
     index("idx_web_push_ws_active").on(t.workspaceId, t.active),
     index("idx_web_push_user").on(t.userId),
+  ]
+);
+
+export const outboundWebhookDeliveries = sqliteTable(
+  "webhook_deliveries",
+  {
+    id: text("id").primaryKey(),
+    endpointId: text("endpoint_id")
+      .notNull()
+      .references(() => outboundWebhookEndpoints.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    eventType: text("event_type").notNull(),
+    payloadJson: text("payload_json").notNull(),
+    status: text("status").notNull().default("pending"), // pending | retrying | delivered | dead
+    attemptCount: integer("attempt_count").notNull().default(0),
+    httpStatus: integer("http_status"),
+    responseSnippet: text("response_snippet"),
+    lastError: text("last_error"),
+    nextRetryAt: integer("next_retry_at"),
+    createdAt: integer("created_at").notNull(),
+    deliveredAt: integer("delivered_at"),
+  },
+  (t) => [
+    index("idx_webhook_deliveries_ws_ts").on(t.workspaceId, t.createdAt),
+    index("idx_webhook_deliveries_retry").on(t.status, t.nextRetryAt),
+  ]
+);
+
+export const idempotencyRecords = sqliteTable(
+  "idempotency_records",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    method: text("method").notNull(),
+    path: text("path").notNull(),
+    requestHash: text("request_hash").notNull(),
+    statusCode: integer("status_code").notNull(),
+    responseJson: text("response_json").notNull(),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_idempotency_ws_key").on(t.workspaceId, t.idempotencyKey),
+    index("idx_idempotency_expires").on(t.expiresAt),
   ]
 );
 

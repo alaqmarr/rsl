@@ -3,7 +3,13 @@
 import React, { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { IosSpinner, SectionCard, sileo, StatusPill } from "@rsl/ui";
+import {
+  GuideDrawerButton,
+  IosSpinner,
+  SectionCard,
+  sileo,
+  StatusPill,
+} from "@rsl/ui";
 import type { ConnectionChannelKind, ConnectionMetadata } from "@rsl/connections";
 import { CopyTextButton } from "@/components/client-utils";
 import { ConnectToGoogleDriveButton, GoogleGLogo } from "@/components/google-drive-connect-button";
@@ -132,7 +138,7 @@ function ConnectWithFacebookButton({
         title="1-click Facebook Sign-In is pending platform setup"
         className={`inline-flex shrink-0 cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-zinc-100/90 font-semibold text-zinc-500 ${sizeCls}`}
       >
-        <FacebookLogo className="h-4 w-4 text-[#1877F2]/60" />
+        <FacebookLogo className="h-4 w-4 text-emerald-700/60" />
         <span>{label}</span>
         <span className="rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 ring-1 ring-zinc-200">
           Setup Pending
@@ -147,9 +153,9 @@ function ConnectWithFacebookButton({
     return (
       <a
         href={href}
-        className={`inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-zinc-300 bg-white font-semibold text-slate-900 shadow-2xs transition hover:border-[#1877F2]/50 hover:bg-blue-50/40 ${sizeCls}`}
+        className={`inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-zinc-300 bg-white font-semibold text-slate-900 shadow-2xs transition hover:border-emerald-400 hover:bg-emerald-50/40 ${sizeCls}`}
       >
-        <FacebookLogo className="h-3.5 w-3.5 text-[#1877F2]" />
+        <FacebookLogo className="h-3.5 w-3.5 text-emerald-800" />
         <span>{label}</span>
       </a>
     );
@@ -158,9 +164,9 @@ function ConnectWithFacebookButton({
   return (
     <a
       href={href}
-      className={`inline-flex shrink-0 items-center justify-center gap-2.5 rounded-xl bg-[#1877F2] font-semibold text-white shadow-xs transition hover:bg-[#166FE5] ${sizeCls}`}
+      className={`rsl-btn-primary inline-flex shrink-0 items-center justify-center gap-2.5 font-semibold shadow-xs ${sizeCls}`}
     >
-      <FacebookLogo className="h-4 w-4 text-white" />
+      <FacebookLogo className="h-4 w-4 text-[var(--btn-primary-fg)]" />
       <span>{label}</span>
     </a>
   );
@@ -568,7 +574,7 @@ export function ConnectionsHub({
           />
         </div>
 
-        <div className="flex items-center justify-between rounded-2xl border border-zinc-200/90 bg-white px-4 py-3.5 shadow-2xs">
+        <div className="rsl-frost-card flex items-center justify-between rounded-2xl px-4 py-3.5">
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
               Meta Business Suite
@@ -577,12 +583,12 @@ export function ConnectionsHub({
               {metaConnectedCount} / 4 Channels
             </div>
           </div>
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-[#1877F2]">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200">
             <FacebookLogo className="h-4 w-4" />
           </span>
         </div>
 
-        <div className="flex items-center justify-between rounded-2xl border border-zinc-200/90 bg-white px-4 py-3.5 shadow-2xs">
+        <div className="rsl-frost-card flex items-center justify-between rounded-2xl px-4 py-3.5">
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
               Google Suite
@@ -600,7 +606,7 @@ export function ConnectionsHub({
       {/* SECTION 1: META BUSINESS SUITE */}
       <SectionCard
         title="Meta Business Suite"
-        subtitle="Sign in with Facebook once to connect WhatsApp Business, Instagram, your Facebook Page, and Meta Ads automatically — no tokens or IDs required."
+        subtitle="Sign in with Facebook once to connect WhatsApp Business, Instagram, your Facebook Page, and Meta Ads automatically - no tokens or IDs required."
         action={
           canManage ? (
             <ConnectWithFacebookButton
@@ -647,7 +653,7 @@ export function ConnectionsHub({
                 <div className="space-y-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-2.5">
-                      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-[#1877F2] ring-1 ring-blue-100">
+                      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200">
                         <FacebookLogo className="h-4 w-4" />
                       </span>
                       <div>
@@ -764,7 +770,7 @@ export function ConnectionsHub({
                             {igAccounts.map((ig) => (
                               <option key={ig.igUserId} value={ig.igUserId}>
                                 {ig.igUsername ? `@${ig.igUsername}` : ig.name || ig.igUserId}
-                                {ig.linkedPageName ? ` — ${ig.linkedPageName}` : ""}
+                                {ig.linkedPageName ? ` - ${ig.linkedPageName}` : ""}
                               </option>
                             ))}
                           </select>
@@ -1087,7 +1093,7 @@ export function ConnectionsHub({
                             {locations.map((loc) => (
                               <option key={loc.locationId} value={loc.locationId}>
                                 {loc.title}
-                                {loc.storeAddress ? ` — ${loc.storeAddress}` : ""}
+                                {loc.storeAddress ? ` - ${loc.storeAddress}` : ""}
                               </option>
                             ))}
                           </select>
@@ -1289,9 +1295,46 @@ export function ConnectionsHub({
                 Click to expand.
               </p>
             </div>
-            <span className="rounded-lg border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-900">
-              Expand Manual Setup
-            </span>
+            <div className="flex items-center gap-2">
+              <GuideDrawerButton
+                drawerId="connections-manual-webhook-guide"
+                label="Need help? • Manual Webhook Setup"
+                guide={{
+                  eyebrow: "Backend-Enabled Manual Override",
+                  title: "Linking Custom System User Tokens & Webhooks",
+                  summary:
+                    "Most workspaces connect in one click via Facebook & Google Sign-In above. Use this section only when Staff has enabled custom System User credentials.",
+                  copyValues:
+                    whatsappWebhookUrl && metaWebhookUrl
+                      ? [
+                          { label: "WhatsApp Webhook URL", value: whatsappWebhookUrl },
+                          { label: "Meta / Instagram Webhook URL", value: metaWebhookUrl },
+                          { label: "Webhook Verify Token", value: verifyToken },
+                        ]
+                      : undefined,
+                  steps: [
+                    {
+                      title: "Configure Webhook Callback URLs in Meta Developer Console",
+                      detail:
+                        "Point WhatsApp Business webhooks to the WhatsApp Webhook URL and Page/Instagram webhooks to the Meta Webhook URL using your Verify Token.",
+                    },
+                    {
+                      title: "Paste your permanent System User token & Asset ID",
+                      detail:
+                        "Select the channel type, enter the 15-digit Phone Number ID / Ad Account ID / Page ID, and paste your System User token.",
+                    },
+                    {
+                      title: "Verify live reachability",
+                      detail:
+                        "After saving, click 'Check' on the connected channel card to run a live provider health check.",
+                    },
+                  ],
+                }}
+              />
+              <span className="rounded-lg border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-900">
+                Expand Manual Setup
+              </span>
+            </div>
           </summary>
 
           <div className="mt-5 space-y-5 border-t border-amber-200/70 pt-5">
@@ -1460,7 +1503,7 @@ export function ConnectionsHub({
                 </div>
                 <div>
                   <label className="mb-1 block font-semibold text-slate-700">
-                    Refresh Token (Optional — Google OAuth)
+                    Refresh Token (Optional - Google OAuth)
                   </label>
                   <input
                     name="refreshToken"

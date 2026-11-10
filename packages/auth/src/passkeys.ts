@@ -402,7 +402,9 @@ export function completePasskeyAuthentication(params: {
       activeWorkspaceId,
       ipAddress: params.ipAddress ?? null,
       userAgent: params.userAgent ?? null,
-      expiresAt: now + 30 * 24 * 60 * 60 * 1000,
+      lastActiveAt: now,
+      stepUpAt: now,
+      expiresAt: now + 7 * 24 * 60 * 60 * 1000,
       createdAt: now,
     })
     .run();

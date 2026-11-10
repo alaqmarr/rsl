@@ -9,11 +9,16 @@ import {
   updateGoogleBusinessReviewSyncMetadata,
   type GoogleBusinessDiscoveryStatus,
 } from "@rsl/connections";
-import { newId, RslError } from "@rsl/core";
+import { assertSafeExternalUrl, fetchWithRetry, newId, RslError } from "@rsl/core";
 import { controlSchema, tenantDataSchema } from "@rsl/database";
 import { defineAction } from "@rsl/logging";
 import { sendWorkspaceWebPushNotification } from "@rsl/notifications";
-import { controlDb, runCloudflareWorkersAiText, tenantDataDb } from "@rsl/tenancy";
+import {
+  controlDb,
+  isWorkspaceSandboxIntegrationMode,
+  runCloudflareWorkersAiText,
+  tenantDataDb,
+} from "@rsl/tenancy";
 
 export function listGoogleReviews(workspaceId: string) {
   return tenantDataDb({ workspaceId })
@@ -160,7 +165,7 @@ export async function syncGoogleBusinessReviewsForWorkspace(params: {
   const resolvedLocationName = profile.storeName || ws?.name || gbpConn.displayName;
 
   // Sandbox mode returns local counts cleanly without outbound HTTP
-  if (/^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken)) {
+  if (isWorkspaceSandboxIntegrationMode(params.workspaceId, accessToken)) {
     const existingRows = listGoogleReviews(params.workspaceId);
     updateGoogleBusinessReviewSyncMetadata({
       workspaceId: params.workspaceId,
@@ -228,10 +233,11 @@ export async function syncGoogleBusinessReviewsForWorkspace(params: {
           url.searchParams.set("pageToken", pageToken);
         }
 
-        const resp = await fetch(url.toString(), {
+        const resp = await fetchWithRetry(url.toString(), {
           method: "GET",
           headers: { Authorization: `Bearer ${accessToken}` },
-          signal: AbortSignal.timeout(8000),
+          timeoutMs: 8000,
+          maxRetries: 2,
         });
         const bodyTxt = await resp.text().catch(() => "");
 
@@ -425,7 +431,7 @@ export async function syncGoogleBusinessReviewsForWorkspace(params: {
     averageRating: computedAvg,
     message:
       fetchedReviews.length === 0
-        ? `Connected to ${resolvedLocationName} — 0 customer reviews posted on Google Maps yet.`
+        ? `Connected to ${resolvedLocationName} - 0 customer reviews posted on Google Maps yet.`
         : `Synced ${fetchedReviews.length} Google review${fetchedReviews.length === 1 ? "" : "s"} for ${resolvedLocationName} (${newCount} new, ${updatedCount} updated).`,
   };
 }
@@ -480,10 +486,10 @@ function buildSmartReplyDraftText(params: {
   }
 
   if (params.rating === 3) {
-    return `Thank you for sharing your honest feedback with ${branch}, ${firstName}. We want every customer experience to be smooth and reliable — please reach out to our team directly so we can understand what we could have done better for you.`;
+    return `Thank you for sharing your honest feedback with ${branch}, ${firstName}. We want every customer experience to be smooth and reliable - please reach out to our team directly so we can understand what we could have done better for you.`;
   }
 
-  return `Dear ${firstName}, thank you for bringing this to our attention, and please accept our sincere apologies that your experience with ${branch} fell short of expectations. Our manager would like to resolve this for you right away — please message or call our desk directly with your order or visit details so we can make things right.`;
+  return `Dear ${firstName}, thank you for bringing this to our attention, and please accept our sincere apologies that your experience with ${branch} fell short of expectations. Our manager would like to resolve this for you right away - please message or call our desk directly with your order or visit details so we can make things right.`;
 }
 
 export const recordGoogleReview = defineAction({
@@ -568,21 +574,25 @@ export const generateSmartReviewDraft = defineAction({
     }
 
     const aiReply = await runCloudflareWorkersAiText({
+      workspaceId: ctx.workspaceId,
       systemPrompt:
         "You write warm, professional, concise owner replies to Google Business Profile reviews for Indian businesses. Address the customer by name, acknowledge their exact feedback, never invent discounts, and keep under 75 words. Output ONLY the reply text.",
       userPrompt: `Business Location: ${review.locationName}\nReviewer: ${review.reviewerName}\nStar Rating: ${review.rating}/5\nReview Comment: ${review.comment}`,
       maxTokens: 180,
     });
 
-    const draftText =
-      aiReply.ok && aiReply.text
-        ? aiReply.text
-        : buildSmartReplyDraftText({
-            reviewerName: review.reviewerName,
-            locationName: review.locationName,
-            rating: review.rating,
-            comment: review.comment,
-          });
+    const isAiGenerated = Boolean(aiReply.ok && aiReply.text);
+    const provider: "workers_ai" | "template_fallback" = isAiGenerated
+      ? "workers_ai"
+      : "template_fallback";
+    const draftText = isAiGenerated
+      ? aiReply.text!
+      : buildSmartReplyDraftText({
+          reviewerName: review.reviewerName,
+          locationName: review.locationName,
+          rating: review.rating,
+          comment: review.comment,
+        });
 
     db.update(tenantDataSchema.reviews)
       .set({
@@ -598,11 +608,11 @@ export const generateSmartReviewDraft = defineAction({
       quantity: 1,
       unitCostPaise,
       dedupeKey: `review_draft:${review.id}:${Math.floor(Date.now() / 3000)}`,
-      description: `Smart reply draft for ${review.reviewerName} (${review.rating}★)`,
+      description: `Smart reply draft (${provider}) for ${review.reviewerName} (${review.rating}★)`,
       actorId: ctx.actorId,
     });
 
-    return { reviewId: review.id, draftText };
+    return { reviewId: review.id, draftText, provider, isAiGenerated };
   },
 });
 
@@ -645,7 +655,7 @@ export const replyToGoogleReview = defineAction({
           );
         }
 
-        if (!/^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken)) {
+        if (!isWorkspaceSandboxIntegrationMode(ctx.workspaceId, accessToken)) {
           let reviewResourcePath = review.externalReviewId.trim();
           if (!reviewResourcePath.startsWith("accounts/")) {
             const locPart = gbpConn.metadata.locationId?.startsWith("locations/")
@@ -667,7 +677,7 @@ export const replyToGoogleReview = defineAction({
             reviewResourcePath = `${accPart}/${locPart}/reviews/${reviewResourcePath}`;
           }
 
-          const putResp = await fetch(
+          const putResp = await fetchWithRetry(
             `https://mybusiness.googleapis.com/v4/${reviewResourcePath}/reply`,
             {
               method: "PUT",
@@ -676,7 +686,8 @@ export const replyToGoogleReview = defineAction({
                 "Content-Type": "application/json",
               },
               body: JSON.stringify({ comment: cleanReply }),
-              signal: AbortSignal.timeout(8000),
+              timeoutMs: 8000,
+              maxRetries: 2,
             }
           );
 
@@ -738,7 +749,7 @@ export async function publishGoogleBusinessLocalPost(params: {
     };
   }
 
-  if (/^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken)) {
+  if (isWorkspaceSandboxIntegrationMode(params.workspaceId, accessToken)) {
     const sbId = `accounts/sandbox/locations/sandbox/localPosts/${newId()}`;
     return {
       ok: true,
@@ -783,33 +794,36 @@ export async function publishGoogleBusinessLocalPost(params: {
   };
 
   if (params.ctaUrl?.trim()) {
+    const safeCtaUrl = await assertSafeExternalUrl(params.ctaUrl.trim(), { label: "CTA URL" });
     const actionType = params.ctaType && params.ctaType !== "CALL" ? params.ctaType : "LEARN_MORE";
     payload.callToAction = {
       actionType,
-      url: params.ctaUrl.trim(),
+      url: safeCtaUrl,
     };
   } else if (params.ctaType === "CALL") {
     payload.callToAction = { actionType: "CALL" };
   }
 
   if (params.mediaUrl?.trim()) {
+    const safeMediaUrl = await assertSafeExternalUrl(params.mediaUrl.trim(), { label: "Media URL" });
     payload.media = [
       {
         mediaFormat: "PHOTO",
-        sourceUrl: params.mediaUrl.trim(),
+        sourceUrl: safeMediaUrl,
       },
     ];
   }
 
   try {
-    const resp = await fetch(`https://mybusiness.googleapis.com/v4/${parentPath}/localPosts`, {
+    const resp = await fetchWithRetry(`https://mybusiness.googleapis.com/v4/${parentPath}/localPosts`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(10_000),
+      timeoutMs: 10_000,
+      maxRetries: 2,
     });
 
     const body = (await resp.json().catch(() => ({}))) as {

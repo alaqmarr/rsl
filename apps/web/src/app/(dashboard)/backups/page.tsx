@@ -3,8 +3,17 @@ import { getWorkspacePlansByKeys } from "@rsl/billing";
 import { listWorkspaceConnections } from "@rsl/connections";
 import { canRoleAccessWebRoute, canRolePerform, formatRoleLabel } from "@rsl/rbac";
 import { getWorkspaceStorageStatus } from "@rsl/storage";
-import { getPublicGoogleOAuthStatus } from "@rsl/tenancy";
-import { AccessRestrictedState, MetricCard, PageHeader, SectionCard, StatusPill } from "@rsl/ui";
+import { getPublicGoogleOAuthStatus, getWorkspaceCloudflareStatus } from "@rsl/tenancy";
+import {
+  AccessRestrictedState,
+  ConfirmSubmitButton,
+  GuideDrawerButton,
+  MetricCard,
+  PageHeader,
+  SectionCard,
+  StatusPill,
+} from "@rsl/ui";
+import { CloudflareOneClickConnectCard } from "@/components/cloudflare-one-click-card";
 import { InlineAddonPlanBanner } from "@/components/feature-plan-gate";
 import { FlashBanner } from "@/components/flash-banner";
 import { ConnectToGoogleDriveButton, GoogleGLogo } from "@/components/google-drive-connect-button";
@@ -12,6 +21,7 @@ import { SubmitButton } from "@/components/ios-feedback";
 import { SettingsNav } from "@/components/settings-nav";
 import {
   createEncryptedBackupAction,
+  deleteWorkspaceStoredObjectAction,
   disconnectGoogleDriveFromBackupsAction,
   importContactsCsvAction,
   optimizeDatabaseAction,
@@ -64,6 +74,7 @@ export default async function DatabaseStorageAndBackupsPage({
   const dbInfo = getWorkspaceDatabaseManagementInfo(session.workspace.id);
   const storage = getWorkspaceStorageStatus(session.workspace.id);
   const googleOAuth = getPublicGoogleOAuthStatus();
+  const cloudflareStatus = getWorkspaceCloudflareStatus(session.workspace.id);
   const workspaceConnections = listWorkspaceConnections(session.workspace.id);
   const activeDriveConn = workspaceConnections.connections.find(
     (c) => c.channelKind === "google_drive"
@@ -159,16 +170,23 @@ export default async function DatabaseStorageAndBackupsPage({
           value={String(dbInfo.backupRuns.length)}
           sublabel={
             dbInfo.lastBackupAt
-              ? `Last backup ${new Date(dbInfo.lastBackupAt).toLocaleDateString("en-IN")}`
+              ? `Last backup ${new Date(dbInfo.lastBackupAt).toLocaleDateString("en-IN", {
+                  timeZone: "Asia/Kolkata",
+                })}`
               : "No backup created yet"
           }
         />
       </div>
 
-      {/* 1. Primary Google Drive Backups Hero Card — Right Above the Fold */}
+      {/* 1. Primary Google Drive Backups Hero Card - Right Above the Fold */}
+      <CloudflareOneClickConnectCard
+        initialStatus={cloudflareStatus}
+        canManage={canManageStorage}
+      />
+
       <SectionCard
         title="Google Drive Automatic Off-Site Backups"
-        subtitle="Connect your personal Gmail or Google Workspace Drive in 1 click — creates your backup folder automatically and syncs every encrypted .rslbackup snapshot."
+        subtitle="Connect your personal Gmail or Google Workspace Drive in 1 click - creates your backup folder automatically and syncs every encrypted .rslbackup snapshot."
         action={
           <StatusPill
             label={
@@ -203,7 +221,7 @@ export default async function DatabaseStorageAndBackupsPage({
                 </span>
               </div>
               <p className="text-xs leading-relaxed text-slate-700">
-                Connected via Google&apos;s official Consent Screen (<code className="font-mono">drive.file</code> scope — RapidShift Labs cannot see or read any other files in your Drive). Every backup you create is uploaded automatically to{" "}
+                Connected via Google&apos;s official Consent Screen (<code className="font-mono">drive.file</code> scope - RapidShift Labs cannot see or read any other files in your Drive). Every backup you create is uploaded automatically to{" "}
                 <strong>{activeDriveConn.metadata.folderName || googleOAuth.defaultDriveFolderName}</strong>.
               </p>
               <a
@@ -237,12 +255,12 @@ export default async function DatabaseStorageAndBackupsPage({
                   />
                   <form action={disconnectGoogleDriveFromBackupsAction}>
                     <input type="hidden" name="connectionId" value={activeDriveConn.id} />
-                    <SubmitButton
+                    <ConfirmSubmitButton
+                      confirmMessage="Disconnect Google Drive automatic off-site backups? Existing files in your Google Drive folder will remain untouched."
                       className="rsl-btn-danger-soft py-1.5 text-xs"
-                      pendingText="Disconnecting..."
                     >
                       Disconnect
-                    </SubmitButton>
+                    </ConfirmSubmitButton>
                   </form>
                 </>
               )}
@@ -250,39 +268,58 @@ export default async function DatabaseStorageAndBackupsPage({
           </div>
         ) : !canManageStorage ? (
           <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-3.5 text-xs text-zinc-600">
-            Read-only view — ask the Business Owner or an Admin to click &ldquo;Connect to Google Drive&rdquo; for automatic off-site backups.
+            Read-only view - ask the Business Owner or an Admin to click &ldquo;Connect to Google Drive&rdquo; for automatic off-site backups.
           </div>
         ) : (
-          <div className="rounded-2xl border border-emerald-200/90 bg-emerald-50/65 p-5 text-[13px]">
+          <div className="rsl-frost-surface rounded-2xl p-5 text-[13px]">
             <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
-              <div className="max-w-2xl space-y-2">
+              <div className="space-y-1.5">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200">
+                  <span className="rsl-pill rsl-pill-forest">
                     <GoogleGLogo className="h-3.5 w-3.5" />
-                    <span>1-Click Official Google Sign-In</span>
-                  </span>
-                  <span className="text-[11px] font-medium text-emerald-900/80">
-                    Zero JSON files • Zero manual Folder IDs
+                    <span>1-Click Google Drive Off-Site Backup</span>
                   </span>
                 </div>
                 <div className="text-sm font-bold text-slate-900">
-                  Connect Your Google Drive for Automatic Off-Site Backups
+                  Connect Google Drive for Automatic Encrypted Snapshots
                 </div>
-                <p className="text-xs leading-relaxed text-slate-700">
-                  Click <strong>Connect to Google Drive</strong> to sign in on Google&apos;s official{" "}
-                  <strong>{googleOAuth.consentAppName || "RapidShift Labs"}</strong> screen. RapidShift Labs automatically creates a{" "}
-                  <strong>{googleOAuth.defaultDriveFolderName || "RapidShift Labs Backups"}</strong> folder in your Drive using Google&apos;s strict{" "}
-                  <code className="font-mono">drive.file</code> privacy scope (never sees any other files in your Drive) and uploads every{" "}
-                  <code className="font-mono">.rslbackup</code> snapshot automatically.
-                </p>
                 {!googleOAuth.enableDriveOAuth && (
-                  <p className="text-[11px] font-medium text-amber-900">
-                    1-click Google Drive sign-in is being enabled for this workspace. Meanwhile, you can download encrypted <code className="font-mono">.rslbackup</code> files directly to your computer below.
+                  <p className="text-xs font-medium text-amber-900">
+                    1-click Google Drive sign-in is awaiting platform setup. You can still download
+                    encrypted <code className="font-mono">.rslbackup</code> files locally below.
                   </p>
                 )}
               </div>
 
-              <div className="shrink-0">
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <GuideDrawerButton
+                  label="Need help? • Backup Guide"
+                  badgeText="3 steps"
+                  guide={{
+                    eyebrow: "Encrypted Off-Site Backups",
+                    title: "Google Drive & Custom S3 / R2 Backups",
+                    summary:
+                      "Protect your workspace with AES-256-GCM signed .rslbackup bundles stored automatically in your own Google Drive or cloud bucket.",
+                    estimatedTime: "~2 min",
+                    steps: [
+                      {
+                        title: "Click Connect to Google Drive",
+                        detail: `Sign in on Google's official ${googleOAuth.consentAppName || "RapidShift Labs"} consent screen. Zero service-account JSON files or manual folder IDs are needed.`,
+                      },
+                      {
+                        title: "Isolated drive.file Privacy Scope",
+                        detail: `RapidShift creates a dedicated '${googleOAuth.defaultDriveFolderName || "RapidShift Labs Backups"}' folder using Google's strict drive.file scope so it never sees any other files in your Drive.`,
+                      },
+                      {
+                        title: "Nightly Snapshots & Instant Restore",
+                        detail:
+                          "Every nightly or manual .rslbackup snapshot is encrypted and hash-verified. Customer STOP opt-outs remain preserved across restores.",
+                      },
+                    ],
+                    fullGuideHref: "/help?slug=storage-r2-and-backups",
+                    fullGuideLabel: "Open Full Backup Guide",
+                  }}
+                />
                 <ConnectToGoogleDriveButton
                   returnTo="/backups"
                   label="Connect to Google Drive"
@@ -331,7 +368,7 @@ export default async function DatabaseStorageAndBackupsPage({
 
           {!canManageStorage ? (
             <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-3.5 text-xs text-zinc-600">
-              Read-only storage view — ask the Business Owner or an Admin to switch cloud storage providers or update bucket credentials.
+              Read-only storage view - ask the Business Owner or an Admin to switch cloud storage providers or update bucket credentials.
             </div>
           ) : (
           <form action={switchStorageModeAction} className="space-y-4 text-[13px]">
@@ -449,7 +486,7 @@ export default async function DatabaseStorageAndBackupsPage({
             <InlineAddonPlanBanner plan={backupPlan} returnPath="/backups" />
           ) : !canRunBackups ? (
             <p className="text-[13px] text-zinc-500">
-              Read-only backup view — ask an Admin or the Business Owner to create or download encrypted backup bundles.
+              Read-only backup view - ask an Admin or the Business Owner to create or download encrypted backup bundles.
             </p>
           ) : (
             <div className="space-y-3 text-[13px]">
@@ -505,7 +542,10 @@ export default async function DatabaseStorageAndBackupsPage({
                 <li key={b.id} className="flex items-center justify-between gap-3 py-2.5">
                   <div>
                     <div className="font-semibold text-slate-900 tabular-nums">
-                      Backup from {new Date(b.createdAt).toLocaleString("en-IN")}
+                      Backup from{" "}
+                      {new Date(b.createdAt).toLocaleString("en-IN", {
+                        timeZone: "Asia/Kolkata",
+                      })}
                     </div>
                     <div className="text-xs text-zinc-500 tabular-nums">
                       {b.kind.toUpperCase()} • {formatBytes(b.sizeBytes)}
@@ -533,7 +573,7 @@ export default async function DatabaseStorageAndBackupsPage({
             <InlineAddonPlanBanner plan={backupPlan} returnPath="/backups" />
           ) : !canRestoreBackup ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-3.5 text-xs text-amber-950">
-              Restricted to Business Owner — restoring a workspace snapshot replaces live operational records and can only be initiated by the Business Owner.
+              Restricted to Business Owner - restoring a workspace snapshot replaces live operational records and can only be initiated by the Business Owner.
             </div>
           ) : (
             <form action={restoreBackupAction} className="space-y-3.5 text-[13px]">
@@ -636,7 +676,7 @@ export default async function DatabaseStorageAndBackupsPage({
           >
             {!canImportContacts ? (
               <p className="text-[13px] text-zinc-500">
-                Read-only role — ask a team member with Customer Messages access to import contact CSVs.
+                Read-only role - ask a team member with Customer Messages access to import contact CSVs.
               </p>
             ) : (
             <form action={importContactsCsvAction} className="space-y-3.5 text-[13px]">
@@ -714,6 +754,80 @@ export default async function DatabaseStorageAndBackupsPage({
           </SectionCard>
         </div>
       </div>
+
+      {/* Stored Workspace Files & Quota Reclamation */}
+      <SectionCard
+        title={`Stored Workspace Files & Quota Management (${storage.objects.length})`}
+        subtitle={`Using ${formatBytes(storage.config.usedBytes)} across ${storage.config.objectCount} stored file(s). Delete obsolete exports, Tally PDFs, or archives anytime to reclaim storage quota.`}
+        noPadding
+      >
+        {storage.objects.length === 0 ? (
+          <div className="p-6 text-xs text-zinc-500">
+            No individual cloud objects stored yet. Generated Tally PDFs, GST tax invoices, and
+            backup bundles appear here with 1-click quota cleanup.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <caption className="sr-only">
+                Stored workspace files with size, category, and quota deletion controls
+              </caption>
+              <thead className="border-b border-zinc-200/80 bg-zinc-50/75 text-xs tracking-wider text-zinc-500 uppercase">
+                <tr>
+                  <th scope="col" className="px-5 py-3 font-semibold sm:px-6">
+                    File Name
+                  </th>
+                  <th scope="col" className="px-4 py-3 font-semibold">
+                    Category
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-right font-semibold">
+                    Size
+                  </th>
+                  <th scope="col" className="px-4 py-3 font-semibold">
+                    Stored On (IST)
+                  </th>
+                  <th scope="col" className="px-5 py-3 text-right font-semibold sm:px-6">
+                    Action
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100 bg-white">
+                {storage.objects.map((obj) => (
+                  <tr key={obj.id}>
+                    <td className="px-5 py-3 font-mono font-medium text-slate-900 sm:px-6">
+                      {obj.fileName}
+                    </td>
+                    <td className="px-4 py-3 text-zinc-600">{obj.category}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-slate-900 tabular-nums">
+                      {formatBytes(obj.sizeBytes)}
+                    </td>
+                    <td className="px-4 py-3 text-zinc-600 whitespace-nowrap tabular-nums">
+                      {new Date(obj.createdAt).toLocaleString("en-IN", {
+                        timeZone: "Asia/Kolkata",
+                      })}
+                    </td>
+                    <td className="px-5 py-3 text-right sm:px-6">
+                      {canManageStorage ? (
+                        <form action={deleteWorkspaceStoredObjectAction} className="inline-flex">
+                          <input type="hidden" name="objectId" value={obj.id} />
+                          <ConfirmSubmitButton
+                            confirmMessage={`Delete stored file "${obj.fileName}" (${formatBytes(obj.sizeBytes)}) and reclaim quota?`}
+                            className="rsl-btn-danger-soft px-2.5 py-1 text-xs"
+                          >
+                            Delete File
+                          </ConfirmSubmitButton>
+                        </form>
+                      ) : (
+                        <span className="text-zinc-400">Read-only</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
     </div>
   );
 }

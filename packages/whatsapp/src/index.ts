@@ -8,7 +8,7 @@ import {
   getWalletBalancePaise,
   WALLET_OVERDRAFT_LIMIT_PAISE,
 } from "@rsl/billing";
-import { decryptEnvelope, formatInr, newEntityId, newId, RslError } from "@rsl/core";
+import { decryptEnvelope, fetchWithRetry, formatInr, newEntityId, newId, RslError } from "@rsl/core";
 import { controlSchema, tenantDataSchema, tenantLogsSchema } from "@rsl/database";
 import { defineAction } from "@rsl/logging";
 import {
@@ -20,7 +20,12 @@ import {
   reserveSendGuard,
   type JobEnvelope,
 } from "@rsl/queue";
-import { controlDb, tenantDataDb, tenantLogsDb } from "@rsl/tenancy";
+import {
+  controlDb,
+  isWorkspaceSandboxIntegrationMode,
+  tenantDataDb,
+  tenantLogsDb,
+} from "@rsl/tenancy";
 
 function extractConnectionAccessToken(encryptedBlob: string): string {
   const decrypted = decryptEnvelope(encryptedBlob);
@@ -411,7 +416,7 @@ export const createWhatsAppTemplate = defineAction({
 
     if (input.submitToMeta && wabaConn && wabaConn.status === "healthy") {
       const token = extractConnectionAccessToken(wabaConn.encryptedTokens);
-      const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(token);
+      const isSandbox = isWorkspaceSandboxIntegrationMode(ctx.workspaceId, token);
 
       if (!isSandbox && token) {
         const wabaGraphId = resolveWabaGraphId(wabaConn);
@@ -427,7 +432,7 @@ export const createWhatsAppTemplate = defineAction({
 
         let resp: Response;
         try {
-          resp = await fetch(
+          resp = await fetchWithRetry(
             `https://graph.facebook.com/v21.0/${encodeURIComponent(wabaGraphId)}/message_templates`,
             {
               method: "POST",
@@ -441,7 +446,8 @@ export const createWhatsAppTemplate = defineAction({
                 category: input.category.toUpperCase(),
                 components,
               }),
-              signal: AbortSignal.timeout(12_000),
+              timeoutMs: 12_000,
+              maxRetries: 2,
             }
           );
         } catch (err) {
@@ -620,7 +626,7 @@ export const submitWhatsAppTemplateToMeta = defineAction({
     }
 
     const now = Date.now();
-    const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(token);
+    const isSandbox = isWorkspaceSandboxIntegrationMode(ctx.workspaceId, token);
     let metaTemplateId = existing.metaTemplateId;
     let approvalStatus = "PENDING";
 
@@ -642,7 +648,7 @@ export const submitWhatsAppTemplateToMeta = defineAction({
 
       let resp: Response;
       try {
-        resp = await fetch(
+        resp = await fetchWithRetry(
           `https://graph.facebook.com/v21.0/${encodeURIComponent(wabaGraphId)}/message_templates`,
           {
             method: "POST",
@@ -656,7 +662,8 @@ export const submitWhatsAppTemplateToMeta = defineAction({
               category: parsed.category.toUpperCase(),
               components,
             }),
-            signal: AbortSignal.timeout(12_000),
+            timeoutMs: 12_000,
+            maxRetries: 2,
           }
         );
       } catch (err) {
@@ -720,7 +727,7 @@ export const installStarterTallyTemplates = defineAction({
 
     const wabaHealthy = Boolean(wabaConn && wabaConn.status === "healthy");
     const token = wabaHealthy && wabaConn ? extractConnectionAccessToken(wabaConn.encryptedTokens) : "";
-    const isSandbox = Boolean(token) && /^(rsl_sandbox_|sandbox_|test_)/i.test(token);
+    const isSandbox = Boolean(token) && isWorkspaceSandboxIntegrationMode(ctx.workspaceId, token);
     const wabaGraphId = wabaHealthy && wabaConn ? resolveWabaGraphId(wabaConn) : "";
 
     const presets: Array<{
@@ -769,7 +776,7 @@ export const installStarterTallyTemplates = defineAction({
         name: "tally_payment_receipt_ack",
         category: "utility",
         headerType: "TEXT",
-        headerText: "Payment Received — Thank You",
+        headerText: "Payment Received - Thank You",
         bodyText:
           "Namaste {{1}}, we have received your payment of {{3}} under Receipt #{{2}} on {{4}}. Thank you!",
         footerText: "Automated update from accounts desk",
@@ -936,14 +943,16 @@ export const syncWhatsAppTemplatesWithMeta = defineAction({
     }
 
     const token = extractConnectionAccessToken(conn.encryptedTokens);
-    if (/^(rsl_sandbox_|sandbox_|test_)/i.test(token)) {
+    if (isWorkspaceSandboxIntegrationMode(ctx.workspaceId, token)) {
       return { syncedCount: 0 };
     }
     const wabaGraphId = resolveWabaGraphId(conn);
-    const resp = await fetch(
+    const resp = await fetchWithRetry(
       `https://graph.facebook.com/v21.0/${encodeURIComponent(wabaGraphId)}/message_templates?limit=100`,
       {
         headers: { Authorization: `Bearer ${token}` },
+        timeoutMs: 10_000,
+        maxRetries: 2,
       }
     );
 
@@ -1039,6 +1048,8 @@ export async function executeWhatsAppTemplateSend(params: {
 }): Promise<{
   sent: boolean;
   mode?: "live" | "sandbox" | "disconnected";
+  isSandboxData?: boolean;
+  authRevoked?: boolean;
   deduplicated?: boolean;
   skippedReason?: string;
   externalMessageId?: string;
@@ -1095,8 +1106,8 @@ export async function executeWhatsAppTemplateSend(params: {
     return {
       sent: false,
       skippedReason: rawTemplate
-        ? `Template '${rawTemplate.name}' is currently ${rawTemplate.approvalStatus} (must be Meta-approved 'APPROVED' before sending — ₹0.00 deducted)`
-        : "Template is missing or not approved yet (₹0.00 deducted)",
+        ? `Template '${rawTemplate.name}' is currently ${rawTemplate.approvalStatus} (must be Meta-approved 'APPROVED' before sending)`
+        : "Template is missing or not approved yet",
     };
   }
 
@@ -1128,7 +1139,8 @@ export async function executeWhatsAppTemplateSend(params: {
     return {
       sent: false,
       mode: "disconnected",
-      skippedReason: "WhatsApp Business Account is not connected under Connected Channels — ₹0.00 deducted",
+      authRevoked: wabaConn?.status === "needs_reauth",
+      skippedReason: "WhatsApp Business Account is not connected or requires re-authorization under Connected Channels",
     };
   }
 
@@ -1137,16 +1149,16 @@ export async function executeWhatsAppTemplateSend(params: {
     return {
       sent: false,
       mode: "disconnected",
-      skippedReason: "WhatsApp Business Account access token is missing — ₹0.00 deducted",
+      skippedReason: "WhatsApp Business Account access token is missing",
     };
   }
 
-  const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken);
+  const isSandbox = isWorkspaceSandboxIntegrationMode(params.workspaceId, accessToken);
   if (!isSandbox && !rawTemplate.metaTemplateId) {
     return {
       sent: false,
       mode: "live",
-      skippedReason: `Template '${rawTemplate.name}' has not been verified on Meta WhatsApp Manager yet — sync or submit it first (₹0.00 deducted)`,
+      skippedReason: `Template '${rawTemplate.name}' has not been verified on Meta WhatsApp Manager yet; sync or submit it first`,
     };
   }
 
@@ -1201,7 +1213,7 @@ export async function executeWhatsAppTemplateSend(params: {
       return {
         sent: false,
         mode: "live",
-        skippedReason: "WhatsApp Phone Number ID is missing on Connected Channels — ₹0.00 deducted",
+        skippedReason: "WhatsApp Phone Number ID is missing on Connected Channels",
       };
     }
 
@@ -1220,7 +1232,7 @@ export async function executeWhatsAppTemplateSend(params: {
 
     let resp: Response;
     try {
-      resp = await fetch(
+      resp = await fetchWithRetry(
         `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`,
         {
           method: "POST",
@@ -1229,7 +1241,8 @@ export async function executeWhatsAppTemplateSend(params: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify(apiBody),
-          signal: AbortSignal.timeout(15_000),
+          timeoutMs: 15_000,
+          maxRetries: 2,
         }
       );
     } catch (err) {
@@ -1255,7 +1268,7 @@ export async function executeWhatsAppTemplateSend(params: {
       return {
         sent: false,
         mode: "live",
-        skippedReason: `Network error reaching Meta WhatsApp Cloud API (${err instanceof Error ? err.message : "timeout"}) — ₹0.00 deducted`,
+        skippedReason: `Network error reaching Meta WhatsApp Cloud API (${err instanceof Error ? err.message : "timeout"})`,
       };
     }
 
@@ -1276,10 +1289,22 @@ export async function executeWhatsAppTemplateSend(params: {
 
     const resJson = (await resp.json().catch(() => ({}))) as {
       messages?: Array<{ id?: string }>;
-      error?: { message?: string; error_user_msg?: string };
+      error?: { message?: string; error_user_msg?: string; code?: number };
     };
 
     if (!resp.ok) {
+      const authRevoked = resp.status === 401 || resJson.error?.code === 190;
+      if (authRevoked) {
+        ctrl
+          .update(controlSchema.connections)
+          .set({
+            status: "needs_reauth",
+            lastHealthCheckAt: Date.now(),
+            updatedAt: Date.now(),
+          })
+          .where(eq(controlSchema.connections.id, wabaConn.id))
+          .run();
+      }
       markSendGuardOutcome({
         workspaceId: params.workspaceId,
         idempotencyKey: params.idempotencyKey,
@@ -1288,7 +1313,8 @@ export async function executeWhatsAppTemplateSend(params: {
       return {
         sent: false,
         mode: "live",
-        skippedReason: `WhatsApp Cloud API rejected message (HTTP ${resp.status}: ${resJson.error?.error_user_msg || resJson.error?.message || "delivery rejected"}) — ₹0.00 deducted`,
+        authRevoked,
+        skippedReason: `WhatsApp Cloud API rejected message (HTTP ${resp.status}: ${resJson.error?.error_user_msg || resJson.error?.message || "delivery rejected"})`,
       };
     }
 
@@ -1302,7 +1328,7 @@ export async function executeWhatsAppTemplateSend(params: {
       return {
         sent: false,
         mode: "live",
-        skippedReason: "WhatsApp Cloud API did not return a confirmed message ID (wamid) — ₹0.00 deducted",
+        skippedReason: "WhatsApp Cloud API did not return a confirmed message ID (wamid)",
       };
     }
     externalMessageId = returnedMsgId;
@@ -1465,6 +1491,7 @@ export async function executeWhatsAppTemplateSend(params: {
   return {
     sent: true,
     mode: sendMode,
+    isSandboxData: isSandbox,
     externalMessageId,
     renderedPreview: previewWithPdf,
     ...(params.pdfDocument?.url ? { attachedPdfUrl: params.pdfDocument.url } : {}),
@@ -1527,7 +1554,7 @@ export async function sendWhatsAppDirectTextJob(params: {
 
   let extId = `wamid.job_${newId("msg", params.workspaceId)}`;
   const token = extractConnectionAccessToken(wabaConn.encryptedTokens);
-  const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(token);
+  const isSandbox = isWorkspaceSandboxIntegrationMode(params.workspaceId, token);
   const phoneNumberId = wabaAsset?.externalId || wabaConn.externalAccountId;
 
   if (!token) {
@@ -1678,12 +1705,13 @@ export async function executeWhatsAppBroadcastChunkJob(envelope: JobEnvelope): P
     .from(tenantDataSchema.broadcasts)
     .where(eq(tenantDataSchema.broadcasts.id, payload.broadcastId))
     .get();
-  if (!bcast) return;
+  if (!bcast || bcast.status === "paused" || bcast.status === "completed") return;
 
   const unitCostPaise = payload.unitCostPaise ?? 85;
   let chunkSent = 0;
   let chunkImmediateDelivered = 0;
   let chunkFailed = 0;
+  let pausedDueToTokenRevocation = false;
 
   for (const recipient of payload.recipients) {
     const res = await executeWhatsAppTemplateSend({
@@ -1711,6 +1739,10 @@ export async function executeWhatsAppBroadcastChunkJob(envelope: JobEnvelope): P
       }
     } else {
       chunkFailed++;
+      if (res.authRevoked) {
+        pausedDueToTokenRevocation = true;
+        break;
+      }
     }
   }
 
@@ -1718,6 +1750,7 @@ export async function executeWhatsAppBroadcastChunkJob(envelope: JobEnvelope): P
   dataDb
     .update(tenantDataSchema.broadcasts)
     .set({
+      ...(pausedDueToTokenRevocation ? { status: "paused" } : {}),
       sentCount: sql`${tenantDataSchema.broadcasts.sentCount} + ${chunkSent}`,
       deliveredCount: sql`${tenantDataSchema.broadcasts.deliveredCount} + ${chunkImmediateDelivered}`,
       failedCount: sql`${tenantDataSchema.broadcasts.failedCount} + ${chunkFailed}`,
@@ -1725,6 +1758,10 @@ export async function executeWhatsAppBroadcastChunkJob(envelope: JobEnvelope): P
     })
     .where(eq(tenantDataSchema.broadcasts.id, payload.broadcastId))
     .run();
+
+  if (pausedDueToTokenRevocation) {
+    return;
+  }
 
   const updated = dataDb
     .select()
@@ -1811,7 +1848,7 @@ export const launchWhatsAppBroadcast = defineAction({
     }
 
     const accessToken = extractConnectionAccessToken(wabaConn.encryptedTokens);
-    const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken);
+    const isSandbox = isWorkspaceSandboxIntegrationMode(ctx.workspaceId, accessToken);
     if (!isSandbox && !template.metaTemplateId) {
       throw new RslError(
         "RSL-VAL-1001",
@@ -1908,7 +1945,7 @@ export const launchWhatsAppBroadcast = defineAction({
     }
 
     if (!isRedisConfigured()) {
-      await processDueSqliteOutboxForTenant(ctx.workspaceId);
+      await processDueSqliteOutboxForTenant(ctx.workspaceId, { queueName: "broadcast.fanout" });
     }
 
     const finalRow = dataDb

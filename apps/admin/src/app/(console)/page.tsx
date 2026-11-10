@@ -189,7 +189,7 @@ export default async function AdminHomePage({
                         />
                       )}
                       <span className="text-[11px] text-zinc-500">
-                        {new Date(req.createdAt).toLocaleString("en-IN")}
+                        {new Date(req.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
                       </span>
                     </div>
 
@@ -492,7 +492,7 @@ export default async function AdminHomePage({
                     );
                     return (
                       <option key={s.key} value={s.key}>
-                        {s.name} — ₹{monthly}/mo
+                        {s.name} - ₹{monthly}/mo
                       </option>
                     );
                   })}
@@ -811,11 +811,11 @@ export default async function AdminHomePage({
                     </td>
                     <td className="px-4 py-3 font-mono text-[11px] text-zinc-600">
                       {r.status === "activated"
-                        ? `${formatInr(r.amountPaidPaise ?? 0)} • ${(r.paymentMethod ?? "upi").toUpperCase()} (${r.paymentReference ?? "—"})`
+                        ? `${formatInr(r.amountPaidPaise ?? 0)} • ${(r.paymentMethod ?? "upi").toUpperCase()} (${r.paymentReference ?? "-"})`
                         : r.staffNotes ?? "Declined"}
                     </td>
                     <td className="px-6 py-3 text-right text-zinc-500">
-                      {r.reviewedAt ? new Date(r.reviewedAt).toLocaleString("en-IN") : "—"}
+                      {r.reviewedAt ? new Date(r.reviewedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "-"}
                     </td>
                   </tr>
                 ))}

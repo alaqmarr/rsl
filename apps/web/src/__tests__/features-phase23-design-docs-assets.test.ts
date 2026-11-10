@@ -88,8 +88,13 @@ describe("Sprint 6 & Sprint 7 — Design Tokens, True Vector Assets, Interactive
       path.join(REPO_ROOT, "apps/admin/src/app/globals.css"),
       "utf8"
     );
-    expect(adminCss).toMatch(/\.adm-btn-danger[\s\S]*?#dc2626/);
-    expect(adminCss).toContain(".adm-btn-danger-soft");
+    const themeCss = fs.readFileSync(
+      path.join(REPO_ROOT, "packages/ui/src/theme.css"),
+      "utf8"
+    );
+    expect(adminCss).toContain("@import \"../../../../packages/ui/src/theme.css\"");
+    expect(themeCss).toMatch(/\.adm-btn-danger[\s\S]*?var\(--btn-danger-bg\)/);
+    expect(themeCss).toContain(".adm-btn-danger-soft");
 
     const uiIndex = fs.readFileSync(path.join(REPO_ROOT, "packages/ui/src/index.tsx"), "utf8");
     expect(uiIndex).toContain("InteractiveAreaChartCanvas");
@@ -131,7 +136,7 @@ describe("Sprint 6 & Sprint 7 — Design Tokens, True Vector Assets, Interactive
       if (match) sopHeadings.push(match[1]!);
     }
     expect(new Set(sopHeadings).size).toBe(sopHeadings.length);
-    expect(sopHeadings.sort()).toEqual(["1", "2", "3", "4", "5"]);
+    expect(sopHeadings.sort()).toEqual(["1", "2", "3", "4", "5", "6"]);
 
     const articles = loadAllDocArticles();
     expect(articles.length).toBe(14);

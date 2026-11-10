@@ -30,6 +30,7 @@ import {
   SectionCard,
   StatusPill,
 } from "@rsl/ui";
+import { ConfidentialityOtpBar } from "@/components/confidentiality-vault-card";
 import { FeaturePlanGate } from "@/components/feature-plan-gate";
 import { FlashBanner } from "@/components/flash-banner";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
@@ -90,10 +91,13 @@ export default async function TallyPartiesLedgersPage({
     Promise.resolve(
       getWorkspacePartiesLedgerSummary(
         session.workspace.id,
-        sp.company && sp.company !== "all" ? sp.company : undefined
+        sp.company && sp.company !== "all" ? sp.company : undefined,
+        { userId: session.user.id }
       )
     ),
-    Promise.resolve(getTallyWorkspaceSummary(session.workspace.id)),
+    Promise.resolve(
+      getTallyWorkspaceSummary(session.workspace.id, { userId: session.user.id })
+    ),
   ]);
 
   const groupFilter =
@@ -163,7 +167,7 @@ export default async function TallyPartiesLedgersPage({
           />
         }
         title="Client & Supplier Ledgers"
-        subtitle="Real-time Sundry Debtors & Creditors synced from Tally Prime — complete with automatic Paid-in-Tally bill settlements, 5-bucket ageing, credit limit alerts, and downloadable PDF statements."
+        subtitle="Real-time Sundry Debtors & Creditors synced from Tally Prime - complete with automatic Paid-in-Tally bill settlements, 5-bucket ageing, credit limit alerts, and downloadable PDF statements."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {ledgerSummary.kpis.totalPartiesCount > 0 && (
@@ -193,6 +197,13 @@ export default async function TallyPartiesLedgersPage({
       />
 
       <FlashBanner notice={sp.notice} error={sp.error} />
+
+      <ConfidentialityOtpBar
+        isMasked={ledgerSummary.confidentiality.isMasked}
+        unmaskActive={ledgerSummary.confidentiality.unmaskActive}
+        unmaskExpiresAt={ledgerSummary.confidentiality.unmaskExpiresAt}
+        policy={ledgerSummary.confidentiality.policy}
+      />
 
       {/* 5-Card Financial Position Strip */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
@@ -348,8 +359,8 @@ export default async function TallyPartiesLedgersPage({
               <div>
                 <label className="mb-1 block font-semibold text-zinc-700">Dr / Cr</label>
                 <select name="openingBalanceType" defaultValue="Dr" className="rsl-input">
-                  <option value="Dr">Debit (Dr — Receivable)</option>
-                  <option value="Cr">Credit (Cr — Payable / Advance)</option>
+                  <option value="Dr">Debit (Dr - Receivable)</option>
+                  <option value="Cr">Credit (Cr - Payable / Advance)</option>
                 </select>
               </div>
               <div>
@@ -373,7 +384,7 @@ export default async function TallyPartiesLedgersPage({
       {/* Interactive 5-Bucket Receivables Ageing Strip */}
       <SectionCard
         title="Receivables Ageing Breakdown (Click Any Bucket to Filter Clients)"
-        subtitle="Calculated across open unpaid & partially paid Sales invoices — updates automatically whenever Tally receipts clear a bill"
+        subtitle="Calculated across open unpaid & partially paid Sales invoices - updates automatically whenever Tally receipts clear a bill"
         action={
           bucketFilter ? (
             <ActionLink href="/tally/parties" spinnerSize="xs" className="rsl-btn-secondary py-1 text-xs">

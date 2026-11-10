@@ -6,7 +6,13 @@ import React from "react";
 import { and, desc, eq, gt } from "drizzle-orm";
 import nodemailer from "nodemailer";
 import { render } from "@react-email/render";
-import { getEnv, hashPassword, newEntityId, RslError } from "@rsl/core";
+import {
+  getEnv,
+  hashPassword,
+  hashPasswordAsync,
+  newEntityId,
+  RslError,
+} from "@rsl/core";
 import { controlSchema } from "@rsl/database";
 import { controlDb, getPlatformSmtpConfig } from "@rsl/tenancy";
 import {
@@ -119,6 +125,84 @@ export function prepareSmtpEmailPayload(renderedHtml: string): {
   return { html, attachments };
 }
 
+type SmtpTransporter = ReturnType<typeof nodemailer.createTransport>;
+const smtpPoolCache = new Map<string, SmtpTransporter>();
+const notificationThrottleWindows = new Map<string, number[]>();
+
+function consumeNotificationRateLimit(bucket: string, key: string, maxAttempts: number, windowMs: number): void {
+  const now = Date.now();
+  const fullKey = `${bucket}:${key}`;
+  const cutoff = now - windowMs;
+  const recent = (notificationThrottleWindows.get(fullKey) ?? []).filter((ts) => ts > cutoff);
+  if (recent.length >= maxAttempts) {
+    notificationThrottleWindows.set(fullKey, recent);
+    throw new RslError(
+      "RSL-AUTH-1004",
+      "Too many verification or password-reset requests. Please wait a few minutes before retrying."
+    );
+  }
+  recent.push(now);
+  notificationThrottleWindows.set(fullKey, recent);
+}
+
+export function resetNotificationRateLimitsForTests(): void {
+  notificationThrottleWindows.clear();
+}
+
+function getOrCreatePooledTransporter(cfg: {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+}): SmtpTransporter {
+  const passDigest = crypto.createHash("sha256").update(cfg.pass).digest("hex").slice(0, 16);
+  const poolKey = `${cfg.host}:${cfg.port}:${cfg.secure ? "1" : "0"}:${cfg.user}:${passDigest}`;
+  const existing = smtpPoolCache.get(poolKey);
+  if (existing) return existing;
+
+  const transporter = nodemailer.createTransport({
+    pool: true,
+    maxConnections: 3,
+    maxMessages: 100,
+    host: cfg.host,
+    port: cfg.port,
+    secure: cfg.secure,
+    auth: {
+      user: cfg.user,
+      pass: cfg.pass,
+    },
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 15_000,
+  });
+
+  if (smtpPoolCache.size >= 16) {
+    const oldestKey = smtpPoolCache.keys().next().value;
+    if (oldestKey) {
+      try {
+        smtpPoolCache.get(oldestKey)?.close();
+      } catch {
+        // ignore close failure
+      }
+      smtpPoolCache.delete(oldestKey);
+    }
+  }
+  smtpPoolCache.set(poolKey, transporter);
+  return transporter;
+}
+
+export function closeAllSmtpPools(): void {
+  for (const transporter of smtpPoolCache.values()) {
+    try {
+      transporter.close();
+    } catch {
+      // ignore close failure
+    }
+  }
+  smtpPoolCache.clear();
+}
+
 async function dispatchHtmlEmail(params: {
   workspaceId?: string | null;
   to: string;
@@ -138,18 +222,16 @@ async function dispatchHtmlEmail(params: {
   if (useCustom || usePlatformGmail) {
     const transportMode = useCustom ? "client_smtp" : "gmail_smtp";
     const smtpPayload = prepareSmtpEmailPayload(renderedHtml);
-    const transporter = nodemailer.createTransport({
+    const transporter = getOrCreatePooledTransporter({
       host: useCustom ? params.customSmtp!.host : platformSmtp.host,
       port: useCustom ? params.customSmtp!.port : platformSmtp.port,
       secure: useCustom ? params.customSmtp!.secure : platformSmtp.secure,
-      auth: {
-        user: useCustom ? params.customSmtp!.user : platformSmtp.user,
-        pass: useCustom ? params.customSmtp!.pass : platformSmtp.password,
-      },
+      user: useCustom ? params.customSmtp!.user : platformSmtp.user,
+      pass: useCustom ? params.customSmtp!.pass : platformSmtp.password,
     });
 
-    try {
-      const info = await transporter.sendMail({
+    const sendOnce = () =>
+      transporter.sendMail({
         from: useCustom ? params.customSmtp!.from : platformSmtp.from || platformSmtp.user,
         to: params.to,
         subject: params.subject,
@@ -157,6 +239,15 @@ async function dispatchHtmlEmail(params: {
         text: renderedText,
         attachments: smtpPayload.attachments,
       });
+
+    try {
+      let info: Awaited<ReturnType<typeof sendOnce>>;
+      try {
+        info = await sendOnce();
+      } catch {
+        await new Promise((r) => setTimeout(r, 350));
+        info = await sendOnce();
+      }
 
       controlDb()
         .insert(controlSchema.emailDeliveries)
@@ -196,8 +287,6 @@ async function dispatchHtmlEmail(params: {
     }
   }
 
-  // When GMAIL_SMTP_USER / GMAIL_SMTP_APP_PASSWORD is not yet configured in .env,
-  // persist rendered React Email HTML to control.db so local verification & reset flows remain 100% functional!
   controlDb()
     .insert(controlSchema.emailDeliveries)
     .values({
@@ -222,10 +311,13 @@ export async function sendEmailVerificationCode(params: {
   recipientName: string;
   workspaceId?: string;
 }): Promise<{ verificationId: string; emailId: string; status: string }> {
+  const normalizedEmail = params.email.trim().toLowerCase();
+  consumeNotificationRateLimit("verify-send", normalizedEmail, 5, 10 * 60_000);
+
   const code = String(crypto.randomInt(100000, 999999));
   const codeHash = crypto.createHash("sha256").update(code).digest("hex");
   const verificationId = newEntityId("req", params.workspaceId ?? params.recipientName);
-  const identifier = `verify:${params.email.trim().toLowerCase()}`;
+  const identifier = `verify:${normalizedEmail}`;
   const now = Date.now();
 
   const db = controlDb();
@@ -244,7 +336,8 @@ export async function sendEmailVerificationCode(params: {
     })
     .run();
 
-  const verifyUrl = `${getEnv().APP_URL}/login?verifyEmail=${encodeURIComponent(params.email)}&code=${code}`;
+  // Never include verification codes or email tokens in HTTP query parameters
+  const verifyUrl = `${getEnv().APP_URL}/login?verify=1#verify`;
   const res = await dispatchHtmlEmail({
     workspaceId: params.workspaceId,
     to: params.email,
@@ -328,11 +421,15 @@ export async function requestPasswordResetEmail(params: {
   email: string;
   requestedFromIp?: string;
 }): Promise<{ dispatched: boolean }> {
-  const db = controlDb();
   const normalized = params.email.trim().toLowerCase();
+  if (params.requestedFromIp) {
+    consumeNotificationRateLimit("pwreset-ip", params.requestedFromIp, 8, 15 * 60_000);
+  }
+  consumeNotificationRateLimit("pwreset-email", normalized, 3, 10 * 60_000);
+
+  const db = controlDb();
   const user = db.select().from(controlSchema.users).where(eq(controlSchema.users.email, normalized)).get();
   if (!user) {
-    // Do not reveal account existence
     return { dispatched: true };
   }
 
@@ -350,7 +447,7 @@ export async function requestPasswordResetEmail(params: {
     })
     .run();
 
-  const resetUrl = `${getEnv().APP_URL}/reset-password?email=${encodeURIComponent(normalized)}&token=${rawResetToken}`;
+  const resetUrl = `${getEnv().APP_URL.replace(/\/$/, "")}/api/auth/reset-handoff?email=${encodeURIComponent(normalized)}&token=${encodeURIComponent(rawResetToken)}`;
   await dispatchHtmlEmail({
     workspaceId: user.activeWorkspaceId,
     to: normalized,
@@ -367,15 +464,7 @@ export async function requestPasswordResetEmail(params: {
   return { dispatched: true };
 }
 
-export function completePasswordReset(params: {
-  email: string;
-  rawToken: string;
-  newPassword: string;
-}): void {
-  if (params.newPassword.length < 8) {
-    throw new RslError("RSL-VAL-1001", "New password must be at least 8 characters long.");
-  }
-
+function finalizePasswordResetWithHash(params: { email: string; rawToken: string }, nextPasswordHash: string): void {
   const db = controlDb();
   const normalized = params.email.trim().toLowerCase();
   const tokenHash = crypto.createHash("sha256").update(params.rawToken.trim()).digest("hex");
@@ -404,12 +493,16 @@ export function completePasswordReset(params: {
     .get();
 
   db.update(controlSchema.users)
-    .set({ passwordHash: hashPassword(params.newPassword), updatedAt: now })
+    .set({
+      passwordHash: nextPasswordHash,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+      updatedAt: now,
+    })
     .where(eq(controlSchema.users.email, normalized))
     .run();
 
   if (user) {
-    // Security (SEC-06): revoke all active sessions on password reset
     db.delete(controlSchema.sessions)
       .where(eq(controlSchema.sessions.userId, user.id))
       .run();
@@ -418,6 +511,29 @@ export function completePasswordReset(params: {
   db.delete(controlSchema.verifications)
     .where(eq(controlSchema.verifications.identifier, `reset:${normalized}`))
     .run();
+}
+
+export function completePasswordReset(params: {
+  email: string;
+  rawToken: string;
+  newPassword: string;
+}): void {
+  if (params.newPassword.length < 8) {
+    throw new RslError("RSL-VAL-1001", "New password must be at least 8 characters long.");
+  }
+  finalizePasswordResetWithHash(params, hashPassword(params.newPassword));
+}
+
+export async function completePasswordResetAsync(params: {
+  email: string;
+  rawToken: string;
+  newPassword: string;
+}): Promise<void> {
+  if (params.newPassword.length < 8) {
+    throw new RslError("RSL-VAL-1001", "New password must be at least 8 characters long.");
+  }
+  const nextHash = await hashPasswordAsync(params.newPassword);
+  finalizePasswordResetWithHash(params, nextHash);
 }
 
 export async function sendTeamInviteNotification(params: {

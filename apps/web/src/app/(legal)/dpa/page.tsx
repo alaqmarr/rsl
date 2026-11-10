@@ -5,7 +5,7 @@ import { getLegalDocumentBySlug } from "@/lib/legal-documents";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Data Processing & Security Addendum (DPA) — RapidShift Labs",
+  title: "Data Processing & Security Addendum (DPA) - RapidShift Labs",
   description:
     "Per-tenant SQLite isolation, AES-256-GCM envelope encryption, SHA-256 hash-chained audit logs, sub-processors, and 72-hour CERT-In/DPDP breach notification commitments.",
   alternates: { canonical: "/dpa" },

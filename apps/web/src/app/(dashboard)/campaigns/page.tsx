@@ -14,7 +14,14 @@ import { formatInr, resolveEndpointsFromHeaders } from "@rsl/core";
 import { fetchWorkspaceGoogleSearchConsoleInsights } from "@rsl/google";
 import { getMetaWorkspaceSummary } from "@rsl/meta";
 import { canRoleAccessWebRoute, canRolePerform, formatRoleLabel } from "@rsl/rbac";
-import { AccessRestrictedState, MetricCard, PageHeader, SectionCard, StatusPill } from "@rsl/ui";
+import {
+  AccessRestrictedState,
+  GuideDrawerButton,
+  MetricCard,
+  PageHeader,
+  SectionCard,
+  StatusPill,
+} from "@rsl/ui";
 import { CampaignsFreeAiBar } from "@/components/campaigns-free-ai-bar";
 import { FeaturePlanGate, InlineAddonPlanBanner } from "@/components/feature-plan-gate";
 import { FlashBanner } from "@/components/flash-banner";
@@ -304,7 +311,7 @@ export default async function CampaignsAndPostsPage({
               </div>
             ) : !canCreateAds ? (
               <p className="text-[13px] text-zinc-500">
-                Read-only role — your current role can monitor campaign spend, conversions, and ROAS below.
+                Read-only role - your current role can monitor campaign spend, conversions, and ROAS below.
               </p>
             ) : (
               <form
@@ -330,7 +337,7 @@ export default async function CampaignsAndPostsPage({
                     <input
                       name="name"
                       required
-                      placeholder="e.g. Mumbai Industrial Valves — Search & WhatsApp Leads"
+                      placeholder="e.g. Mumbai Industrial Valves - Search & WhatsApp Leads"
                       className="rsl-input"
                     />
                   </div>
@@ -382,10 +389,10 @@ export default async function CampaignsAndPostsPage({
                   <div>
                     <label className="rsl-label">Google Ads Type (If Google)</label>
                     <select name="googleObjective" defaultValue="search_leads" className="rsl-input">
-                      <option value="search_leads">Google Search — High-Intent Leads</option>
+                      <option value="search_leads">Google Search - High-Intent Leads</option>
                       <option value="performance_max">Performance Max (Search + Maps + YouTube)</option>
                       <option value="call_ads">Search Call &amp; Store Visit Ads</option>
-                      <option value="website_sales">Google Search — Website Sales</option>
+                      <option value="website_sales">Google Search - Website Sales</option>
                     </select>
                   </div>
 
@@ -421,7 +428,7 @@ export default async function CampaignsAndPostsPage({
                     <input
                       name="headline"
                       maxLength={90}
-                      placeholder="e.g. Authorised Industrial Supplier — Instant GST Quote"
+                      placeholder="e.g. Authorised Industrial Supplier - Instant GST Quote"
                       className="rsl-input"
                     />
                   </div>
@@ -756,12 +763,14 @@ export default async function CampaignsAndPostsPage({
                                 <span>{vaultPct}% of cap</span>
                                 <span>{formatInr(c.vaultAllocatedPaise)}</span>
                               </div>
-                              <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-zinc-200">
-                                <div
-                                  className={`h-full rounded-full ${vaultPct >= 100 ? "bg-amber-600" : "bg-emerald-600"}`}
-                                  style={{ width: `${vaultPct}%` }}
-                                />
-                              </div>
+                              <progress
+                                value={vaultPct}
+                                max={100}
+                                aria-label={`${vaultPct}% of Managed Vault cap`}
+                                className={`rsl-progress rsl-progress-sm mt-0.5 ${
+                                  vaultPct >= 100 ? "rsl-progress-sunset" : ""
+                                }`}
+                              />
                             </div>
                           )}
                         </td>
@@ -967,7 +976,7 @@ export default async function CampaignsAndPostsPage({
                 </form>
               ) : (
                 <p className="text-[13px] text-zinc-500">
-                  Read-only role — view scheduled and published social posts below.
+                  Read-only role - view scheduled and published social posts below.
                 </p>
               )}
 
@@ -987,8 +996,8 @@ export default async function CampaignsAndPostsPage({
                           <span>•</span>
                           <span>
                             {p.status === "published" && p.publishedAt
-                              ? `Published ${new Date(p.publishedAt).toLocaleString("en-IN")}`
-                              : `Scheduled ${new Date(p.scheduledFor).toLocaleString("en-IN")}`}
+                              ? `Published ${new Date(p.publishedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`
+                              : `Scheduled ${new Date(p.scheduledFor).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`}
                           </span>
                           {p.externalPermalink && (
                             <a
@@ -1053,29 +1062,51 @@ export default async function CampaignsAndPostsPage({
         <SectionCard
           title="Website Sales Pixel & Live Meta Conversions API (CAPI)"
           subtitle="Deduplicates orders by Event ID and dispatches SHA-256 hashed conversions directly to Meta Pixel"
+          action={
+            hasPixel ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusPill
+                  label={
+                    metaAdsConn?.metadata.pixelId
+                      ? `Pixel ${metaAdsConn.metadata.pixelId}`
+                      : "Connect Meta Pixel"
+                  }
+                  tone={metaAdsConn?.metadata.pixelId ? "emerald" : "amber"}
+                />
+                <GuideDrawerButton
+                  label="Need help? • Server CAPI Setup"
+                  badgeText="REST API"
+                  guide={{
+                    eyebrow: "Server-Side Conversions API",
+                    title: "Connect Shopify, WooCommerce, or Custom Checkouts",
+                    summary:
+                      "Post server-side order completions so RapidShift deduplicates by Event ID and forwards SHA-256 hashed conversions to Meta CAPI.",
+                    steps: [
+                      {
+                        title: "Issue a Scoped Pixel API Key",
+                        detail:
+                          "Open All API Tokens (/settings/tokens) and issue a key with the pixel:write scope.",
+                      },
+                      {
+                        title: "Send Order Events to Your REST Endpoint",
+                        detail:
+                          "POST each checkout event with a unique eventId, customer phone/email, and order total.",
+                        code: `curl -X POST "${ep.effectiveAppBaseUrl}/api/v1/pixel/events" \\\n  -H "Authorization: Bearer rsl_live_YOUR_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{"eventId":"ORD-2026-901","eventName":"Purchase","amountRupees":2450,"phone":"+919876543210"}'`,
+                        codeLanguage: "bash",
+                      },
+                    ],
+                    fullGuideHref: "/help?slug=ads-social-posts-and-website-conversions",
+                    fullGuideLabel: "Open Full CAPI Guide",
+                  }}
+                />
+              </div>
+            ) : undefined
+          }
         >
           {!hasPixel && pixelPlan ? (
             <InlineAddonPlanBanner plan={pixelPlan} returnPath="/campaigns" />
           ) : (
             <>
-              <div className="mb-3 rounded-xl border border-zinc-200/80 bg-zinc-50/80 p-3 text-xs text-zinc-700">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-semibold text-slate-900">
-                    Server-Side REST Ingest Endpoint (Shopify / WooCommerce / Custom Checkout)
-                  </span>
-                  <StatusPill
-                    label={
-                      metaAdsConn?.metadata.pixelId
-                        ? `Meta Pixel ${metaAdsConn.metadata.pixelId} Linked`
-                        : "Connect Meta Pixel for Live CAPI"
-                    }
-                    tone={metaAdsConn?.metadata.pixelId ? "emerald" : "amber"}
-                  />
-                </div>
-                <code className="mt-1.5 block overflow-x-auto rounded-lg bg-slate-900 px-3 py-2 font-mono text-[11px] text-emerald-300">
-                  {`POST ${ep.effectiveAppBaseUrl}/api/v1/pixel/events  (Authorization: Bearer rsl_live_...)`}
-                </code>
-              </div>
 
               {canManagePixel ? (
                 <form action={recordPixelEventAction} className="space-y-3.5 text-[13px]">
@@ -1139,7 +1170,7 @@ export default async function CampaignsAndPostsPage({
                 </form>
               ) : (
                 <p className="text-[13px] text-zinc-500">
-                  Read-only role — inspect recorded server-side website sales events below.
+                  Read-only role - inspect recorded server-side website sales events below.
                 </p>
               )}
 

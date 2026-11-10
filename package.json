@@ -26,7 +26,10 @@
     "build:runtime": "node scripts/build-runtime-services.mjs",
     "build": "node scripts/sync-public-assets.mjs && node scripts/build-runtime-services.mjs && turbo run build",
     "typecheck": "turbo run typecheck",
-    "lint": "turbo run lint",
+    "lint": "eslint . && turbo run lint",
+    "audit:deps": "pnpm audit --prod",
+    "loadtest": "node scripts/load-test-local.mjs",
+    "ops:rollback-drill": "node scripts/db-rollback-drill.mjs",
     "test": "vitest run",
     "db:migrate:control": "pnpm --filter @rsl/tenancy db:migrate:control",
     "db:migrate:tenants": "pnpm --filter @rsl/tenancy db:migrate:tenants",
@@ -36,14 +39,22 @@
     "format": "prettier --write \"**/*.{ts,tsx,md,mdx,json}\""
   },
   "devDependencies": {
+    "@eslint/js": "^9.22.0",
     "@types/node": "^22.20.5",
+    "eslint": "^9.22.0",
     "prettier": "^3.9.10",
     "tsx": "^4.23.15",
     "turbo": "^2.11.10",
     "typescript": "^6.0.3",
+    "typescript-eslint": "^8.26.1",
     "vitest": "^5.0.5"
   },
   "pnpm": {
+    "overrides": {
+      "better-sqlite3": "12.11.1",
+      "@types/better-sqlite3": "7.6.13",
+      "drizzle-orm": "0.45.4"
+    },
     "onlyBuiltDependencies": [
       "better-sqlite3",
       "esbuild",

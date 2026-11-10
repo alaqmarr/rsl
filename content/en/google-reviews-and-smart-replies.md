@@ -14,26 +14,26 @@ Replying politely and promptly to every 5-star praise and 1-to-3-star concern on
 
 ---
 
-## Step 1 — Connect Google Business Profile & Sync Store Reviews
+## Step 1 - Connect Google Business Profile & Sync Store Reviews
 
 1. First, ensure **Google Business Profile Reviews** (`google.reviews`) is unlocked in **Plans & Wallet** (`/billing`).
-2. Connect your store's Google Business Profile in 2 clicks under **Connected Channels** (`/connections` -> **Google Business** -> **Sign in with Google Business Profile →**) — see Part 5 of [Connecting WhatsApp, Instagram, Facebook & Google](/guides/connecting-channels-whatsapp-meta-google).
+2. Connect your store's Google Business Profile in 2 clicks under **Connected Channels** (`/connections` -> **Google Business** -> **Sign in with Google Business Profile →**) - see Part 5 of [Connecting WhatsApp, Instagram, Facebook & Google](/guides/connecting-channels-whatsapp-meta-google).
 3. Open **Google Reviews** (`/reviews`) in your left sidebar.
 4. Click **Sync Reviews** (or log an offline/imported store review in the **Record / Test Store Review** card during setup) to pull incoming customer ratings, reviewer names, star scores (`1★` to `5★`), and review comments.
 
 ---
 
-## Step 2 — Filtering Reviews That Need Attention First
+## Step 2 - Filtering Reviews That Need Attention First
 
 At the top of **Google Reviews** (`/reviews`):
 
 1. Check the **Average Star Rating** and **Unreplied Reviews Count** summary cards.
-2. Filter by **Star Rating** (`All`, `1–2 Stars — Urgent`, `3 Stars`, `4–5 Stars`) or **Reply Status** (`Needs Reply` vs `Replied`).
-   - **Best Practice**: Always respond to `1★`–`3★` reviews within 4 business hours — acknowledge the customer's experience calmly, avoid sharing private invoice amounts publicly, and invite them to message your WhatsApp support number to resolve it immediately.
+2. Filter by **Star Rating** (`All`, `1–2 Stars - Urgent`, `3 Stars`, `4–5 Stars`) or **Reply Status** (`Needs Reply` vs `Replied`).
+   - **Best Practice**: Always respond to `1★`–`3★` reviews within 4 business hours - acknowledge the customer's experience calmly, avoid sharing private invoice amounts publicly, and invite them to message your WhatsApp support number to resolve it immediately.
 
 ---
 
-## Step 3 — Generating a ₹1.00 Smart Review Reply Draft (`google.autoreply`)
+## Step 3 - Generating a ₹1.00 Smart Review Reply Draft (`google.autoreply`)
 
 If you also unlocked the **Smart Review Reply Drafts** (`google.autoreply`) add-on:
 
@@ -46,7 +46,7 @@ If you also unlocked the **Smart Review Reply Drafts** (`google.autoreply`) add-
 
 ---
 
-## Step 4 — Publishing Your Verified Owner Response
+## Step 4 - Publishing Your Verified Owner Response
 
 1. Review the final text inside the **Owner Reply Box** on the review card (whether written manually by you or refined from a Smart Draft).
 2. Click **Approve & Publish Owner Reply**.

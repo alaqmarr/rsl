@@ -46,6 +46,11 @@ export async function GET(
   req: NextRequest,
   context: { params: Promise<{ kind: string }> }
 ) {
+  const fetchSite = req.headers.get("sec-fetch-site");
+  if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") {
+    return NextResponse.json({ ok: false, error: "Cross-site export downloads are forbidden." }, { status: 403 });
+  }
+
   const session = await getOptionalWebSession();
   if (!session) {
     return NextResponse.json({ ok: false, error: "Authentication required" }, { status: 401 });

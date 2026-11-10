@@ -25,6 +25,7 @@ export function ensureTallyAutomationProcessorRegistered(): void {
   if (tallyAutomationRegistered) return;
 
   registerJobProcessor("tally.whatsapp.automation", async (envelope) => {
+    const startedAt = Date.now();
     const payload = envelope.payload as {
       voucherId?: string;
       voucherGuid?: string;
@@ -107,7 +108,7 @@ export function ensureTallyAutomationProcessorRegistered(): void {
         outcome: "success",
         requestId: envelope.requestId,
         correlationId: envelope.correlationId,
-        durationMs: 12,
+        durationMs: Date.now() - startedAt,
         summary: `Automatically sent WhatsApp template '${payload.templateName || templateTarget}'${
           nativePdf ? ` with native Tally PDF (${nativePdf.filename})` : ""
         } for Tally bill to ${payload.recipientName || "customer"}`,
@@ -121,5 +122,5 @@ export function ensureTallyAutomationProcessorRegistered(): void {
 export async function flushInlineTallyOutboxIfNoRedis(workspaceId: string): Promise<number> {
   if (isRedisConfigured()) return 0;
   ensureTallyAutomationProcessorRegistered();
-  return processDueSqliteOutboxForTenant(workspaceId);
+  return processDueSqliteOutboxForTenant(workspaceId, { queueName: "outbound.whatsapp" });
 }

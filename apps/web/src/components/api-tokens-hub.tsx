@@ -3,7 +3,15 @@
 import React, { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { EmptyWorkspaceState, IosSpinner, MetricCard, SectionCard, sileo, StatusPill } from "@rsl/ui";
+import {
+  EmptyWorkspaceState,
+  GuideDrawerButton,
+  IosSpinner,
+  MetricCard,
+  SectionCard,
+  sileo,
+  StatusPill,
+} from "@rsl/ui";
 import type { ConnectionChannelKind } from "@rsl/connections";
 import { ApiSandbox } from "@/components/api-sandbox";
 import { CopyTextButton } from "@/components/client-utils";
@@ -56,6 +64,19 @@ export interface TokenOutboundWebhookItem {
   lastDeliveryStatus: string | null;
 }
 
+export interface TokenWebhookDeliveryItem {
+  id: string;
+  endpointId: string;
+  eventType: string;
+  status: string;
+  attemptCount: number;
+  httpStatus: number | null;
+  lastError: string | null;
+  nextRetryAt: number | null;
+  createdAt: number;
+  deliveredAt: number | null;
+}
+
 export interface ApiTokensHubProps {
   workspaceSlug: string;
   channels: TokenChannelItem[];
@@ -77,6 +98,7 @@ export interface ApiTokensHubProps {
   canManageApiKeys: boolean;
   apiKeys: TokenApiKeyItem[];
   outboundWebhooks: TokenOutboundWebhookItem[];
+  webhookDeliveries?: TokenWebhookDeliveryItem[];
   apiScopes: Array<{ key: string; label: string }>;
   webhookEvents: Array<{ key: string; label: string }>;
   initialRevealedKey?: string;
@@ -140,6 +162,7 @@ export function ApiTokensHub({
   canManageApiKeys,
   apiKeys,
   outboundWebhooks,
+  webhookDeliveries = [],
   apiScopes,
   webhookEvents,
   initialRevealedKey,
@@ -279,6 +302,14 @@ export function ApiTokensHub({
   }
 
   function handleChannelDisconnect(ch: TokenChannelItem) {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `Disconnect ${ch.displayName}? Stored OAuth/API tokens for this channel will be purged immediately.`
+      )
+    ) {
+      return;
+    }
     setPendingActionKey(`ch-disc:${ch.id}`);
     startRowAction(async () => {
       const fd = new FormData();
@@ -353,6 +384,14 @@ export function ApiTokensHub({
   }
 
   function handleRevokeApiKey(keyId: string) {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        "Revoke this REST API key permanently? Any external integration using it will receive 401 Unauthorized immediately."
+      )
+    ) {
+      return;
+    }
     setPendingActionKey(`key-revoke:${keyId}`);
     startRowAction(async () => {
       const fd = new FormData();
@@ -425,6 +464,12 @@ export function ApiTokensHub({
   }
 
   function handleDeleteWebhook(endpointId: string) {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm("Remove this outbound webhook endpoint and stop future event deliveries?")
+    ) {
+      return;
+    }
     setPendingActionKey(`wh-del:${endpointId}`);
     startRowAction(async () => {
       const fd = new FormData();
@@ -705,21 +750,50 @@ export function ApiTokensHub({
             <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/75 p-3.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs font-semibold text-slate-900">
-                  Cloud Subdomain Tally Webhook Endpoint
+                  Cloud Subdomain Tally Webhook Endpoint (Header Auth Only)
                 </span>
                 <div className="flex flex-wrap items-center gap-1.5">
-                  {tallyCleanEndpointUrl && (
-                    <CopyTextButton
-                      text={tallyCleanEndpointUrl}
-                      label="Copy Clean URL"
-                      copiedLabel="Copied"
-                    />
-                  )}
-                  <CopyTextButton text={tallyUrl} label="Copy URL + Token" copiedLabel="Copied URL" />
+                  <GuideDrawerButton
+                    label="Need help? • Header & HMAC Guide"
+                    badgeText="Security"
+                    guide={{
+                      eyebrow: "Webhook & REST API Security",
+                      title: "Authenticating Tally & Outbound HMAC Webhooks",
+                      summary:
+                        "All inbound and outbound webhooks use header-only authentication and SHA-256 HMAC signatures with a 5-minute replay window.",
+                      steps: [
+                        {
+                          title: "Inbound Tally Webhook Headers",
+                          detail:
+                            "Pass your secret in X-Tally-Webhook-Token along with X-RSL-Timestamp (epoch ms) and X-RSL-Signature (HMAC-SHA256). Query-string ?token= URLs are rejected.",
+                          copyValues: [
+                            {
+                              label: "Clean Tally Endpoint",
+                              value: tallyCleanEndpointUrl || tallyUrl,
+                            },
+                          ],
+                        },
+                        {
+                          title: "Verifying Outbound Webhooks on Your Server",
+                          detail:
+                            "Compute HMAC-SHA256 over '<X-RSL-Timestamp>.<rawBody>' using your endpoint signing secret and compare against X-RSL-Signature.",
+                          code: `const expected = crypto.createHmac("sha256", webhookSecret)\n  .update(\`\${req.headers["x-rsl-timestamp"]}.\${rawBody}\`)\n  .digest("hex");`,
+                          codeLanguage: "javascript",
+                        },
+                      ],
+                      fullGuideHref: "/help?slug=developer-api",
+                      fullGuideLabel: "Open Developer API Guide",
+                    }}
+                  />
+                  <CopyTextButton
+                    text={tallyCleanEndpointUrl || tallyUrl}
+                    label="Copy Clean URL"
+                    copiedLabel="Copied"
+                  />
                 </div>
               </div>
               <div className="mt-2 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-xs font-semibold text-emerald-800">
-                POST {revealTally ? tallyUrl : tallyUrl.replace(tallyToken, maskMiddle(tallyToken))}
+                POST {tallyCleanEndpointUrl || tallyUrl}
               </div>
             </div>
           </div>
@@ -841,7 +915,7 @@ export function ApiTokensHub({
             <div className="rounded-2xl border border-amber-300 bg-amber-50/90 p-4 text-[13px] text-amber-950 shadow-2xs">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="font-bold">
-                  Copy Your Newly Issued API Key Now (Shown Only Once — Hashed in Vault):
+                  Copy Your Newly Issued API Key Now (Shown Only Once - Hashed in Vault):
                 </div>
                 <div className="flex items-center gap-2">
                   <CopyTextButton
@@ -973,14 +1047,29 @@ export function ApiTokensHub({
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-[13px]">
-                  <thead className="border-b border-zinc-200/80 bg-zinc-50/75 text-[11px] tracking-wider text-zinc-500 uppercase">
+                  <caption className="sr-only">
+                    Active and historical workspace REST API keys
+                  </caption>
+                  <thead className="border-b border-zinc-200/80 bg-zinc-50/75 text-xs tracking-wider text-zinc-500 uppercase">
                     <tr>
-                      <th className="px-5 py-3 font-semibold sm:px-6">Label &amp; Key Prefix</th>
-                      <th className="px-4 py-3 font-semibold">Scopes</th>
-                      <th className="px-4 py-3 font-semibold">Limit</th>
-                      <th className="px-4 py-3 font-semibold">Last Used</th>
-                      <th className="px-4 py-3 font-semibold">Status</th>
-                      <th className="px-5 py-3 text-right font-semibold sm:px-6">Action</th>
+                      <th scope="col" className="px-5 py-3 font-semibold sm:px-6">
+                        Label &amp; Key Prefix
+                      </th>
+                      <th scope="col" className="px-4 py-3 font-semibold">
+                        Scopes
+                      </th>
+                      <th scope="col" className="px-4 py-3 font-semibold">
+                        Limit
+                      </th>
+                      <th scope="col" className="px-4 py-3 font-semibold">
+                        Last Used
+                      </th>
+                      <th scope="col" className="px-4 py-3 font-semibold">
+                        Status
+                      </th>
+                      <th scope="col" className="px-5 py-3 text-right font-semibold sm:px-6">
+                        Action
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100">
@@ -1002,9 +1091,13 @@ export function ApiTokensHub({
                           <td className="px-4 py-3.5 text-xs text-zinc-600 whitespace-nowrap tabular-nums">
                             {k.lastUsedAt ? (
                               <div>
-                                <div>{new Date(k.lastUsedAt).toLocaleString("en-IN")}</div>
+                                <div>
+                                  {new Date(k.lastUsedAt).toLocaleString("en-IN", {
+                                    timeZone: "Asia/Kolkata",
+                                  })}
+                                </div>
                                 {k.lastUsedIp && (
-                                  <div className="font-mono text-[11px] text-zinc-400">
+                                  <div className="font-mono text-xs text-zinc-400">
                                     {k.lastUsedIp}
                                   </div>
                                 )}
@@ -1188,6 +1281,92 @@ export function ApiTokensHub({
                 </div>
               )}
             </div>
+          </SectionCard>
+
+          <SectionCard
+            title={`6. Outbound Webhook Delivery Log & Retry Queue (${webhookDeliveries.length})`}
+            subtitle="Exponential-backoff delivery trail (pending, retrying, delivered, or dead-lettered after max attempts)"
+            noPadding
+          >
+            {webhookDeliveries.length === 0 ? (
+              <div className="p-6 text-xs text-zinc-500">
+                No outbound webhook deliveries recorded yet. Click &ldquo;Send Test Event&rdquo; on
+                any endpoint above to verify signature delivery.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <caption className="sr-only">
+                    Recent outbound webhook delivery attempts, HTTP status codes, and retry state
+                  </caption>
+                  <thead className="border-b border-zinc-200/80 bg-zinc-50/75 text-xs tracking-wider text-zinc-500 uppercase">
+                    <tr>
+                      <th scope="col" className="px-5 py-3 font-semibold sm:px-6">
+                        Event &amp; Delivery ID
+                      </th>
+                      <th scope="col" className="px-4 py-3 font-semibold">
+                        Status
+                      </th>
+                      <th scope="col" className="px-4 py-3 font-semibold text-right">
+                        HTTP / Attempts
+                      </th>
+                      <th scope="col" className="px-4 py-3 font-semibold">
+                        Error / Next Retry
+                      </th>
+                      <th scope="col" className="px-5 py-3 font-semibold text-right sm:px-6">
+                        Timestamp (IST)
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-100 bg-white">
+                    {webhookDeliveries.map((del) => (
+                      <tr key={del.id}>
+                        <td className="px-5 py-3 sm:px-6">
+                          <div className="font-mono font-semibold text-slate-900">
+                            {del.eventType}
+                          </div>
+                          <div className="font-mono text-xs text-zinc-400">{del.id}</div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusPill
+                            label={del.status}
+                            tone={
+                              del.status === "delivered"
+                                ? "emerald"
+                                : del.status === "dead"
+                                  ? "ruby"
+                                  : "amber"
+                            }
+                          />
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono text-slate-700 tabular-nums">
+                          {del.httpStatus ? `HTTP ${del.httpStatus}` : "-"} • {del.attemptCount}x
+                        </td>
+                        <td className="px-4 py-3 text-zinc-600">
+                          {del.lastError ? (
+                            <span className="text-rose-700">{del.lastError}</span>
+                          ) : del.nextRetryAt && del.status !== "delivered" ? (
+                            <span>
+                              Retry at{" "}
+                              {new Date(del.nextRetryAt).toLocaleString("en-IN", {
+                                timeZone: "Asia/Kolkata",
+                              })}
+                            </span>
+                          ) : (
+                            <span className="text-emerald-700">2xx Acknowledged</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-3 text-right text-zinc-600 whitespace-nowrap tabular-nums sm:px-6">
+                          {new Date(del.deliveredAt || del.createdAt).toLocaleString("en-IN", {
+                            timeZone: "Asia/Kolkata",
+                          })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </SectionCard>
         </>
       )}

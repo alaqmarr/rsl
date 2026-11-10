@@ -9,6 +9,7 @@ import {
 } from "@rsl/billing";
 import { formatInr } from "@rsl/core";
 import {
+  countConversationsWithContacts,
   getConversationThread,
   listCannedReplies,
   listContacts,
@@ -19,12 +20,13 @@ import {
 import { canRoleAccessWebRoute, canRolePerform, formatRoleLabel } from "@rsl/rbac";
 import {
   AccessRestrictedState,
+  ConfirmSubmitButton,
   EmptyWorkspaceState,
   PageHeader,
   SectionCard,
   StatusPill,
 } from "@rsl/ui";
-import { InboxReplyComposer } from "@/components/client-utils";
+import { InboxReplyComposer, InboxToolsDisclosure } from "@/components/client-utils";
 import { FeaturePlanGate } from "@/components/feature-plan-gate";
 import { FlashBanner } from "@/components/flash-banner";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
@@ -102,11 +104,22 @@ export default async function CustomerInboxPage({
         : undefined;
   const searchQuery = sp.q?.trim() || "";
 
-  const contacts = listContacts(session.workspace.id, 150);
-  const conversations = listConversationsWithContacts(
+  const INBOX_PAGE_SIZE = 50;
+  const totalThreadsCount = countConversationsWithContacts(
     session.workspace.id,
     statusFilter,
     resolvedAssignedUserId
+  );
+  const totalThreadPages = Math.max(1, Math.ceil(totalThreadsCount / INBOX_PAGE_SIZE));
+  const rawInboxPage = Math.max(1, Number.parseInt(sp.page || "1", 10) || 1);
+  const currentInboxPage = Math.min(rawInboxPage, totalThreadPages);
+
+  const contacts = listContacts(session.workspace.id, { limit: 150, offset: 0 });
+  const conversations = listConversationsWithContacts(
+    session.workspace.id,
+    statusFilter,
+    resolvedAssignedUserId,
+    { page: currentInboxPage, pageSize: INBOX_PAGE_SIZE }
   );
   const cannedReplies = listCannedReplies(session.workspace.id);
   const workspaceLabels = listWorkspaceLabels(session.workspace.id);
@@ -163,7 +176,7 @@ export default async function CustomerInboxPage({
             <span className="font-semibold">
               Prepaid Wallet Balance: {formatInr(walletBalancePaise, { showDecimals: true })}
             </span>{" "}
-            —{" "}
+            -{" "}
             {isOverdraftExhausted
               ? "Maximum -₹200.00 overdraft limit reached. Free 24-hour window replies continue to work; recharge wallet to send metered WhatsApp templates."
               : `${formatInr(walletAvailableSpendPaise, { showDecimals: true })} overdraft credit remaining down to -₹200.00 so customer template replies stay uninterrupted.`}
@@ -199,8 +212,7 @@ export default async function CustomerInboxPage({
                     className="inline-flex items-center gap-1 font-semibold text-emerald-600 hover:underline"
                   >
                     Open Conversation
-                  </ActionLink>{" "}
-                  — <span className="text-zinc-600">{hit.snippet}</span>
+                  </ActionLink>{" "} - <span className="text-zinc-600">{hit.snippet}</span>
                 </li>
               ))}
             </ul>
@@ -208,27 +220,16 @@ export default async function CustomerInboxPage({
         </SectionCard>
       )}
 
-      {/* Quick Actions: collapsed into a clean drawer once active threads exist */}
+      {/* Quick Actions: controlled accessible disclosure drawer */}
       {canReply && (
-      <details
-        open={contacts.length === 0 || conversations.length === 0}
-        className="group rounded-2xl border border-zinc-200/90 bg-white shadow-2xs"
-      >
-        <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-5 py-3.5 text-[13px] font-semibold text-slate-900 select-none">
-          <span>
-            {contacts.length === 0
+        <InboxToolsDisclosure
+          defaultOpen={contacts.length === 0 || totalThreadsCount === 0}
+          summaryLabel={
+            contacts.length === 0
               ? "Step 1: Add or Import Customer Contacts to Start Messaging"
-              : `+ Add Contact, Start New Thread, or Bulk Import CSV (${contacts.length} contacts saved)`}
-          </span>
-          <span className="text-xs font-medium text-emerald-700 group-open:hidden">
-            Expand Tools
-          </span>
-          <span className="hidden text-xs font-medium text-zinc-500 group-open:inline">
-            Hide Tools
-          </span>
-        </summary>
-
-        <div className="space-y-5 border-t border-zinc-100 p-5">
+              : `+ Add Contact, Start New Thread, or Bulk Import CSV (${contacts.length} contacts saved)`
+          }
+        >
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
             <SectionCard
               title="Add Customer Contact"
@@ -426,15 +427,14 @@ export default async function CustomerInboxPage({
               </SubmitButton>
             </form>
           </SectionCard>
-        </div>
-      </details>
+        </InboxToolsDisclosure>
       )}
 
       {/* 3-Pane Inbox Workspace (Master-Detail on Mobile, 3-Column on Desktop) */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[310px_1fr_290px]">
         <div className={hasMobileThreadOpen ? "hidden lg:block" : "block"}>
         <SectionCard
-          title={`Threads (${conversations.length})`}
+          title={`Threads (${totalThreadsCount})`}
           action={
             <div className="inline-flex rounded-lg border border-zinc-200 bg-white p-0.5 text-[11.5px]">
               {["all", "open", "resolved"].map((st) => (
@@ -493,7 +493,7 @@ export default async function CustomerInboxPage({
                     }
                   >
                     <ActionLink
-                      href={`/inbox?status=${statusFilter}&assigned=${assignedFilter}&conv=${encodeURIComponent(conversation.id)}`}
+                      href={`/inbox?status=${statusFilter}&assigned=${assignedFilter}&page=${currentInboxPage}&conv=${encodeURIComponent(conversation.id)}`}
                       variant="card"
                       className="flex items-center justify-between gap-2 px-5 py-3.5"
                     >
@@ -523,6 +523,33 @@ export default async function CustomerInboxPage({
               })}
             </ul>
           )}
+          {totalThreadPages > 1 && (
+            <div className="flex items-center justify-between border-t border-zinc-100 bg-zinc-50/70 px-4 py-2 text-xs text-zinc-600">
+              <span className="tabular-nums">
+                Page {currentInboxPage} / {totalThreadPages}
+              </span>
+              <div className="flex items-center gap-1.5">
+                {currentInboxPage > 1 && (
+                  <ActionLink
+                    href={`/inbox?status=${statusFilter}&assigned=${assignedFilter}&page=${currentInboxPage - 1}`}
+                    spinnerSize="xs"
+                    className="rsl-btn-secondary px-2.5 py-0.5 text-xs"
+                  >
+                    ← Prev
+                  </ActionLink>
+                )}
+                {currentInboxPage < totalThreadPages && (
+                  <ActionLink
+                    href={`/inbox?status=${statusFilter}&assigned=${assignedFilter}&page=${currentInboxPage + 1}`}
+                    spinnerSize="xs"
+                    className="rsl-btn-secondary px-2.5 py-0.5 text-xs"
+                  >
+                    Next →
+                  </ActionLink>
+                )}
+              </div>
+            </div>
+          )}
         </SectionCard>
         </div>
 
@@ -545,7 +572,7 @@ export default async function CustomerInboxPage({
             activeThread
               ? activeThread.whatsappWindowOpen
                 ? "24-hour free reply window is OPEN"
-                : "24-hour window closed — include an approved template name to message on WhatsApp"
+                : "24-hour window closed - include an approved template name to message on WhatsApp"
               : undefined
           }
           action={
@@ -613,7 +640,7 @@ export default async function CustomerInboxPage({
                 />
               ) : (
                 <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/75 px-4 py-3 text-xs text-zinc-600">
-                  Read-only role — your current role can inspect customer message threads, while Support Executives, Managers, Admins, and Owners can send replies.
+                  Read-only role - your current role can inspect customer message threads, while Support Executives, Managers, Admins, and Owners can send replies.
                 </div>
               )}
             </div>
@@ -633,10 +660,10 @@ export default async function CustomerInboxPage({
                 <div className="space-y-1 rounded-xl border border-zinc-200/85 bg-zinc-50/75 p-3.5">
                   <div className="font-semibold text-slate-900">{activeThread.contact?.name}</div>
                   <div className="font-mono text-xs text-zinc-600">
-                    Phone: {activeThread.contact?.phoneE164 || "—"}
+                    Phone: {activeThread.contact?.phoneE164 || "-"}
                   </div>
                   <div className="text-xs text-zinc-600">
-                    Email: {activeThread.contact?.email || "—"}
+                    Email: {activeThread.contact?.email || "-"}
                   </div>
                 </div>
 
@@ -801,7 +828,7 @@ export default async function CustomerInboxPage({
                     >
                       <div className="min-w-0">
                         <div className="font-semibold text-slate-900">
-                          <span className="font-mono text-emerald-700">/{cr.shortcut}</span> —{" "}
+                          <span className="font-mono text-emerald-700">/{cr.shortcut}</span> -{" "}
                           {cr.title}
                         </div>
                         <p className="mt-0.5 line-clamp-2 text-[11.5px] text-zinc-600">{cr.body}</p>
@@ -814,13 +841,12 @@ export default async function CustomerInboxPage({
                             name="conversationId"
                             value={activeThread?.conversation.id ?? ""}
                           />
-                          <SubmitButton
-                            spinnerSize="xs"
-                            pendingText="..."
-                            className="rsl-btn-danger-soft px-2 py-0.5 text-[11px]"
+                          <ConfirmSubmitButton
+                            confirmMessage={`Delete saved quick reply "${cr.title}"?`}
+                            className="rsl-btn-danger-soft px-2 py-0.5 text-xs"
                           >
                             Remove
-                          </SubmitButton>
+                          </ConfirmSubmitButton>
                         </form>
                       )}
                     </li>

@@ -1,9 +1,20 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
-import { sileo, Toaster } from "sileo";
+import React, { useEffect, useRef, useState } from "react";
+import { sileo, Toaster, type SileoOptions } from "sileo";
 
 export { sileo };
+
+export const RSL_SILEO_TOAST_OPTIONS: Partial<SileoOptions> = {
+  fill: "var(--sileo-fill)",
+  roundness: 16,
+  styles: {
+    title: "rsl-sileo-title",
+    description: "rsl-sileo-description",
+    badge: "rsl-sileo-badge",
+    button: "rsl-sileo-button",
+  },
+};
 
 export interface FlashToastPayload {
   id: string;
@@ -18,7 +29,7 @@ function splitToastMessage(
   const clean = raw.trim();
   if (!clean) return { title: fallbackTitle };
 
-  const dashIdx = clean.indexOf(" — ");
+  const dashIdx = clean.indexOf(" - ");
   if (dashIdx > 3 && dashIdx <= 48) {
     return {
       title: clean.slice(0, dashIdx).trim(),
@@ -52,6 +63,7 @@ export function triggerSileoToast(
   if (type === "error") {
     const parts = splitToastMessage(message, "Could not complete action");
     sileo.error({
+      ...RSL_SILEO_TOAST_OPTIONS,
       title: parts.title,
       description: parts.description,
       duration: 5500,
@@ -61,6 +73,7 @@ export function triggerSileoToast(
   if (type === "warning") {
     const parts = splitToastMessage(message, "Please check");
     sileo.warning({
+      ...RSL_SILEO_TOAST_OPTIONS,
       title: parts.title,
       description: parts.description,
       duration: 5000,
@@ -70,6 +83,7 @@ export function triggerSileoToast(
   if (type === "info") {
     const parts = splitToastMessage(message, "Update");
     sileo.info({
+      ...RSL_SILEO_TOAST_OPTIONS,
       title: parts.title,
       description: parts.description,
       duration: 4200,
@@ -78,6 +92,7 @@ export function triggerSileoToast(
   }
   const parts = splitToastMessage(message, "Saved");
   sileo.success({
+    ...RSL_SILEO_TOAST_OPTIONS,
     title: parts.title,
     description: parts.description,
     duration: 4200,
@@ -102,70 +117,104 @@ function clearBrowserCookie(name: string): void {
   document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=Lax`;
 }
 
-function decodeFlashPayload(raw: string): FlashToastPayload | null {
-  try {
-    if (raw.startsWith("b64_")) {
-      const b64 = raw.slice(4).replace(/-/g, "+").replace(/_/g, "/");
-      const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
-      const binary = atob(padded);
-      const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
-      const text = new TextDecoder().decode(bytes);
-      return JSON.parse(text) as FlashToastPayload;
-    }
-    try {
-      return JSON.parse(decodeURIComponent(raw)) as FlashToastPayload;
-    } catch {
-      return JSON.parse(raw) as FlashToastPayload;
-    }
-  } catch {
-    return null;
-  }
-}
-
 export function SileoToastProvider({
   cookieName = "rsl_toast",
+  verifiedToast = null,
+  verifyEndpoint = "/api/flash-toast",
 }: {
   cookieName?: string;
+  verifiedToast?: FlashToastPayload | null;
+  verifyEndpoint?: string;
 }) {
   const seenIdsRef = useRef<Set<string>>(new Set());
+  const verifyingCookieRef = useRef<string>("");
+  const [toastTheme, setToastTheme] = useState<"light" | "dark">("light");
+
+  useEffect(() => {
+    const syncTheme = () => {
+      if (typeof document === "undefined") return;
+      const attr = document.documentElement.dataset.theme;
+      if (attr === "dark" || attr === "light") {
+        setToastTheme(attr);
+        return;
+      }
+      if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
+        setToastTheme("dark");
+      } else {
+        setToastTheme("light");
+      }
+    };
+    syncTheme();
+    const onThemeChange = (e: Event) => {
+      const next = (e as CustomEvent<"light" | "dark">).detail;
+      if (next === "dark" || next === "light") setToastTheme(next);
+    };
+    window.addEventListener("rsl-theme-change", onThemeChange);
+    return () => window.removeEventListener("rsl-theme-change", onThemeChange);
+  }, []);
+
+  useEffect(() => {
+    if (verifiedToast?.id && !seenIdsRef.current.has(verifiedToast.id)) {
+      seenIdsRef.current.add(verifiedToast.id);
+      clearBrowserCookie(cookieName);
+      triggerSileoToast(verifiedToast.type, verifiedToast.message);
+    }
+  }, [verifiedToast, cookieName]);
 
   useEffect(() => {
     const consumePendingToasts = () => {
-      // 1. Consume Server Action flash cookie (zero URL params)
       const encoded = readCookieValue(cookieName);
       if (encoded) {
-        clearBrowserCookie(cookieName);
-        const parsed = decodeFlashPayload(encoded);
-        if (parsed?.id && !seenIdsRef.current.has(parsed.id)) {
-          seenIdsRef.current.add(parsed.id);
-          triggerSileoToast(parsed.type, parsed.message);
+        // Unsigned client-crafted cookies are never trusted and are cleared immediately.
+        if (!encoded.startsWith("sig1.")) {
+          clearBrowserCookie(cookieName);
+          return;
         }
+        if (verifyingCookieRef.current === encoded) {
+          return;
+        }
+        verifyingCookieRef.current = encoded;
+        void fetch(verifyEndpoint, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cookieName }),
+        })
+          .then(async (res) => {
+            clearBrowserCookie(cookieName);
+            if (!res.ok) return;
+            const data = (await res.json()) as { toast?: FlashToastPayload | null };
+            const parsed = data?.toast ?? null;
+            if (parsed?.id && !seenIdsRef.current.has(parsed.id)) {
+              seenIdsRef.current.add(parsed.id);
+              triggerSileoToast(parsed.type, parsed.message);
+            }
+          })
+          .catch(() => {
+            clearBrowserCookie(cookieName);
+          })
+          .finally(() => {
+            if (verifyingCookieRef.current === encoded) {
+              verifyingCookieRef.current = "";
+            }
+          });
       }
 
-      // 2. Also intercept & strip any legacy ?notice= or ?error= query params so URLs stay clean
+      // Scrub legacy ?notice= or ?error= query params from the address bar without rendering unverified URL strings
       if (typeof window !== "undefined" && window.location.search) {
         const sp = new URLSearchParams(window.location.search);
-        const notice = sp.get("notice");
-        const error = sp.get("error");
-        if (notice || error) {
-          const urlKey = `url:${window.location.pathname}:${notice ?? ""}:${error ?? ""}`;
+        if (sp.has("notice") || sp.has("error")) {
           sp.delete("notice");
           sp.delete("error");
           const qs = sp.toString();
           const cleanUrl = `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`;
           window.history.replaceState(null, "", cleanUrl);
-
-          if (!seenIdsRef.current.has(urlKey)) {
-            seenIdsRef.current.add(urlKey);
-            if (notice) triggerSileoToast("success", notice);
-            if (error) triggerSileoToast("error", error);
-          }
         }
       }
     };
 
     consumePendingToasts();
-    const timer = window.setInterval(consumePendingToasts, 220);
+    const timer = window.setInterval(consumePendingToasts, 450);
     window.addEventListener("focus", consumePendingToasts);
     window.addEventListener("popstate", consumePendingToasts);
 
@@ -174,44 +223,25 @@ export function SileoToastProvider({
       window.removeEventListener("focus", consumePendingToasts);
       window.removeEventListener("popstate", consumePendingToasts);
     };
-  }, [cookieName]);
+  }, [cookieName, verifyEndpoint]);
 
   return (
     <Toaster
       position="top-right"
-      theme="light"
+      theme={toastTheme}
+      options={RSL_SILEO_TOAST_OPTIONS}
       offset={{ top: 16, right: 16 }}
     />
   );
 }
 
 /**
- * Legacy `<FlashBanner />` shim — renders nothing inline in the page flow
- * because all feedback is now delivered via Sileo physics toasts.
- * If props are passed directly without cookie/URL, fires Sileo once on mount.
+ * Legacy `<FlashBanner />` shim - renders nothing and ignores unverified URL query strings
+ * because all feedback is delivered via server-signed flash toast cookies (`sig1.<hmac>.<b64>`).
  */
-export function FlashBanner({
-  notice,
-  error,
-}: {
+export function FlashBanner(_props: {
   notice?: string;
   error?: string;
 }) {
-  const firedRef = useRef<string>("");
-
-  useEffect(() => {
-    if (!notice && !error) return;
-    // If URL still had ?notice / ?error, SileoToastProvider handles & strips it
-    if (typeof window !== "undefined" && window.location.search) {
-      const sp = new URLSearchParams(window.location.search);
-      if (sp.has("notice") || sp.has("error")) return;
-    }
-    const key = `${notice ?? ""}|${error ?? ""}`;
-    if (firedRef.current === key) return;
-    firedRef.current = key;
-    if (notice) triggerSileoToast("success", notice);
-    if (error) triggerSileoToast("error", error);
-  }, [notice, error]);
-
   return null;
 }

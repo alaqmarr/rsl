@@ -218,7 +218,7 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
   {
     key: "storage.managed",
     name: "RSL Managed Cloud Storage (Cloudflare R2)",
-    plainSummary: "Store Tally PDFs, social media files, and backups on RSL's managed cloud vault — or switch to your own R2 anytime.",
+    plainSummary: "Store Tally PDFs, social media files, and backups on RSL's managed cloud vault - or switch to your own R2 anytime.",
     category: "Data & Developer",
     dependsOn: [],
     pricingModel: "wallet_plus_monthly",
@@ -532,7 +532,7 @@ export const DEFAULT_BUNDLE_CATALOG: readonly DefaultBundleCatalogItem[] = [
     tagline:
       "Every feature across Tally Prime Suite, WhatsApp Auto-Billing, Inbox, Meta & Google Ads, Google Reviews, Cloud Backups & API (~₹750/mo billed yearly).",
     description:
-      "Full-platform access unlocking all 16 RSL Marketing & Tally Prime Suite tools with zero locked modules — customizable per client.",
+      "Full-platform access unlocking all 16 RSL Marketing & Tally Prime Suite tools with zero locked modules - customizable per client.",
     includedKeys: SERVICE_CATALOG.map((s) => s.key),
     monthlyAmountPaise: 99900,
     quarterlyAmountPaise: 269900,
@@ -1240,7 +1240,7 @@ const DOC_SERIES_PREFIX: Readonly<Record<BillingDocumentType, string>> = {
 
 /**
  * Atomically allocates the next sequential document number (`RSL/YY-YY/0001`, `ADV/YY-YY/0001`, `CN/YY-YY/0001`)
- * via `controlSchema.invoiceSequences` so deletions, credit notes, or concurrent webhooks never reuse numbers (P1-24 / ACT-5.4).
+ * via `controlSchema.invoiceSequences` so deletions, credit notes, or concurrent webhooks never reuse numbers.
  */
 export function allocateNextDocumentNumber(
   docType: BillingDocumentType,
@@ -1376,7 +1376,7 @@ export function createGstInvoice(params: {
 /**
  * Issues a statutory Advance Receipt Voucher (`ADV/YY-YY/0001`) at 0% GST when a customer deposits
  * funds into their refundable/prepaid messaging wallet. GST Tax Invoices (`RSL/...`) are issued
- * strictly upon taxable plan/service consumption (P0-06 / ACT-2.1).
+ * strictly upon taxable plan/service consumption.
  */
 export function createAdvanceReceiptVoucher(params: {
   workspaceId: string;
@@ -1456,7 +1456,7 @@ export function activateServiceEntitlement(params: {
     throw new RslError("RSL-VAL-1001", "Unknown plan key.");
   }
 
-  // Enforce dependencies server-side (Section 2)
+  // Enforce module dependencies server-side
   const deps = JSON.parse(svc.dependsOnJson) as string[];
   for (const depKey of deps) {
     if (!hasActiveEntitlement(params.workspaceId, depKey)) {
@@ -1494,7 +1494,7 @@ export function activateServiceEntitlement(params: {
     });
     const inv = createGstInvoice({
       workspaceId: params.workspaceId,
-      description: `${svc.name} — Monthly Plan`,
+      description: `${svc.name} - Monthly Plan`,
       subtotalPaise: monthlyPaise,
       status: "paid",
     });
@@ -1537,14 +1537,42 @@ export function deactivateServiceEntitlement(workspaceId: string, serviceKey: st
     .run();
 }
 
+const WALLET_CACHE_TTL_MS = process.env.NODE_ENV === "test" || process.env.VITEST ? 0 : 2_500;
+const walletBalanceCache = new Map<string, { value: number; expiresAt: number }>();
+const adSpendBalanceCache = new Map<string, { value: number; expiresAt: number }>();
+
+export function invalidateWalletBalanceCache(workspaceId?: string): void {
+  if (workspaceId) {
+    walletBalanceCache.delete(workspaceId);
+    adSpendBalanceCache.delete(workspaceId);
+    return;
+  }
+  walletBalanceCache.clear();
+  adSpendBalanceCache.clear();
+}
+
 export function getWalletBalancePaise(workspaceId: string): number {
-  const row = controlDb()
+  const db = controlDb();
+  const inTx = db.$client.inTransaction;
+  const now = Date.now();
+  if (!inTx && WALLET_CACHE_TTL_MS > 0) {
+    const cached = walletBalanceCache.get(workspaceId);
+    if (cached && cached.expiresAt > now) {
+      return cached.value;
+    }
+  }
+
+  const row = db
     .select({ total: sql<number>`COALESCE(SUM(${controlSchema.ledgerEntries.amountPaise}), 0)` })
     .from(controlSchema.ledgerEntries)
     .where(eq(controlSchema.ledgerEntries.workspaceId, workspaceId))
     .get();
 
-  return Number(row?.total ?? 0);
+  const total = Number(row?.total ?? 0);
+  if (!inTx && WALLET_CACHE_TTL_MS > 0) {
+    walletBalanceCache.set(workspaceId, { value: total, expiresAt: now + WALLET_CACHE_TTL_MS });
+  }
+  return total;
 }
 
 export function listLedgerEntries(workspaceId: string, limit = 50) {
@@ -1566,7 +1594,7 @@ export function creditWallet(params: {
   entryType?: "credit" | "refund" | "staff_adjustment";
   createInvoice?: boolean;
 }): { balancePaise: number; invoiceNumber?: string } {
-  if (!Number.isInteger(params.amountPaise) || params.amountPaise <= 0) {
+  if (!Number.isFinite(params.amountPaise) || !Number.isInteger(params.amountPaise) || params.amountPaise <= 0) {
     throw new RslError("RSL-VAL-1001", "Amount must be a positive rupee value.");
   }
 
@@ -1614,7 +1642,7 @@ export function creditWallet(params: {
       const extKey = `wallet_credit:${params.workspaceId}:${params.idempotencyKey}`;
       const inv = createAdvanceReceiptVoucher({
         workspaceId: params.workspaceId,
-        description: `Prepaid Wallet Deposit — ${params.description}`,
+        description: `Prepaid Wallet Deposit - ${params.description}`,
         amountPaise: params.amountPaise,
         externalRefKey: extKey,
       });
@@ -1643,7 +1671,9 @@ export function creditWallet(params: {
     };
   });
 
-  return raw.inTransaction ? runImmediate() : runImmediate.immediate();
+  const result = raw.inTransaction ? runImmediate() : runImmediate.immediate();
+  invalidateWalletBalanceCache(params.workspaceId);
+  return result;
 }
 
 export function debitWallet(params: {
@@ -1656,7 +1686,7 @@ export function debitWallet(params: {
   entryType?: "debit" | "reserve" | "staff_adjustment";
   allowOverdraft?: boolean;
 }): { balancePaise: number } {
-  if (!Number.isInteger(params.amountPaise) || params.amountPaise <= 0) {
+  if (!Number.isFinite(params.amountPaise) || !Number.isInteger(params.amountPaise) || params.amountPaise <= 0) {
     throw new RslError("RSL-VAL-1001", "Debit amount must be positive.");
   }
 
@@ -1718,7 +1748,9 @@ export function debitWallet(params: {
     return { balancePaise: getWalletBalancePaise(params.workspaceId) };
   });
 
-  return raw.inTransaction ? runImmediate() : runImmediate.immediate();
+  const result = raw.inTransaction ? runImmediate() : runImmediate.immediate();
+  invalidateWalletBalanceCache(params.workspaceId);
+  return result;
 }
 
 export function consumeUsage(params: {
@@ -1730,8 +1762,11 @@ export function consumeUsage(params: {
   description: string;
   actorId: string;
 }): void {
+  if (!Number.isFinite(params.quantity) || params.quantity <= 0 || !Number.isInteger(params.unitCostPaise) || params.unitCostPaise < 0) {
+    return;
+  }
   const db = controlDb();
-  const totalCost = params.quantity * params.unitCostPaise;
+  const totalCost = Math.round(params.quantity * params.unitCostPaise);
 
   const existing = db
     .select()
@@ -1767,6 +1802,7 @@ export function consumeUsage(params: {
       createdAt: Date.now(),
     })
     .run();
+  invalidateWalletBalanceCache(params.workspaceId);
 }
 
 export function verifyRazorpaySignature(rawBody: string, signatureHex: string): boolean {
@@ -1779,19 +1815,30 @@ export function isRazorpayCheckoutConfigured(): boolean {
   return getPlatformRazorpayConfig().isReady;
 }
 
+function normalizeAndValidateUtrReference(rawUtr: string): { displayRef: string; canonicalUtr: string } {
+  const ref = String(rawUtr ?? "").trim();
+  if (ref.length < 4 || ref.length > 64 || !/^[A-Za-z0-9/_.:-]+$/.test(ref)) {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Enter a valid UPI or Bank UTR transaction reference number (4–64 alphanumeric characters)."
+    );
+  }
+  return {
+    displayRef: ref,
+    canonicalUtr: ref.toUpperCase(),
+  };
+}
+
 export function submitWalletRechargeRequest(params: {
   workspaceId: string;
   amountPaise: number;
   utrOrReference: string;
   paymentMethod: "upi" | "bank_transfer";
 }): { paymentId: string } {
-  if (!Number.isInteger(params.amountPaise) || params.amountPaise < 10000) {
+  if (!Number.isFinite(params.amountPaise) || !Number.isInteger(params.amountPaise) || params.amountPaise < 10000 || params.amountPaise > 1_000_000_000) {
     throw new RslError("RSL-VAL-1001", "Minimum wallet recharge request is ₹100.");
   }
-  const ref = params.utrOrReference.trim();
-  if (ref.length < 4) {
-    throw new RslError("RSL-VAL-1001", "Enter your UPI or Bank UTR transaction reference number.");
-  }
+  const { displayRef, canonicalUtr } = normalizeAndValidateUtrReference(params.utrOrReference);
 
   const db = controlDb();
   const duplicate = db
@@ -1800,7 +1847,10 @@ export function submitWalletRechargeRequest(params: {
     .where(
       and(
         eq(controlSchema.payments.workspaceId, params.workspaceId),
-        eq(controlSchema.payments.externalPaymentId, ref)
+        or(
+          eq(controlSchema.payments.externalPaymentId, displayRef),
+          eq(controlSchema.payments.externalRefUtr, canonicalUtr)
+        )
       )
     )
     .get();
@@ -1815,7 +1865,8 @@ export function submitWalletRechargeRequest(params: {
       id: paymentId,
       workspaceId: params.workspaceId,
       provider: params.paymentMethod,
-      externalPaymentId: ref,
+      externalPaymentId: displayRef,
+      externalRefUtr: canonicalUtr,
       amountPaise: params.amountPaise,
       currency: "INR",
       purpose: "wallet_topup",
@@ -1860,65 +1911,73 @@ export function approveWalletRechargeRequest(params: {
   staffId: string;
 }): { workspaceId: string; amountPaise: number; invoiceNumber?: string; balancePaise: number } {
   const db = controlDb();
-  const payment = db
-    .select()
-    .from(controlSchema.payments)
-    .where(eq(controlSchema.payments.id, params.paymentId))
-    .get();
+  const raw = db.$client;
 
-  if (!payment || payment.status !== "pending_verification") {
-    throw new RslError("RSL-VAL-1001", "Recharge request not found or already processed.");
-  }
+  const tx = raw.transaction(() => {
+    const payment = db
+      .select()
+      .from(controlSchema.payments)
+      .where(eq(controlSchema.payments.id, params.paymentId))
+      .get();
 
-  const isAdSpendVault = payment.purpose === "ad_spend_topup";
-  const inv = createAdvanceReceiptVoucher({
-    workspaceId: payment.workspaceId,
-    description: isAdSpendVault
-      ? `Managed Ad Spend Vault Deposit (${payment.provider.toUpperCase()} Ref: ${payment.externalPaymentId ?? payment.id})`
-      : `Prepaid Wallet Deposit (${payment.provider.toUpperCase()} Ref: ${payment.externalPaymentId ?? payment.id})`,
-    amountPaise: payment.amountPaise,
-    externalRefKey: `${isAdSpendVault ? "ad_vault_recharge" : "wallet_recharge"}:${payment.id}`,
+    if (!payment || payment.status !== "pending_verification") {
+      throw new RslError("RSL-VAL-1001", "Recharge request not found or already processed.");
+    }
+
+    const isAdSpendVault = payment.purpose === "ad_spend_topup";
+    const inv = createAdvanceReceiptVoucher({
+      workspaceId: payment.workspaceId,
+      description: isAdSpendVault
+        ? `Managed Ad Spend Vault Deposit (${payment.provider.toUpperCase()} Ref: ${payment.externalPaymentId ?? payment.id})`
+        : `Prepaid Wallet Deposit (${payment.provider.toUpperCase()} Ref: ${payment.externalPaymentId ?? payment.id})`,
+      amountPaise: payment.amountPaise,
+      externalRefKey: `${isAdSpendVault ? "ad_vault_recharge" : "wallet_recharge"}:${payment.id}`,
+    });
+
+    let nextBalancePaise = 0;
+    if (isAdSpendVault) {
+      const creditedVault = creditAdSpendVault({
+        workspaceId: payment.workspaceId,
+        amountPaise: payment.amountPaise,
+        description: `Verified ${payment.provider.toUpperCase()} Ad Spend Vault top-up (Ref: ${payment.externalPaymentId ?? "-"})`,
+        idempotencyKey: `verified_ad_payment:${payment.id}`,
+        actorId: params.staffId,
+        paymentId: payment.id,
+        entryType: "deposit",
+      });
+      nextBalancePaise = creditedVault.availablePaise;
+    } else {
+      const credited = creditWallet({
+        workspaceId: payment.workspaceId,
+        amountPaise: payment.amountPaise,
+        description: `Verified ${payment.provider.toUpperCase()} recharge (Ref: ${payment.externalPaymentId ?? "-"})`,
+        idempotencyKey: `verified_payment:${payment.id}`,
+        actorId: params.staffId,
+        entryType: "credit",
+        createInvoice: false,
+      });
+      nextBalancePaise = credited.balancePaise;
+    }
+
+    db.update(controlSchema.payments)
+      .set({
+        status: "captured",
+        invoiceId: inv.id,
+      })
+      .where(eq(controlSchema.payments.id, payment.id))
+      .run();
+
+    return {
+      workspaceId: payment.workspaceId,
+      amountPaise: payment.amountPaise,
+      invoiceNumber: inv.invoiceNumber,
+      balancePaise: nextBalancePaise,
+    };
   });
 
-  let nextBalancePaise = 0;
-  if (isAdSpendVault) {
-    const creditedVault = creditAdSpendVault({
-      workspaceId: payment.workspaceId,
-      amountPaise: payment.amountPaise,
-      description: `Verified ${payment.provider.toUpperCase()} Ad Spend Vault top-up (Ref: ${payment.externalPaymentId ?? "—"})`,
-      idempotencyKey: `verified_ad_payment:${payment.id}`,
-      actorId: params.staffId,
-      paymentId: payment.id,
-      entryType: "deposit",
-    });
-    nextBalancePaise = creditedVault.availablePaise;
-  } else {
-    const credited = creditWallet({
-      workspaceId: payment.workspaceId,
-      amountPaise: payment.amountPaise,
-      description: `Verified ${payment.provider.toUpperCase()} recharge (Ref: ${payment.externalPaymentId ?? "—"})`,
-      idempotencyKey: `verified_payment:${payment.id}`,
-      actorId: params.staffId,
-      entryType: "credit",
-      createInvoice: false,
-    });
-    nextBalancePaise = credited.balancePaise;
-  }
-
-  db.update(controlSchema.payments)
-    .set({
-      status: "captured",
-      invoiceId: inv.id,
-    })
-    .where(eq(controlSchema.payments.id, payment.id))
-    .run();
-
-  return {
-    workspaceId: payment.workspaceId,
-    amountPaise: payment.amountPaise,
-    invoiceNumber: inv.invoiceNumber,
-    balancePaise: nextBalancePaise,
-  };
+  const out = raw.inTransaction ? tx() : tx.immediate();
+  invalidateWalletBalanceCache(out.workspaceId);
+  return out;
 }
 
 export function rejectWalletRechargeRequest(params: {
@@ -1962,7 +2021,7 @@ export async function createRazorpayOrderForWallet(params: {
   }
   const purpose = params.purpose === "ad_spend_topup" ? "ad_spend_topup" : "wallet_topup";
   const minPaise = purpose === "ad_spend_topup" ? 50000 : 10000;
-  if (!Number.isInteger(params.amountPaise) || params.amountPaise < minPaise) {
+  if (!Number.isFinite(params.amountPaise) || !Number.isInteger(params.amountPaise) || params.amountPaise < minPaise || params.amountPaise > 1_000_000_000) {
     throw new RslError(
       "RSL-VAL-1001",
       purpose === "ad_spend_topup"
@@ -1971,7 +2030,7 @@ export async function createRazorpayOrderForWallet(params: {
     );
   }
 
-  // Prepaid wallet & Ad Spend Vault deposits are collected at 0% GST (Advance Receipt Voucher); GST applies upon service consumption (P0-06)
+  // Prepaid wallet & Ad Spend Vault deposits are collected at 0% GST (Advance Receipt Voucher); GST applies upon service consumption.
   const amountWithGstPaise = params.amountPaise;
   const authHeader = Buffer.from(`${rzp.keyId}:${rzp.keySecret}`).toString("base64");
   const resp = await fetch("https://api.razorpay.com/v1/orders", {
@@ -2041,73 +2100,246 @@ export function verifyRazorpayCheckoutAndCreditWallet(params: {
   }
 
   const db = controlDb();
-  const orderRow = db
-    .select()
-    .from(controlSchema.payments)
-    .where(
-      and(
-        eq(controlSchema.payments.workspaceId, params.workspaceId),
-        eq(controlSchema.payments.externalOrderId, params.orderId)
+  const raw = db.$client;
+  const tx = raw.transaction(() => {
+    const orderRow = db
+      .select()
+      .from(controlSchema.payments)
+      .where(
+        and(
+          eq(controlSchema.payments.workspaceId, params.workspaceId),
+          eq(controlSchema.payments.externalOrderId, params.orderId)
+        )
       )
-    )
-    .get();
+      .get();
 
-  if (!orderRow) {
-    throw new RslError("RSL-VAL-1001", "Matching payment order not found.");
-  }
+    if (!orderRow) {
+      throw new RslError("RSL-VAL-1001", "Matching payment order not found.");
+    }
 
-  const purpose: "wallet_topup" | "ad_spend_topup" =
-    orderRow.purpose === "ad_spend_topup" ? "ad_spend_topup" : "wallet_topup";
+    const purpose: "wallet_topup" | "ad_spend_topup" =
+      orderRow.purpose === "ad_spend_topup" ? "ad_spend_topup" : "wallet_topup";
 
-  const inv = createAdvanceReceiptVoucher({
-    workspaceId: params.workspaceId,
-    description:
-      purpose === "ad_spend_topup"
-        ? `Online Managed Ad Spend Vault Deposit (Payment ${params.paymentId})`
-        : `Online Prepaid Wallet Deposit (Payment ${params.paymentId})`,
-    amountPaise: orderRow.amountPaise,
-    externalRefKey: `rzp_payment:${params.paymentId}`,
+    const inv = createAdvanceReceiptVoucher({
+      workspaceId: params.workspaceId,
+      description:
+        purpose === "ad_spend_topup"
+          ? `Online Managed Ad Spend Vault Deposit (Payment ${params.paymentId})`
+          : `Online Prepaid Wallet Deposit (Payment ${params.paymentId})`,
+      amountPaise: orderRow.amountPaise,
+      externalRefKey: `rzp_payment:${params.paymentId}`,
+    });
+
+    let nextBalancePaise = 0;
+    if (purpose === "ad_spend_topup") {
+      const creditedVault = creditAdSpendVault({
+        workspaceId: params.workspaceId,
+        amountPaise: orderRow.amountPaise,
+        description: `Razorpay Ad Spend Vault Deposit (${params.paymentId})`,
+        idempotencyKey: `rzp_payment:${params.paymentId}`,
+        actorId: params.actorId,
+        paymentId: orderRow.id,
+        entryType: "deposit",
+      });
+      nextBalancePaise = creditedVault.availablePaise;
+    } else {
+      const credited = creditWallet({
+        workspaceId: params.workspaceId,
+        amountPaise: orderRow.amountPaise,
+        description: `Razorpay Wallet Recharge (${params.paymentId})`,
+        idempotencyKey: `rzp_payment:${params.paymentId}`,
+        actorId: params.actorId,
+        entryType: "credit",
+        createInvoice: false,
+      });
+      nextBalancePaise = credited.balancePaise;
+    }
+
+    db.update(controlSchema.payments)
+      .set({
+        externalPaymentId: params.paymentId,
+        invoiceId: inv.id,
+        status: "captured",
+      })
+      .where(eq(controlSchema.payments.id, orderRow.id))
+      .run();
+
+    return {
+      balancePaise: nextBalancePaise,
+      invoiceNumber: inv.invoiceNumber,
+      purpose,
+    };
   });
 
-  let nextBalancePaise = 0;
-  if (purpose === "ad_spend_topup") {
-    const creditedVault = creditAdSpendVault({
-      workspaceId: params.workspaceId,
-      amountPaise: orderRow.amountPaise,
-      description: `Razorpay Ad Spend Vault Deposit (${params.paymentId})`,
-      idempotencyKey: `rzp_payment:${params.paymentId}`,
-      actorId: params.actorId,
-      paymentId: orderRow.id,
-      entryType: "deposit",
-    });
-    nextBalancePaise = creditedVault.availablePaise;
-  } else {
-    const credited = creditWallet({
-      workspaceId: params.workspaceId,
-      amountPaise: orderRow.amountPaise,
-      description: `Razorpay Wallet Recharge (${params.paymentId})`,
-      idempotencyKey: `rzp_payment:${params.paymentId}`,
-      actorId: params.actorId,
-      entryType: "credit",
-      createInvoice: false,
-    });
-    nextBalancePaise = credited.balancePaise;
+  const out = raw.inTransaction ? tx() : tx.immediate();
+  invalidateWalletBalanceCache(params.workspaceId);
+  return out;
+}
+
+/**
+ * Reconciles a signed `payment.captured` Razorpay webhook atomically in a single IMMEDIATE transaction.
+ * Authoritatively matches `payments.externalOrderId` and verifies `capturedAmountPaise === order.amountPaise`,
+ * never trusting client-supplied `notes.walletCreditPaise` to inflate the credit amount.
+ */
+export function reconcileRazorpayCapturedPayment(params: {
+  paymentId: string;
+  orderId?: string | null;
+  capturedAmountPaise: number;
+  notesWorkspaceId?: string | null;
+  notesWalletCreditPaise?: number | null;
+  notesPurpose?: string | null;
+}): {
+  workspaceId: string;
+  creditedPaise: number;
+  invoiceId: string;
+  invoiceNumber: string;
+  purpose: "wallet_topup" | "ad_spend_topup";
+} {
+  const paymentId = String(params.paymentId ?? "").trim();
+  const orderId = params.orderId?.trim() || null;
+  const captured = Number(params.capturedAmountPaise);
+  if (!paymentId) {
+    throw new RslError("RSL-VAL-1001", "Razorpay payment ID is required.");
+  }
+  if (!Number.isFinite(captured) || !Number.isInteger(captured) || captured <= 0) {
+    throw new RslError("RSL-VAL-1001", "Razorpay captured amount must be a positive integer in paise.");
   }
 
-  db.update(controlSchema.payments)
-    .set({
-      externalPaymentId: params.paymentId,
-      invoiceId: inv.id,
-      status: "captured",
-    })
-    .where(eq(controlSchema.payments.id, orderRow.id))
-    .run();
+  const db = controlDb();
+  const raw = db.$client;
+  const tx = raw.transaction(() => {
+    const orderRow = orderId
+      ? db
+          .select()
+          .from(controlSchema.payments)
+          .where(eq(controlSchema.payments.externalOrderId, orderId))
+          .get()
+      : undefined;
 
-  return {
-    balancePaise: nextBalancePaise,
-    invoiceNumber: inv.invoiceNumber,
-    purpose,
-  };
+    if (orderId && !orderRow && !params.notesWorkspaceId) {
+      throw new RslError("RSL-VAL-1001", "Razorpay order was not recognized.");
+    }
+
+    if (orderRow) {
+      if (captured !== orderRow.amountPaise) {
+        throw new RslError(
+          "RSL-VAL-1001",
+          `Razorpay captured amount (${captured}) does not match recorded order amount (${orderRow.amountPaise}).`
+        );
+      }
+      if (
+        params.notesWorkspaceId &&
+        params.notesWorkspaceId.trim() &&
+        params.notesWorkspaceId.trim() !== orderRow.workspaceId
+      ) {
+        throw new RslError("RSL-VAL-1001", "Razorpay order workspace mismatch.");
+      }
+    } else if (
+      params.notesWalletCreditPaise !== null &&
+      params.notesWalletCreditPaise !== undefined &&
+      Number.isFinite(params.notesWalletCreditPaise) &&
+      params.notesWalletCreditPaise !== captured
+    ) {
+      throw new RslError(
+        "RSL-VAL-1001",
+        "Razorpay note credit amount does not match captured gateway amount."
+      );
+    }
+
+    const workspaceId = orderRow?.workspaceId ?? params.notesWorkspaceId?.trim() ?? "";
+    if (!workspaceId) {
+      throw new RslError("RSL-VAL-1001", "Workspace ID missing for captured payment.");
+    }
+
+    const creditPaise = orderRow ? orderRow.amountPaise : captured;
+    const purpose: "wallet_topup" | "ad_spend_topup" =
+      (orderRow?.purpose ?? params.notesPurpose) === "ad_spend_topup"
+        ? "ad_spend_topup"
+        : "wallet_topup";
+
+    const inv = createAdvanceReceiptVoucher({
+      workspaceId,
+      description:
+        purpose === "ad_spend_topup"
+          ? `Online Managed Ad Spend Vault Deposit (${paymentId})`
+          : `Online Prepaid Wallet Deposit (${paymentId})`,
+      amountPaise: creditPaise,
+      externalRefKey: `rzp_payment:${paymentId}`,
+    });
+
+    if (purpose === "ad_spend_topup") {
+      creditAdSpendVault({
+        workspaceId,
+        amountPaise: creditPaise,
+        description: `Verified Razorpay Ad Spend Vault Deposit (${paymentId})`,
+        idempotencyKey: `rzp_payment:${paymentId}`,
+        actorId: "razorpay_webhook",
+        paymentId: orderRow?.id,
+        entryType: "deposit",
+      });
+    } else {
+      creditWallet({
+        workspaceId,
+        amountPaise: creditPaise,
+        description: `Verified Razorpay Wallet Recharge (${paymentId})`,
+        idempotencyKey: `rzp_payment:${paymentId}`,
+        actorId: "razorpay_webhook",
+        entryType: "credit",
+        createInvoice: false,
+      });
+    }
+
+    if (orderRow) {
+      db.update(controlSchema.payments)
+        .set({
+          status: "captured",
+          externalPaymentId: paymentId,
+          invoiceId: inv.id,
+        })
+        .where(eq(controlSchema.payments.id, orderRow.id))
+        .run();
+    } else {
+      const existingPayment = db
+        .select()
+        .from(controlSchema.payments)
+        .where(
+          and(
+            eq(controlSchema.payments.workspaceId, workspaceId),
+            eq(controlSchema.payments.externalPaymentId, paymentId)
+          )
+        )
+        .get();
+      if (!existingPayment) {
+        db.insert(controlSchema.payments)
+          .values({
+            id: newId("pay", workspaceId),
+            workspaceId,
+            invoiceId: inv.id,
+            provider: "razorpay",
+            externalOrderId: orderId,
+            externalPaymentId: paymentId,
+            amountPaise: creditPaise,
+            currency: "INR",
+            purpose,
+            status: "captured",
+            createdAt: Date.now(),
+          })
+          .run();
+      }
+    }
+
+    return {
+      workspaceId,
+      creditedPaise: creditPaise,
+      invoiceId: inv.id,
+      invoiceNumber: inv.invoiceNumber,
+      purpose,
+    };
+  });
+
+  const out = raw.inTransaction ? tx() : tx.immediate();
+  invalidateWalletBalanceCache(out.workspaceId);
+  return out;
 }
 
 // ============================================================================
@@ -2122,12 +2354,25 @@ export interface AdSpendVaultSummary {
 }
 
 export function getAdSpendVaultBalancePaise(workspaceId: string): number {
-  const row = controlDb()
+  const db = controlDb();
+  const inTx = db.$client.inTransaction;
+  const now = Date.now();
+  if (!inTx && WALLET_CACHE_TTL_MS > 0) {
+    const cached = adSpendBalanceCache.get(workspaceId);
+    if (cached && cached.expiresAt > now) {
+      return cached.value;
+    }
+  }
+  const row = db
     .select({ total: sql<number>`coalesce(sum(${controlSchema.adSpendLedger.amountPaise}), 0)` })
     .from(controlSchema.adSpendLedger)
     .where(eq(controlSchema.adSpendLedger.workspaceId, workspaceId))
     .get();
-  return Math.max(0, Number(row?.total ?? 0));
+  const val = Math.max(0, Number(row?.total ?? 0));
+  if (!inTx && WALLET_CACHE_TTL_MS > 0) {
+    adSpendBalanceCache.set(workspaceId, { value: val, expiresAt: now + WALLET_CACHE_TTL_MS });
+  }
+  return val;
 }
 
 export function listAdSpendVaultLedger(workspaceId: string, limit = 30) {
@@ -2179,13 +2424,10 @@ export function submitAdSpendRechargeRequest(params: {
   utrOrReference: string;
   paymentMethod: "upi" | "bank_transfer";
 }): { paymentId: string } {
-  if (!Number.isInteger(params.amountPaise) || params.amountPaise < 50000) {
+  if (!Number.isFinite(params.amountPaise) || !Number.isInteger(params.amountPaise) || params.amountPaise < 50000 || params.amountPaise > 1_000_000_000) {
     throw new RslError("RSL-VAL-1001", "Minimum Managed Ad Spend Vault deposit is ₹500.");
   }
-  const ref = params.utrOrReference.trim();
-  if (ref.length < 4) {
-    throw new RslError("RSL-VAL-1001", "Enter your UPI or Bank UTR transaction reference number.");
-  }
+  const { displayRef, canonicalUtr } = normalizeAndValidateUtrReference(params.utrOrReference);
 
   const db = controlDb();
   const duplicate = db
@@ -2194,7 +2436,10 @@ export function submitAdSpendRechargeRequest(params: {
     .where(
       and(
         eq(controlSchema.payments.workspaceId, params.workspaceId),
-        eq(controlSchema.payments.externalPaymentId, ref)
+        or(
+          eq(controlSchema.payments.externalPaymentId, displayRef),
+          eq(controlSchema.payments.externalRefUtr, canonicalUtr)
+        )
       )
     )
     .get();
@@ -2211,7 +2456,8 @@ export function submitAdSpendRechargeRequest(params: {
       id: paymentId,
       workspaceId: params.workspaceId,
       provider: params.paymentMethod,
-      externalPaymentId: ref,
+      externalPaymentId: displayRef,
+      externalRefUtr: canonicalUtr,
       amountPaise: params.amountPaise,
       currency: "INR",
       purpose: "ad_spend_topup",
@@ -2279,12 +2525,14 @@ export function creditAdSpendVault(params: {
     };
   });
 
-  return raw.inTransaction ? tx() : tx.immediate();
+  const out = raw.inTransaction ? tx() : tx.immediate();
+  invalidateWalletBalanceCache(params.workspaceId);
+  return out;
 }
 
 /**
- * Atomically allocates pre-funded Rupee budget from the workspace's 0-Overdraft Managed Ad Spend Vault.
- * Throws RSL-BILL-1003 if available Ad Spend Vault balance is less than `amountPaise` (ZERO overdraft permitted).
+ * Atomically allocates pre-funded Rupee budget from the workspace's Managed Ad Spend Vault.
+ * Throws RSL-BILL-1003 if available Ad Spend Vault balance is less than `amountPaise` (no overdraft permitted).
  */
 export function allocateAdSpendToCampaign(params: {
   workspaceId: string;
@@ -2326,7 +2574,7 @@ export function allocateAdSpendToCampaign(params: {
     if (available < params.amountPaise) {
       throw new RslError(
         "RSL-BILL-1003",
-        `Insufficient Ad Spend Vault balance (${formatInr(available, { showDecimals: true })}) to fund ${formatInr(params.amountPaise, { showDecimals: true })} for '${params.campaignName}'. Managed Ad Spend has 0 overdraft — deposit ad funds on Plans & Wallet or switch to Direct Client Ad Account billing.`
+        `Insufficient Ad Spend Vault balance (${formatInr(available, { showDecimals: true })}) to fund ${formatInr(params.amountPaise, { showDecimals: true })} for '${params.campaignName}'. Managed Ad Spend has 0 overdraft - deposit ad funds on Plans & Wallet or switch to Direct Client Ad Account billing.`
       );
     }
 
@@ -2353,7 +2601,9 @@ export function allocateAdSpendToCampaign(params: {
     };
   });
 
-  return raw.inTransaction ? tx() : tx.immediate();
+  const out = raw.inTransaction ? tx() : tx.immediate();
+  invalidateWalletBalanceCache(params.workspaceId);
+  return out;
 }
 
 export function releaseUnusedCampaignAdSpend(params: {
@@ -2765,7 +3015,7 @@ export function staffRecordPlanPaymentAndActivate(params: {
 
     const inv = createGstInvoice({
       workspaceId: params.workspaceId,
-      description: `${displayLabel} — ${cycleMeta.label} (${params.paymentMethod.toUpperCase()} Ref: ${ref})`,
+      description: `${displayLabel} - ${cycleMeta.label} (${params.paymentMethod.toUpperCase()} Ref: ${ref})`,
       subtotalPaise: params.amountPaidPaise,
       status: "paid",
     });
@@ -2899,7 +3149,7 @@ export function staffDeclinePlanRequest(params: {
   db.update(controlSchema.servicePlanRequests)
     .set({
       status: "declined",
-      staffNotes: params.staffNotes?.trim() || "Declined — payment not received or cancelled.",
+      staffNotes: params.staffNotes?.trim() || "Declined - payment not received or cancelled.",
       reviewedByStaffId: params.staffId,
       reviewedAt: now,
       updatedAt: now,
@@ -3416,7 +3666,7 @@ export function staffBulkUnlockBundle(params: {
     const expiresAt = now + cycleMeta.durationDays * 86_400_000;
     const inv = createGstInvoice({
       workspaceId: params.workspaceId,
-      description: `${bundleLabel} — ${cycleMeta.label} (${params.paymentMethod.toUpperCase()} Ref: ${ref})`,
+      description: `${bundleLabel} - ${cycleMeta.label} (${params.paymentMethod.toUpperCase()} Ref: ${ref})`,
       subtotalPaise: params.amountPaidPaise,
       status: "paid",
     });
@@ -3665,7 +3915,7 @@ export async function sweepAutomaticBillingReminders(nowMs = Date.now()): Promis
 
       const headline =
         stage === "overdue"
-          ? `Action Needed: ${cycleLabel} Renewal Overdue — ${grp.label}`
+          ? `Action Needed: ${cycleLabel} Renewal Overdue - ${grp.label}`
           : `Upcoming ${cycleLabel} Plan Renewal on ${dueFormatted}`;
 
       const paymentDestCopy =
@@ -3785,7 +4035,7 @@ export async function sendManualBillingReminder(params: {
     workspaceId: ws.id,
     businessName: ws.name,
     recipientEmail: owner.email,
-    headline: `${cycleLabel} Billing Reminder — ${summary}`,
+    headline: `${cycleLabel} Billing Reminder - ${summary}`,
     bodyText: `Gentle reminder for your ${cycleLabel.toLowerCase()} renewal of '${summary}'. Total payable (including 18% GST): ${formatInr(upi.totalPayablePaise, { showDecimals: true })}. Scan the direct Bank-over-UPI QR inside your RSL Marketing Billing dashboard, or remit to ${paymentDestCopy} with transaction note '${upi.transactionNote}'.`,
     walletBalanceFormatted: formatInr(getWalletBalancePaise(ws.id), { showDecimals: true }),
   });
@@ -3962,7 +4212,7 @@ export function issueGstCreditNote(params: {
       linkedInvoiceId: inv.id,
       externalRefKey: `credit_note_for:${inv.id}`,
       financialYear: fy,
-      description: `Credit Note against ${inv.invoiceNumber} — ${reasonText}`,
+      description: `Credit Note against ${inv.invoiceNumber} - ${reasonText}`,
       subtotalPaise: -Math.abs(inv.subtotalPaise),
       cgstPaise: -Math.abs(inv.cgstPaise),
       sgstPaise: -Math.abs(inv.sgstPaise),
@@ -4535,7 +4785,7 @@ export function activatePlanOrBundleFromWallet(params: {
 
     const inv = createGstInvoice({
       workspaceId: params.workspaceId,
-      description: `${activatedName} — ${cycleMeta.label} (Instant Prepaid Wallet Settlement)`,
+      description: `${activatedName} - ${cycleMeta.label} (Instant Prepaid Wallet Settlement)`,
       subtotalPaise,
       status: "paid",
     });
@@ -4544,7 +4794,7 @@ export function activatePlanOrBundleFromWallet(params: {
       workspaceId: params.workspaceId,
       amountPaise: inv.totalPaise,
       serviceKey: params.targetType === "service" ? params.targetKey : undefined,
-      description: `${activatedName} (${cycleMeta.label}) — Tax Invoice ${inv.invoiceNumber}`,
+      description: `${activatedName} (${cycleMeta.label}) - Tax Invoice ${inv.invoiceNumber}`,
       idempotencyKey: `wallet_plan_unlock:${inv.id}`,
       actorId: params.actorId,
       allowOverdraft: false,

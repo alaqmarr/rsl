@@ -1,13 +1,20 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { cookies } from "next/headers";
+import { Fraunces, JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import { getEnv } from "@rsl/core";
-import { BrandLogo, PlatformFooter } from "@rsl/ui";
+import { BrandLogo, PlatformFooter, ThemeToggleButton } from "@rsl/ui";
 import { ActionLink } from "@/components/ios-feedback";
 import "./globals.css";
 
-const sans = Inter({
+const display = Fraunces({
   subsets: ["latin"],
-  variable: "--font-inter",
+  variable: "--font-fraunces",
+  display: "swap",
+});
+
+const sans = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  variable: "--font-jakarta",
   display: "swap",
 });
 
@@ -19,7 +26,7 @@ const mono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.DOCS_URL || "https://docs.rapidshiftlabs.in"),
-  title: "RSL Marketing — Help Guides & API Reference",
+  title: "RSL Marketing - Help Guides & API Reference",
   description:
     "Step-by-step setup guides for Tally Prime, WhatsApp bill alerts, backups, GST billing, and the REST API.",
   manifest: "/site.webmanifest",
@@ -33,7 +40,7 @@ export const metadata: Metadata = {
     apple: "/apple-touch-icon.png",
   },
   openGraph: {
-    title: "RapidShift Labs — Help Guides & REST API Reference",
+    title: "RapidShift Labs - Help Guides & REST API Reference",
     description:
       "Plain-English setup guides for Tally Prime, WhatsApp Business Cloud API, Google Drive backups, and REST API v1.",
     images: [{ url: "/og-image.png", width: 1200, height: 630, alt: "RapidShift Labs Guides" }],
@@ -44,13 +51,21 @@ export const metadata: Metadata = {
   },
 };
 
-export default function DocsRootLayout({ children }: { children: React.ReactNode }) {
+export default async function DocsRootLayout({ children }: { children: React.ReactNode }) {
   const appUrl = getEnv().APP_URL;
+  const cookieStore = await cookies();
+  const rawTheme = cookieStore.get("rsl_theme")?.value;
+  const dataTheme = rawTheme === "dark" || rawTheme === "light" ? rawTheme : undefined;
 
   return (
-    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
-      <body className="flex min-h-screen w-full flex-col bg-[#F8F9FB] font-sans text-slate-900 antialiased">
-        <header className="sticky top-0 z-30 border-b border-zinc-200/90 bg-white/95 backdrop-blur-md">
+    <html
+      lang="en"
+      data-theme={dataTheme}
+      suppressHydrationWarning
+      className={`${display.variable} ${sans.variable} ${mono.variable}`}
+    >
+      <body className="rsl-ambient-canvas flex min-h-screen w-full flex-col font-sans text-[var(--ink)] antialiased">
+        <header className="rsl-frost-header sticky top-0 z-30">
           <div className="flex w-full items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-3.5 lg:px-8 xl:px-12">
             <div className="flex min-w-0 items-center gap-3 sm:gap-6">
               {/* Mobile Navigation Menu Drawer Trigger */}
@@ -107,7 +122,7 @@ export default function DocsRootLayout({ children }: { children: React.ReactNode
 
               <ActionLink href="/" className="inline-flex min-w-0 items-center gap-3">
                 <BrandLogo variant="long" size="sm" />
-                <span className="hidden rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-0.5 text-[11px] font-semibold text-zinc-600 sm:inline-flex">
+                <span className="hidden rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-0.5 text-xs font-semibold text-zinc-600 sm:inline-flex">
                   Help &amp; API
                 </span>
               </ActionLink>
@@ -128,6 +143,7 @@ export default function DocsRootLayout({ children }: { children: React.ReactNode
               </nav>
             </div>
             <div className="flex shrink-0 items-center gap-2.5">
+              <ThemeToggleButton />
               <a href={`${appUrl}/status`} className="rsl-btn-secondary hidden sm:inline-flex">
                 Account Status
               </a>

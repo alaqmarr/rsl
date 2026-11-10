@@ -54,7 +54,7 @@ export default async function PersonalizedHelpPage({
           ? `All ${workspaceServices.length} RSL Marketing tools are active and ready to use`
           : unlockedToolsCount > 0
             ? `${unlockedToolsCount} of ${workspaceServices.length} platform tools active`
-            : "No paid plans unlocked yet — choose individual tools or a value bundle",
+            : "No paid plans unlocked yet - choose individual tools or a value bundle",
       statusLabel:
         unlockedToolsCount === workspaceServices.length
           ? "All Active"
@@ -69,7 +69,7 @@ export default async function PersonalizedHelpPage({
       title: "Business GST Details",
       detail: session.workspace.gstin
         ? `GSTIN ${session.workspace.gstin} (State ${session.workspace.stateCode})`
-        : `State ${session.workspace.stateCode} set — add GSTIN for B2B tax credit`,
+        : `State ${session.workspace.stateCode} set - add GSTIN for B2B tax credit`,
       statusLabel: session.workspace.gstin ? "Ready" : "Optional",
       tone: session.workspace.gstin ? "emerald" : "stone",
       href: "/settings/business",
@@ -81,8 +81,8 @@ export default async function PersonalizedHelpPage({
         walletPaise > 0
           ? `${formatInr(walletPaise, { showDecimals: true })} available (+ ₹200 overdraft buffer down to -₹200.00)`
           : walletPaise < 0
-            ? `${formatInr(walletPaise, { showDecimals: true })} negative balance (using ₹200 overdraft credit — recharge soon)`
-            : "₹0.00 balance — up to -₹200.00 overdraft buffer available for urgent WhatsApp sends",
+            ? `${formatInr(walletPaise, { showDecimals: true })} negative balance (using ₹200 overdraft credit - recharge soon)`
+            : "₹0.00 balance - up to -₹200.00 overdraft buffer available for urgent WhatsApp sends",
       statusLabel:
         walletPaise > 0 ? "Funded" : walletPaise > -20_000 ? "Overdraft Ready" : "Limit Reached",
       tone: walletPaise > 0 ? "emerald" : walletPaise > -20_000 ? "amber" : "stone",

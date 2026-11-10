@@ -17,7 +17,7 @@ import {
   ShieldCheck,
   TrendingUp,
 } from "lucide-react";
-import { BrandLogo } from "@rsl/ui";
+import { BrandLogo, ThemeToggleButton } from "@rsl/ui";
 
 export interface PublicBundleCardItem {
   key: string;
@@ -55,7 +55,7 @@ interface WorkbenchDomain {
   key: WorkbenchTabKey;
   index: string;
   label: string;
-  accentHex: string;
+  accentBadgeClass: string;
   pillClass: string;
   activeTabClass: string;
   headline: string;
@@ -78,9 +78,9 @@ const WORKBENCH_DOMAINS: WorkbenchDomain[] = [
     key: "tally",
     index: "01",
     label: "Tally Prime & Stock",
-    accentHex: "#4338CA",
-    pillClass: "bg-indigo-50 text-indigo-800 ring-indigo-200/80",
-    activeTabClass: "border-indigo-600 bg-indigo-50/60 text-slate-950",
+    accentBadgeClass: "bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)]",
+    pillClass: "rsl-pill-forest",
+    activeTabClass: "border-emerald-600 bg-emerald-50/70 text-slate-950",
     headline: "Two-way Tally Prime sync for ledgers, GST vouchers, and godown stock.",
     summary:
       "Reads Sales, Receipts, Payments, Credit Notes, Party Ledgers, and Stock Items directly from your Windows Tally Prime company without manual exports or port forwarding.",
@@ -127,9 +127,9 @@ const WORKBENCH_DOMAINS: WorkbenchDomain[] = [
     key: "whatsapp",
     index: "02",
     label: "WhatsApp & Team Inbox",
-    accentHex: "#047857",
-    pillClass: "bg-emerald-50 text-emerald-800 ring-emerald-200/80",
-    activeTabClass: "border-emerald-600 bg-emerald-50/60 text-slate-950",
+    accentBadgeClass: "bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)]",
+    pillClass: "rsl-pill-forest",
+    activeTabClass: "border-emerald-600 bg-emerald-50/70 text-slate-950",
     headline: "Official Meta WhatsApp Cloud API billing and shared multi-agent customer desk.",
     summary:
       "Dispatches untouched Tally-printed GST PDF invoices with dynamic NPCI 0% MDR UPI payment links, and routes customer replies into a role-scoped team inbox.",
@@ -176,9 +176,9 @@ const WORKBENCH_DOMAINS: WorkbenchDomain[] = [
     key: "growth",
     index: "03",
     label: "Ads, SEO & Reviews",
-    accentHex: "#6D28D9",
-    pillClass: "bg-violet-50 text-violet-800 ring-violet-200/80",
-    activeTabClass: "border-violet-600 bg-violet-50/60 text-slate-950",
+    accentBadgeClass: "bg-[var(--sunset-orange)] text-[var(--midnight-black)]",
+    pillClass: "rsl-pill-sunset",
+    activeTabClass: "border-amber-500 bg-amber-50/70 text-slate-950",
     headline: "One-click Facebook, Instagram, and Google Ads connected to real collections.",
     summary:
       "Connect your ad accounts, Google Search Console property, and Google Business Profile via clean OAuth sign-in without copying developer tokens or JSON keys.",
@@ -225,9 +225,9 @@ const WORKBENCH_DOMAINS: WorkbenchDomain[] = [
     key: "vault",
     index: "04",
     label: "Encrypted Vault & GST",
-    accentHex: "#B45309",
-    pillClass: "bg-amber-50 text-amber-900 ring-amber-200/80",
-    activeTabClass: "border-amber-600 bg-amber-50/60 text-slate-950",
+    accentBadgeClass: "bg-[var(--sunset-orange)] text-[var(--midnight-black)]",
+    pillClass: "rsl-pill-sunset",
+    activeTabClass: "border-amber-500 bg-amber-50/70 text-slate-950",
     headline: "Dedicated per-company database file, Google Drive backups, and biometric sign-in.",
     summary:
       "Unlike shared multi-tenant tables, every business workspace runs on its own isolated SQLite database file with signed AES-256-GCM archives to your own Google Drive.",
@@ -314,26 +314,12 @@ export function PublicLandingPage({
   }, [services]);
 
   return (
-    <div className="relative min-h-screen w-full overflow-x-clip bg-[#F1F5F9] text-slate-900">
-      {/* Subtle Multi-Tone Ambient Top Wash (Z-0 Canvas Depth) */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 z-0 h-[560px]"
-        style={{
-          background:
-            "radial-gradient(60% 55% at 18% 0%, rgba(67, 56, 202, 0.08) 0%, transparent 70%), radial-gradient(50% 50% at 82% 5%, rgba(4, 120, 87, 0.08) 0%, transparent 70%)",
-        }}
-      />
-
+    <div className="rsl-ambient-canvas relative min-h-screen w-full overflow-x-clip text-slate-900">
       {/* Top 3-Tone Architectural Seam */}
-      <div className="relative z-40 grid h-1 w-full grid-cols-12">
-        <div className="col-span-6 bg-[#0B1220]" />
-        <div className="col-span-3 bg-[#4338CA]" />
-        <div className="col-span-3 bg-[#047857]" />
-      </div>
+      <div className="rsl-top-seam relative z-40 h-1.5 w-full" />
 
       {/* Sticky Storefront Masthead (Z-40) */}
-      <header className="sticky top-0 z-40 w-full border-b border-slate-200/90 bg-white/92 shadow-[0_4px_24px_-12px_rgba(15,23,42,0.08)] backdrop-blur-xl">
+      <header className="rsl-frost-header sticky top-0 z-40 w-full">
         <div className="flex w-full items-center justify-between gap-4 px-5 py-3.5 sm:px-8 lg:px-12 xl:px-16">
           <Link href="/" className="min-w-0 shrink-0">
             <BrandLogo variant="long" size="md" subtitle="Accounting, Messaging & Growth Desk" />
@@ -367,18 +353,19 @@ export function PublicLandingPage({
           </nav>
 
           <div className="flex items-center gap-2.5">
+            <ThemeToggleButton compact />
             <Link
               href="/login"
-              className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-300/90 bg-white px-4 py-2 text-xs font-semibold text-slate-800 shadow-2xs transition hover:border-slate-400 hover:bg-slate-50"
+              className="rsl-btn-secondary !min-h-10 !px-4 !py-2 !text-xs"
             >
               Sign In
             </Link>
             <Link
               href="/register"
-              className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl bg-[#0B1220] px-4 py-2 text-xs font-semibold text-white shadow-[0_6px_16px_-4px_rgba(11,18,32,0.35)] transition hover:bg-slate-800"
+              className="rsl-btn-primary !min-h-10 !px-4 !py-2 !text-xs"
             >
               <span>Open 7-Day Trial</span>
-              <ArrowRight className="h-3.5 w-3.5 text-emerald-400" />
+              <ArrowRight className="h-3.5 w-3.5 text-amber-500" />
             </Link>
           </div>
         </div>
@@ -388,14 +375,14 @@ export function PublicLandingPage({
         {/* Split Hero with Multi-Plane Z-Axis Live Operational Stage */}
         <section className="grid w-full grid-cols-1 items-center gap-12 lg:grid-cols-[1.06fr_0.94fr] xl:gap-16">
           <div className="space-y-6">
-            <div className="inline-flex items-center gap-2.5 rounded-lg border border-slate-300/80 bg-white/90 px-3 py-1.5 shadow-2xs">
-              <span className="h-2 w-2 rounded-full bg-emerald-600" />
-              <span className="font-mono text-[11px] font-semibold tracking-wider text-slate-700 uppercase">
+            <div className="rsl-frost-surface inline-flex items-center gap-2.5 rounded-full px-3.5 py-1.5">
+              <span className="h-2 w-2 rounded-full bg-amber-500" />
+              <span className="font-mono text-[11px] font-semibold tracking-wider text-slate-800 uppercase">
                 Indian Accounting, Messaging &amp; Collections Suite
               </span>
             </div>
 
-            <h1 className="text-3xl font-extrabold leading-[1.12] tracking-tight text-slate-950 sm:text-4xl xl:text-[44px]">
+            <h1 className="rsl-display-heading text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl xl:text-[46px]">
               Tally Prime ledgers, WhatsApp GST billing, and ad collections in one working desk.
             </h1>
 
@@ -409,14 +396,14 @@ export function PublicLandingPage({
             <div className="flex flex-wrap items-center gap-3 pt-1">
               <Link
                 href="/register"
-                className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-emerald-700 px-6 py-3 text-sm font-semibold text-white shadow-[0_10px_24px_-6px_rgba(4,120,87,0.45)] transition hover:-translate-y-0.5 hover:bg-emerald-800"
+                className="rsl-btn-spark !min-h-12 !px-6 !py-3 !text-sm"
               >
                 <span>Create Business Workspace</span>
                 <ArrowRight className="h-4 w-4" />
               </Link>
               <a
                 href="#pricing"
-                className="inline-flex min-h-12 items-center rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-800 shadow-xs transition hover:border-slate-400 hover:bg-slate-50"
+                className="rsl-btn-secondary !min-h-12 !px-5 !py-3 !text-sm"
               >
                 Compare INR Plans
               </a>
@@ -427,19 +414,19 @@ export function PublicLandingPage({
 
             {/* Clean Architectural Fact Strip */}
             <div className="grid grid-cols-1 gap-4 border-t border-slate-200/90 pt-6 sm:grid-cols-3">
-              <div className="border-l-2 border-indigo-600 pl-3.5">
+              <div className="border-l-2 border-emerald-700 pl-3.5">
                 <div className="text-xs font-bold text-slate-900">Two-Way Tally Prime XML</div>
                 <div className="mt-0.5 text-xs text-slate-600">
                   Sales, Receipts, Ledgers, HSN slabs &amp; Godown stock
                 </div>
               </div>
-              <div className="border-l-2 border-emerald-600 pl-3.5">
+              <div className="border-l-2 border-amber-500 pl-3.5">
                 <div className="text-xs font-bold text-slate-900">Post-Delivery Wallet Billing</div>
                 <div className="mt-0.5 text-xs text-slate-600">
                   Meta-approved templates only; ₹0 charged on failed sends
                 </div>
               </div>
-              <div className="border-l-2 border-amber-600 pl-3.5">
+              <div className="border-l-2 border-emerald-700 pl-3.5">
                 <div className="text-xs font-bold text-slate-900">Per-Company Vault + GST ITC</div>
                 <div className="mt-0.5 text-xs text-slate-600">
                   Dedicated SQLite file, Google Drive backup &amp; SAC 998314
@@ -450,44 +437,50 @@ export function PublicLandingPage({
 
           {/* Right: 3-Layer Z-Axis Stacked Product Stage */}
           <div className="relative pt-1 pb-2">
-            {/* Plane 1 (Z-10 Base Layer): Deep Midnight-Indigo Tally Prime Voucher Card */}
-            <div className="relative z-10 rounded-2xl border border-slate-800 bg-gradient-to-br from-[#0B1220] via-[#111A2E] to-[#1B2544] p-5 text-white shadow-[0_24px_48px_-16px_rgba(11,18,32,0.45)] sm:p-6">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-3.5">
+            {/* Plane 1 (Z-10 Base Layer): Deep Forest-Midnight Tally Prime Voucher Card */}
+            <div className="rsl-hero-surface relative z-10 rounded-2xl p-5 sm:p-6">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/15 pb-3.5">
                 <div className="flex items-center gap-2">
-                  <FileSpreadsheet className="h-4 w-4 text-indigo-400" />
-                  <span className="font-mono text-[11px] font-semibold tracking-wider text-indigo-200 uppercase">
+                  <FileSpreadsheet className="h-4 w-4 text-amber-400" />
+                  <span className="font-mono text-[11px] font-semibold tracking-wider text-[var(--ink-on-dark)] uppercase">
                     Tally Prime • Sales Voucher #GST/26-27/0418
                   </span>
                 </div>
-                <span className="rounded-md bg-emerald-500/15 px-2 py-0.5 font-mono text-[10.5px] font-semibold text-emerald-300 ring-1 ring-emerald-400/30">
+                <span className="rounded-md bg-white/10 px-2 py-0.5 font-mono text-[10.5px] font-semibold text-[var(--ink-on-dark)] ring-1 ring-white/20">
                   XML BALANCED
                 </span>
               </div>
 
               <div className="mt-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
                 <div>
-                  <div className="text-[10.5px] text-slate-400">Party Ledger</div>
-                  <div className="mt-0.5 font-semibold text-white">Shree Steels Surat</div>
-                  <div className="font-mono text-[10.5px] text-slate-400">24AABCS1429B1Z1</div>
+                  <div className="text-[10.5px] text-[var(--ink-on-dark-muted)]">Party Ledger</div>
+                  <div className="mt-0.5 font-semibold text-[var(--ink-on-dark)]">Shree Steels Surat</div>
+                  <div className="font-mono text-[10.5px] text-[var(--ink-on-dark-muted)]">
+                    24AABCS1429B1Z1
+                  </div>
                 </div>
                 <div>
-                  <div className="text-[10.5px] text-slate-400">Dispatch Godown</div>
-                  <div className="mt-0.5 font-semibold text-slate-100">Bhiwandi Unit-2</div>
-                  <div className="font-mono text-[10.5px] text-slate-400">HSN 7209 • 18% GST</div>
+                  <div className="text-[10.5px] text-[var(--ink-on-dark-muted)]">Dispatch Godown</div>
+                  <div className="mt-0.5 font-semibold text-[var(--ink-on-dark)]">Bhiwandi Unit-2</div>
+                  <div className="font-mono text-[10.5px] text-[var(--ink-on-dark-muted)]">
+                    HSN 7209 • 18% GST
+                  </div>
                 </div>
                 <div className="col-span-2 sm:col-span-1 sm:text-right">
-                  <div className="text-[10.5px] text-slate-400">Invoice Receivable</div>
-                  <div className="mt-0.5 font-mono text-lg font-bold text-white">₹48,380.00</div>
-                  <div className="text-[10.5px] text-amber-300">Due 18 Nov 2026</div>
+                  <div className="text-[10.5px] text-[var(--ink-on-dark-muted)]">Invoice Receivable</div>
+                  <div className="mt-0.5 font-mono text-lg font-bold text-[var(--ink-on-dark)]">
+                    ₹48,380.00
+                  </div>
+                  <div className="text-[10.5px] font-semibold text-amber-400">Due 18 Nov 2026</div>
                 </div>
               </div>
             </div>
 
             {/* Plane 2 (Z-20 Elevated Middle Layer): Official WhatsApp PDF + NPCI UPI Card */}
-            <div className="relative z-20 -mt-4 ml-3 rounded-2xl border border-slate-200/95 bg-white p-5 shadow-[0_22px_50px_-14px_rgba(15,23,42,0.22)] sm:ml-8 sm:p-6">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <div className="rsl-frost-card relative z-20 -mt-4 ml-3 rounded-2xl p-5 sm:ml-8 sm:p-6">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 pb-3">
                 <div className="flex items-center gap-2">
-                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200">
                     <MessageSquareText className="h-4 w-4" />
                   </span>
                   <div>
@@ -505,8 +498,8 @@ export function PublicLandingPage({
               </div>
 
               <div className="mt-3.5 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
-                <div className="rounded-xl border border-slate-200/80 bg-slate-50/80 p-3 text-xs leading-relaxed text-slate-700">
-                  <div className="mb-1.5 inline-flex items-center gap-1.5 rounded bg-white px-2 py-0.5 font-mono text-[10.5px] font-semibold text-indigo-700 ring-1 ring-slate-200">
+                <div className="rounded-xl border border-slate-200/80 bg-zinc-50 p-3 text-xs leading-relaxed text-slate-700">
+                  <div className="mb-1.5 inline-flex items-center gap-1.5 rounded bg-white px-2 py-0.5 font-mono text-[10.5px] font-semibold text-emerald-800 ring-1 ring-slate-200">
                     PDF ATTACHED: GST_0418_ShreeSteels.pdf (2 Pages)
                   </div>
                   <p>
@@ -516,13 +509,13 @@ export function PublicLandingPage({
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2.5 rounded-xl border border-indigo-200/80 bg-indigo-50/50 px-3.5 py-3 sm:flex-col sm:text-center">
-                  <QrCode className="h-7 w-7 shrink-0 text-indigo-700" />
+                <div className="flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 sm:flex-col sm:text-center">
+                  <QrCode className="h-7 w-7 shrink-0 text-amber-700" />
                   <div>
-                    <div className="text-[10.5px] font-bold text-indigo-950 uppercase">
+                    <div className="text-[10.5px] font-bold text-slate-900 uppercase">
                       NPCI UPI QR
                     </div>
-                    <div className="font-mono text-[10px] font-semibold text-indigo-700">
+                    <div className="font-mono text-[10px] font-semibold text-amber-700">
                       0% MDR Fee
                     </div>
                   </div>
@@ -531,8 +524,8 @@ export function PublicLandingPage({
             </div>
 
             {/* Plane 3 (Z-30 Top Floating Chip): Automatic Paid-in-Tally Reconciliation */}
-            <div className="relative z-30 -mt-3 mr-2 ml-auto flex max-w-md items-center gap-3 rounded-xl border border-amber-300/90 bg-gradient-to-r from-amber-50 via-white to-emerald-50 px-4 py-2.5 shadow-[0_14px_30px_-8px_rgba(15,23,42,0.18)]">
-              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white">
+            <div className="rsl-frost-surface relative z-30 -mt-3 mr-2 ml-auto flex max-w-md items-center gap-3 rounded-xl px-4 py-2.5">
+              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-700 text-white">
                 <Check className="h-3.5 w-3.5" />
               </span>
               <div className="text-xs">
@@ -549,10 +542,10 @@ export function PublicLandingPage({
         <section id="features" className="w-full space-y-6 scroll-mt-24">
           <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
             <div>
-              <div className="font-mono text-xs font-bold tracking-wider text-indigo-700 uppercase">
+              <div className="font-mono text-xs font-bold tracking-wider text-emerald-800 uppercase">
                 Unified 4-Domain Architecture
               </div>
-              <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-950 sm:text-3xl">
+              <h2 className="rsl-display-heading mt-1 text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl">
                 One operational desk across accounting, WhatsApp, ads, and compliance.
               </h2>
             </div>
@@ -562,12 +555,12 @@ export function PublicLandingPage({
             </p>
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-slate-200/95 bg-white shadow-[0_18px_42px_-16px_rgba(15,23,42,0.12)]">
+          <div className="rsl-frost-card overflow-hidden rounded-2xl">
             {/* Domain Selector Bar */}
             <div
               role="tablist"
               aria-label="Platform product domains"
-              className="grid grid-cols-2 border-b border-slate-200 bg-slate-50/70 lg:grid-cols-4"
+              className="grid grid-cols-2 border-b border-slate-200 bg-zinc-50 lg:grid-cols-4"
             >
               {WORKBENCH_DOMAINS.map((dom) => {
                 const isActive = dom.key === currentDomain.key;
@@ -585,11 +578,9 @@ export function PublicLandingPage({
                     }`}
                   >
                     <span
-                      className="rounded px-1.5 py-0.5 font-mono text-[11px] font-bold"
-                      style={{
-                        backgroundColor: isActive ? dom.accentHex : "#E2E8F0",
-                        color: isActive ? "#FFFFFF" : "#334155",
-                      }}
+                      className={`rounded px-1.5 py-0.5 font-mono text-[11px] font-bold ${
+                        isActive ? dom.accentBadgeClass : "bg-zinc-200 text-slate-700"
+                      }`}
                     >
                       {dom.index}
                     </span>
@@ -619,8 +610,7 @@ export function PublicLandingPage({
                     {currentDomain.points.map((pt) => (
                       <li key={pt} className="flex items-start gap-2.5 text-[13.5px] text-slate-700">
                         <span
-                          className="mt-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-white"
-                          style={{ backgroundColor: currentDomain.accentHex }}
+                          className={`mt-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full ${currentDomain.accentBadgeClass}`}
                         >
                           <Check className="h-2.5 w-2.5" />
                         </span>
@@ -630,7 +620,7 @@ export function PublicLandingPage({
                   </ul>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4 text-xs text-slate-500">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200/70 pt-4 text-xs text-slate-500">
                   <span>{currentDomain.footnote}</span>
                   <Link
                     href="/register"
@@ -643,7 +633,7 @@ export function PublicLandingPage({
               </div>
 
               {/* Structured Live Operational Ledger Preview */}
-              <div className="rounded-xl border border-slate-200/95 bg-[#F8FAFC] p-4 shadow-inner sm:p-5">
+              <div className="rounded-xl border border-slate-200/95 bg-zinc-50 p-4 shadow-inner sm:p-5">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/90 pb-3">
                   <div className="text-xs font-bold text-slate-900">
                     {currentDomain.previewTitle}
@@ -688,20 +678,20 @@ export function PublicLandingPage({
         {/* Dark Architectural 3-Step Rollout Band (#how-it-works) */}
         <section
           id="how-it-works"
-          className="w-full overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-br from-[#0B1220] via-[#0F172A] to-[#172038] p-7 text-white shadow-[0_22px_50px_-18px_rgba(11,18,32,0.5)] scroll-mt-24 sm:p-10"
+          className="rsl-hero-surface w-full overflow-hidden rounded-2xl p-7 scroll-mt-24 sm:p-10"
         >
-          <div className="flex flex-wrap items-end justify-between gap-4 border-b border-white/10 pb-6">
+          <div className="flex flex-wrap items-end justify-between gap-4 border-b border-white/15 pb-6">
             <div>
-              <div className="font-mono text-xs font-semibold tracking-wider text-emerald-400 uppercase">
+              <div className="font-mono text-xs font-semibold tracking-wider text-amber-400 uppercase">
                 10-Minute Office Rollout
               </div>
-              <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-white sm:text-3xl">
+              <h2 className="rsl-display-heading mt-1 text-2xl font-semibold tracking-tight text-[var(--ink-on-dark)] sm:text-3xl">
                 Connect Tally Prime, WhatsApp, and Google without an IT team.
               </h2>
             </div>
             <Link
               href="/register"
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-white px-4 py-2 text-xs font-bold text-slate-950 shadow-sm transition hover:bg-slate-100"
+              className="rsl-btn-spark !min-h-10 !px-4 !py-2 !text-xs"
             >
               <span>Create Trial Workspace</span>
               <ArrowRight className="h-3.5 w-3.5" />
@@ -709,49 +699,49 @@ export function PublicLandingPage({
           </div>
 
           <div className="mt-7 grid grid-cols-1 gap-6 md:grid-cols-3">
-            <div className="rounded-xl border border-white/10 bg-white/[0.04] p-5">
+            <div className="rounded-xl border border-white/15 bg-white/[0.06] p-5 backdrop-blur-sm">
               <div className="flex items-center justify-between">
-                <span className="rounded-md bg-indigo-500/20 px-2.5 py-1 font-mono text-xs font-bold text-indigo-300 ring-1 ring-indigo-400/30">
+                <span className="rounded-md bg-white/10 px-2.5 py-1 font-mono text-xs font-bold text-[var(--ink-on-dark)] ring-1 ring-white/20">
                   STEP 01
                 </span>
-                <Building2 className="h-4 w-4 text-indigo-300" />
+                <Building2 className="h-4 w-4 text-amber-400" />
               </div>
-              <h3 className="mt-3.5 text-base font-bold text-white">
+              <h3 className="mt-3.5 text-base font-bold text-[var(--ink-on-dark)]">
                 Register your firm &amp; GSTIN
               </h3>
-              <p className="mt-1.5 text-xs leading-relaxed text-slate-300">
+              <p className="mt-1.5 text-xs leading-relaxed text-[var(--ink-on-dark-muted)]">
                 Enter your legal business name, PIN code, and optional GSTIN. Your isolated database
                 file and 7-day full-suite trial provision immediately.
               </p>
             </div>
 
-            <div className="rounded-xl border border-white/10 bg-white/[0.04] p-5">
+            <div className="rounded-xl border border-white/15 bg-white/[0.06] p-5 backdrop-blur-sm">
               <div className="flex items-center justify-between">
-                <span className="rounded-md bg-emerald-500/20 px-2.5 py-1 font-mono text-xs font-bold text-emerald-300 ring-1 ring-emerald-400/30">
+                <span className="rounded-md bg-white/10 px-2.5 py-1 font-mono text-xs font-bold text-[var(--ink-on-dark)] ring-1 ring-white/20">
                   STEP 02
                 </span>
-                <Database className="h-4 w-4 text-emerald-300" />
+                <Database className="h-4 w-4 text-amber-400" />
               </div>
-              <h3 className="mt-3.5 text-base font-bold text-white">
+              <h3 className="mt-3.5 text-base font-bold text-[var(--ink-on-dark)]">
                 Pair the Windows Tally Connector
               </h3>
-              <p className="mt-1.5 text-xs leading-relaxed text-slate-300">
+              <p className="mt-1.5 text-xs leading-relaxed text-[var(--ink-on-dark-muted)]">
                 Download your pre-paired launcher from Tally Studio on the accountant PC. Outbound
                 HTTPS syncs vouchers, PDFs, and stock without firewall changes.
               </p>
             </div>
 
-            <div className="rounded-xl border border-white/10 bg-white/[0.04] p-5">
+            <div className="rounded-xl border border-white/15 bg-white/[0.06] p-5 backdrop-blur-sm">
               <div className="flex items-center justify-between">
-                <span className="rounded-md bg-amber-500/20 px-2.5 py-1 font-mono text-xs font-bold text-amber-300 ring-1 ring-amber-400/30">
+                <span className="rounded-md bg-white/10 px-2.5 py-1 font-mono text-xs font-bold text-[var(--ink-on-dark)] ring-1 ring-white/20">
                   STEP 03
                 </span>
-                <TrendingUp className="h-4 w-4 text-amber-300" />
+                <TrendingUp className="h-4 w-4 text-amber-400" />
               </div>
-              <h3 className="mt-3.5 text-base font-bold text-white">
+              <h3 className="mt-3.5 text-base font-bold text-[var(--ink-on-dark)]">
                 One-Click Meta &amp; Google Sign-In
               </h3>
-              <p className="mt-1.5 text-xs leading-relaxed text-slate-300">
+              <p className="mt-1.5 text-xs leading-relaxed text-[var(--ink-on-dark-muted)]">
                 Authorize WhatsApp Cloud API, Facebook/Instagram Ads, Google Ads, and Google Drive
                 backups with standard OAuth popups in Connection Hub.
               </p>
@@ -763,10 +753,10 @@ export function PublicLandingPage({
         <section id="pricing" className="w-full space-y-8 scroll-mt-24">
           <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
             <div>
-              <div className="font-mono text-xs font-bold tracking-wider text-emerald-700 uppercase">
+              <div className="font-mono text-xs font-bold tracking-wider text-emerald-800 uppercase">
                 Statutory INR Pricing • SAC 998314
               </div>
-              <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-950 sm:text-3xl">
+              <h2 className="rsl-display-heading mt-1 text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl">
                 Straightforward plans with 18% GST Input Tax Credit.
               </h2>
               <p className="mt-1 text-sm text-slate-600">
@@ -779,7 +769,7 @@ export function PublicLandingPage({
             <div
               role="group"
               aria-label="Select billing cycle"
-              className="inline-flex self-start rounded-xl border border-slate-300/90 bg-white p-1 shadow-xs"
+              className="rsl-frost-surface inline-flex self-start rounded-xl p-1"
             >
               {(
                 [
@@ -797,8 +787,8 @@ export function PublicLandingPage({
                     aria-pressed={active}
                     className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-bold transition ${
                       active
-                        ? "bg-[#0B1220] text-white shadow-xs"
-                        : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
+                        ? "bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)] shadow-xs"
+                        : "text-slate-600 hover:bg-zinc-100 hover:text-slate-950"
                     }`}
                   >
                     <span>{opt.label}</span>
@@ -806,8 +796,8 @@ export function PublicLandingPage({
                       <span
                         className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-bold ${
                           active
-                            ? "bg-emerald-500 text-slate-950"
-                            : "bg-emerald-50 text-emerald-800"
+                            ? "bg-[var(--sunset-orange)] text-[var(--midnight-black)]"
+                            : "bg-amber-50 text-amber-800"
                         }`}
                       >
                         {opt.badge}
@@ -842,24 +832,23 @@ export function PublicLandingPage({
               return (
                 <div
                   key={bundle.key}
-                  className={`relative flex flex-col justify-between overflow-hidden rounded-2xl border transition ${
+                  className={`relative flex flex-col justify-between overflow-hidden rounded-2xl transition ${
                     isRecommended
-                      ? "z-20 border-emerald-600 bg-white shadow-[0_24px_50px_-14px_rgba(4,120,87,0.22)] lg:-translate-y-1.5"
+                      ? "rsl-frost-card z-20 ring-2 ring-[var(--sunset-orange)] lg:-translate-y-1.5"
                       : isAllInOne
-                        ? "z-10 border-slate-800 bg-[#0B1220] text-white shadow-[0_20px_42px_-16px_rgba(11,18,32,0.45)]"
-                        : "z-10 border-slate-200/95 bg-white shadow-[0_12px_30px_-14px_rgba(15,23,42,0.1)]"
+                        ? "rsl-hero-surface z-10"
+                        : "rsl-frost-card z-10"
                   }`}
                 >
                   {/* Top Chromatic Rule */}
                   <div
-                    className="h-1.5 w-full"
-                    style={{
-                      background: isRecommended
-                        ? "linear-gradient(90deg, #4338CA 0%, #047857 100%)"
+                    className={`h-1.5 w-full ${
+                      isRecommended
+                        ? "rsl-accent-bar-blend"
                         : isAllInOne
-                          ? "linear-gradient(90deg, #D97706 0%, #10B981 100%)"
-                          : "#4338CA",
-                    }}
+                          ? "rsl-accent-bar-sunset"
+                          : "rsl-accent-bar-forest"
+                    }`}
                   />
 
                   <div className="flex flex-1 flex-col justify-between p-6 sm:p-7">
@@ -868,10 +857,10 @@ export function PublicLandingPage({
                         <span
                           className={`rounded-md px-2.5 py-0.5 font-mono text-[10.5px] font-bold uppercase ${
                             isRecommended
-                              ? "bg-emerald-50 text-emerald-900 ring-1 ring-emerald-200"
+                              ? "bg-amber-50 text-amber-800 ring-1 ring-amber-200"
                               : isAllInOne
-                                ? "bg-amber-400/15 text-amber-300 ring-1 ring-amber-400/30"
-                                : "bg-indigo-50 text-indigo-900 ring-1 ring-indigo-200"
+                                ? "bg-white/10 text-amber-300 ring-1 ring-white/20"
+                                : "bg-emerald-50 text-emerald-900 ring-1 ring-emerald-200"
                           }`}
                         >
                           {isRecommended
@@ -884,7 +873,7 @@ export function PublicLandingPage({
                         {bundle.savingsMonthlyPaise > 0 && (
                           <span
                             className={`font-mono text-[11px] font-semibold ${
-                              isAllInOne ? "text-emerald-300" : "text-emerald-700"
+                              isAllInOne ? "text-amber-300" : "text-emerald-700"
                             }`}
                           >
                             Saves {formatInrPlain(bundle.savingsMonthlyPaise)}/mo
@@ -895,14 +884,14 @@ export function PublicLandingPage({
                       <div>
                         <h3
                           className={`text-lg font-extrabold tracking-tight ${
-                            isAllInOne ? "text-white" : "text-slate-950"
+                            isAllInOne ? "text-[var(--ink-on-dark)]" : "text-slate-950"
                           }`}
                         >
                           {bundle.name}
                         </h3>
                         <p
                           className={`mt-1 text-xs leading-relaxed ${
-                            isAllInOne ? "text-slate-300" : "text-slate-600"
+                            isAllInOne ? "text-[var(--ink-on-dark-muted)]" : "text-slate-600"
                           }`}
                         >
                           {bundle.tagline}
@@ -911,20 +900,20 @@ export function PublicLandingPage({
 
                       <div
                         className={`border-y py-3.5 tabular-nums ${
-                          isAllInOne ? "border-white/10" : "border-slate-100"
+                          isAllInOne ? "border-white/15" : "border-slate-200/80"
                         }`}
                       >
                         <div className="flex items-baseline gap-1.5">
                           <span
-                            className={`font-mono text-3xl font-extrabold tracking-tight ${
-                              isAllInOne ? "text-white" : "text-slate-950"
+                            className={`rsl-display-metric text-3xl font-semibold tracking-tight ${
+                              isAllInOne ? "text-[var(--ink-on-dark)]" : "text-slate-950"
                             }`}
                           >
                             {formatInrPlain(pricePaise)}
                           </span>
                           <span
                             className={`text-xs font-medium ${
-                              isAllInOne ? "text-slate-300" : "text-slate-500"
+                              isAllInOne ? "text-[var(--ink-on-dark-muted)]" : "text-slate-500"
                             }`}
                           >
                             {cycleSuffix} + 18% GST
@@ -933,7 +922,7 @@ export function PublicLandingPage({
                         {cycle !== "monthly" && (
                           <div
                             className={`mt-1 text-[11.5px] font-semibold ${
-                              isAllInOne ? "text-emerald-300" : "text-emerald-700"
+                              isAllInOne ? "text-amber-300" : "text-emerald-700"
                             }`}
                           >
                             Effective {formatInrPlain(effectiveMonthlyPaise)}/month billed{" "}
@@ -945,7 +934,7 @@ export function PublicLandingPage({
                       <div>
                         <div
                           className={`mb-2.5 font-mono text-[10.5px] font-bold tracking-wider uppercase ${
-                            isAllInOne ? "text-slate-400" : "text-slate-500"
+                            isAllInOne ? "text-[var(--ink-on-dark-muted)]" : "text-slate-500"
                           }`}
                         >
                           Included Modules ({bundle.includedServiceNames.length})
@@ -955,10 +944,14 @@ export function PublicLandingPage({
                             <li key={svcName} className="flex items-start gap-2">
                               <Check
                                 className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${
-                                  isAllInOne ? "text-emerald-400" : "text-emerald-600"
+                                  isAllInOne ? "text-amber-400" : "text-emerald-700"
                                 }`}
                               />
-                              <span className={isAllInOne ? "text-slate-200" : "text-slate-700"}>
+                              <span
+                                className={
+                                  isAllInOne ? "text-[var(--ink-on-dark)]" : "text-slate-700"
+                                }
+                              >
                                 {svcName}
                               </span>
                             </li>
@@ -966,7 +959,7 @@ export function PublicLandingPage({
                           {bundle.includedServiceNames.length > 6 && (
                             <li
                               className={`pl-5 text-[11px] font-semibold ${
-                                isAllInOne ? "text-amber-300" : "text-indigo-700"
+                                isAllInOne ? "text-amber-300" : "text-emerald-800"
                               }`}
                             >
                               + {bundle.includedServiceNames.length - 6} additional modules included
@@ -979,12 +972,12 @@ export function PublicLandingPage({
                     <div className="mt-6 pt-2">
                       <Link
                         href="/register"
-                        className={`inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-xs font-bold transition ${
+                        className={`w-full !min-h-11 !px-4 !py-2.5 !text-xs ${
                           isRecommended
-                            ? "bg-emerald-700 text-white shadow-[0_8px_20px_-4px_rgba(4,120,87,0.45)] hover:bg-emerald-800"
+                            ? "rsl-btn-spark"
                             : isAllInOne
-                              ? "bg-white text-slate-950 hover:bg-slate-100"
-                              : "bg-[#0B1220] text-white hover:bg-slate-800"
+                              ? "rsl-btn-spark"
+                              : "rsl-btn-primary"
                         }`}
                       >
                         <span>Start 7-Day Free Trial</span>
@@ -998,7 +991,7 @@ export function PublicLandingPage({
           </div>
 
           {/* Collapsible Drawer for Secondary Channel Packs & Modular Tools (Keeps Default View Clean) */}
-          <details className="group overflow-hidden rounded-2xl border border-slate-200/95 bg-white shadow-xs">
+          <details className="rsl-frost-card group overflow-hidden rounded-2xl">
             <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-4 px-6 py-4 transition hover:bg-slate-50/80">
               <div className="flex flex-wrap items-center gap-3">
                 <span className="rounded-md bg-indigo-50 px-2.5 py-1 font-mono text-[11px] font-bold text-indigo-800 ring-1 ring-indigo-200">

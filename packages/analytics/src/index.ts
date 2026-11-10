@@ -74,12 +74,23 @@ export interface SetupMilestoneItem {
   done: boolean;
 }
 
+const setupProgressCache = new Map<
+  string,
+  { expiresAt: number; data: { doneCount: number; totalCount: number; milestones: SetupMilestoneItem[] } }
+>();
+
 export function getWorkspaceSetupProgress(workspaceId: string): {
   doneCount: number;
   totalCount: number;
   milestones: SetupMilestoneItem[];
 } {
   const validId = assertValidUlid(workspaceId, "workspaceId");
+  const now = Date.now();
+  const cached = setupProgressCache.get(validId);
+  if (cached && cached.expiresAt > now) {
+    return cached.data;
+  }
+
   const ctrlDb = controlDb().$client;
   const dataDb = tenantDataDb({ workspaceId: validId }).$client;
 
@@ -104,16 +115,122 @@ export function getWorkspaceSetupProgress(workspaceId: string): {
   ];
 
   const doneCount = milestones.filter((m) => m.done).length;
-  return { doneCount, totalCount: milestones.length, milestones };
+  const data = { doneCount, totalCount: milestones.length, milestones };
+  if (process.env.NODE_ENV !== "test") {
+    setupProgressCache.set(validId, { expiresAt: now + 5_000, data });
+  }
+  return data;
 }
 
-export function getWorkspaceAnalytics(workspaceId: string, range: AnalyticsDateRange = "30d") {
+function computeWorkspaceAnalyticsWatermark(
+  validId: string,
+  dataDb: ReturnType<typeof tenantDataDb>["$client"],
+  ctrlDb: ReturnType<typeof controlDb>["$client"]
+): string {
+  const tenantRow = dataDb
+    .prepare(
+      `SELECT
+        (SELECT COUNT(*) || ':' || COALESCE(MAX(updated_at), 0) FROM contacts) || '|' ||
+        (SELECT COUNT(*) || ':' || COALESCE(MAX(created_at), 0) FROM messages) || '|' ||
+        (SELECT COUNT(*) || ':' || COALESCE(MAX(last_activity_at), 0) FROM conversations) || '|' ||
+        (SELECT COUNT(*) || ':' || COALESCE(MAX(updated_at), 0) FROM tally_vouchers) || '|' ||
+        (SELECT COUNT(*) || ':' || COALESCE(MAX(updated_at), 0) FROM campaigns) || '|' ||
+        (SELECT COUNT(*) || ':' || COALESCE(MAX(occurred_at), 0) FROM pixel_events) || '|' ||
+        (SELECT COUNT(*) || ':' || COALESCE(MAX(created_at), 0) FROM broadcasts) || '|' ||
+        (SELECT COUNT(*) FROM reviews) AS wm`
+    )
+    .get() as { wm: string } | undefined;
+
+  const ctrlRow = ctrlDb
+    .prepare(
+      `SELECT
+        (SELECT COALESCE(SUM(amount_paise), 0) || ':' || COUNT(*) FROM ledger_entries WHERE workspace_id = ?) || '|' ||
+        (SELECT COUNT(*) FROM connections WHERE workspace_id = ?) AS wm`
+    )
+    .get(validId, validId) as { wm: string } | undefined;
+
+  return `${tenantRow?.wm ?? ""}|${ctrlRow?.wm ?? ""}`;
+}
+
+export function invalidateWorkspaceAnalyticsRollups(workspaceId: string): void {
+  const validId = assertValidUlid(workspaceId, "workspaceId");
+  setupProgressCache.delete(validId);
+  try {
+    tenantDataDb({ workspaceId: validId }).$client.prepare(`DELETE FROM analytics_rollups`).run();
+  } catch {
+    // Ignore if tenant DB is closed
+  }
+}
+
+export function refreshWorkspaceAnalyticsRollups(workspaceId: string): void {
+  const validId = assertValidUlid(workspaceId, "workspaceId");
+  getWorkspaceAnalytics(validId, "30d", { forceRecompute: true });
+  getWorkspaceAnalytics(validId, "7d", { forceRecompute: true });
+}
+
+export function getWorkspaceAnalytics(
+  workspaceId: string,
+  range: AnalyticsDateRange = "30d",
+  options?: { forceRecompute?: boolean }
+) {
   const validId = assertValidUlid(workspaceId, "workspaceId");
   const dataDb = tenantDataDb({ workspaceId: validId }).$client;
   const logsDb = tenantLogsDb({ workspaceId: validId }).$client;
   const ctrlDb = controlDb().$client;
 
   const now = Date.now();
+  const rollupKey = `analytics:${range}`;
+  const watermark = computeWorkspaceAnalyticsWatermark(validId, dataDb, ctrlDb);
+
+  if (!options?.forceRecompute) {
+    try {
+      const existingRollup = dataDb
+        .prepare(
+          `SELECT payload_json AS payloadJson, computed_at AS computedAt
+           FROM analytics_rollups
+           WHERE key = ?`
+        )
+        .get(rollupKey) as { payloadJson: string; computedAt: number } | undefined;
+
+      if (existingRollup && now - existingRollup.computedAt <= 60_000) {
+        const parsed = JSON.parse(existingRollup.payloadJson) as {
+          watermark?: string;
+          report?: ReturnType<typeof computeWorkspaceAnalyticsSnapshot>;
+        };
+        if (parsed.watermark === watermark && parsed.report) {
+          return parsed.report;
+        }
+      }
+    } catch {
+      // Fall through to live computation
+    }
+  }
+
+  const report = computeWorkspaceAnalyticsSnapshot(validId, range, now, dataDb, logsDb, ctrlDb);
+
+  try {
+    dataDb
+      .prepare(
+        `INSERT INTO analytics_rollups (key, payload_json, computed_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET payload_json = excluded.payload_json, computed_at = excluded.computed_at`
+      )
+      .run(rollupKey, JSON.stringify({ watermark, report }), now);
+  } catch {
+    // Non-fatal rollup cache write
+  }
+
+  return report;
+}
+
+function computeWorkspaceAnalyticsSnapshot(
+  validId: string,
+  range: AnalyticsDateRange,
+  now: number,
+  dataDb: ReturnType<typeof tenantDataDb>["$client"],
+  logsDb: ReturnType<typeof tenantLogsDb>["$client"],
+  ctrlDb: ReturnType<typeof controlDb>["$client"]
+) {
   const days = resolveRangeDays(range);
   const windowMs = days * 86_400_000;
   const startMs = range === "all" ? 0 : now - windowMs;
@@ -198,7 +315,7 @@ export function getWorkspaceAnalytics(workspaceId: string, range: AnalyticsDateR
     overdueCount: number;
   };
 
-  // Deduplicate Receipt vouchers vs Sales.paid_amount_paise per (company, party) so collections are never double-counted (P1-23 / ACT-5.1)
+  // Deduplicate Receipt vouchers vs Sales.paid_amount_paise per (company, party) so collections are never double-counted
   const collectedPartyRows = dataDb
     .prepare(
       `SELECT

@@ -2,9 +2,15 @@ import { headers } from "next/headers";
 import { INDIA_GST_STATES } from "@rsl/billing";
 import { resolveEndpointsFromHeaders } from "@rsl/core";
 import { canRoleAccessWebRoute, canRolePerform, formatRoleLabel } from "@rsl/rbac";
+import {
+  getWorkspaceConfidentialityPolicy,
+  isConfidentialityUnmaskActive,
+  shouldMaskWorkspacePortalData,
+} from "@rsl/tally";
 import { listWorkspaceSslCertificates } from "@rsl/tenancy";
 import { AccessRestrictedState, PageHeader } from "@rsl/ui";
 import { BusinessSettingsClient } from "@/components/business-settings-client";
+import { ConfidentialityVaultCard } from "@/components/confidentiality-vault-card";
 import { FlashBanner } from "@/components/flash-banner";
 import { SettingsNav } from "@/components/settings-nav";
 import { requireWebSession } from "@/lib/session";
@@ -58,6 +64,18 @@ export default async function BusinessSettingsPage({
     "/settings/tokens",
     session.workspace.id
   );
+  const canManageConfidentiality = canRolePerform(
+    session.roleSlug,
+    "workspace:manage",
+    session.workspace.id
+  );
+  const confidentialityPolicy = getWorkspaceConfidentialityPolicy(session.workspace.id);
+  const unmaskStatus = isConfidentialityUnmaskActive(session.workspace.id, session.user.id);
+  const isMaskedInPortal = shouldMaskWorkspacePortalData(session.workspace.id, {
+    userId: session.user.id,
+    unmaskSessionActive: unmaskStatus.active,
+    policy: confidentialityPolicy,
+  });
 
   return (
     <div className="w-full space-y-6">
@@ -70,6 +88,14 @@ export default async function BusinessSettingsPage({
       <SettingsNav />
 
       <FlashBanner notice={sp.notice} error={sp.error} />
+
+      <ConfidentialityVaultCard
+        initialPolicy={confidentialityPolicy}
+        isMasked={isMaskedInPortal}
+        unmaskActive={unmaskStatus.active}
+        unmaskExpiresAt={unmaskStatus.expiresAt}
+        canManageSettings={canManageConfidentiality}
+      />
 
       <BusinessSettingsClient
         workspace={{
@@ -98,6 +124,7 @@ export default async function BusinessSettingsPage({
         }}
         gstStates={GST_STATE_OPTIONS}
         canEditBusiness={canEditBusiness}
+        isOwner={session.roleSlug === "owner" && !session.impersonatorStaffId}
         canProvisionSsl={canProvisionSsl}
         canAccessBilling={canAccessBilling}
         canAccessTokens={canAccessTokens}

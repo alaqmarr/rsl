@@ -1,5 +1,5 @@
 import { getPlatformCloudflareTurnstileConfig } from "@rsl/tenancy";
-import { BrandLogo, TurnstileWidget } from "@rsl/ui";
+import { BrandLogo, ThemeToggleButton, TurnstileWidget } from "@rsl/ui";
 import { FlashBanner } from "@/components/flash-banner";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
 import { forgotPasswordAction } from "@/lib/actions";
@@ -11,10 +11,11 @@ export default async function ForgotPasswordPage({
 }) {
   const sp = await searchParams;
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#F8F9FB] p-6">
-      <div className="w-full max-w-md rounded-2xl border border-zinc-200/90 bg-white p-7 shadow-[0_1px_3px_rgba(15,23,42,0.05)] sm:p-8">
-        <div className="mb-5">
+    <div className="rsl-ambient-canvas flex min-h-screen items-center justify-center p-6">
+      <div className="rsl-frost-card w-full max-w-md rounded-2xl p-7 sm:p-8">
+        <div className="mb-5 flex items-center justify-between gap-2">
           <BrandLogo variant="long" size="sm" subtitle="RSL Marketing & Tally Suite" />
+          <ThemeToggleButton compact />
         </div>
 
         <h1 className="text-xl font-semibold tracking-tight text-slate-900">

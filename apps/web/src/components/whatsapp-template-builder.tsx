@@ -88,10 +88,21 @@ export function WhatsAppTemplateBuilder({
         }
         sileo.success({
           title: "Translated Preserving {{Variables}}",
-          description: `Translated via ${res.provider || "Bhashini / AI"} — all {{1}} placeholders kept intact.`,
+          description: `Translated via ${
+            res.provider === "bhashini"
+              ? "MeitY Bhashini"
+              : res.provider === "cloudflare_workers_ai"
+                ? "Cloudflare Workers AI"
+                : res.provider || "Live AI"
+          } - all {{1}} placeholders kept intact.`,
         });
       } else {
-        sileo.error({ title: "Translation Failed", description: res.message || "Try again." });
+        sileo.error({
+          title: "Translation Unavailable",
+          description:
+            res.message ||
+            "Configure Bhashini or Cloudflare Workers AI credentials in Platform Admin to enable live regional translation.",
+        });
       }
     } finally {
       setTranslating(false);
@@ -472,7 +483,7 @@ export function WhatsAppTemplateBuilder({
                 </ul>
               ) : (
                 <p className="mt-0.5 text-emerald-800">
-                  ✓ Clean variable placement and category match — ready for fast Meta approval!
+                  ✓ Clean variable placement and category match - ready for fast Meta approval!
                 </p>
               )}
               {lintResult.aiAdvice && (
@@ -488,7 +499,7 @@ export function WhatsAppTemplateBuilder({
         <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
           <span className="text-[12.5px] text-zinc-500">
             {wabaConnected
-              ? "Connected to WhatsApp Cloud API — saving submits directly to Meta for approval. Wallet is charged strictly after confirmed message delivery (₹0 on error)."
+              ? "Connected to WhatsApp Cloud API - saving submits directly to Meta for approval. Wallet is charged strictly after confirmed message delivery (₹0 on error)."
               : "Saved as a Draft until your WhatsApp Business Account is connected and Meta approves the template."}
           </span>
           <SubmitButton pendingText="Saving Template..." className="rsl-btn-primary">
@@ -510,13 +521,13 @@ export function WhatsAppTemplateBuilder({
           </div>
 
           <div className="mx-auto max-w-sm overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-md">
-            <div className="bg-[#075E54] px-4 py-3 text-white">
+            <div className="bg-[var(--forest-green)] px-4 py-3 text-[var(--snow-white)]">
               <div className="text-[13px] font-semibold">Your Business (Official WhatsApp)</div>
-              <div className="text-[11px] text-white/80">Verified Business Account</div>
+              <div className="text-[11px] opacity-80">Verified Business Account</div>
             </div>
 
-            <div className="bg-[#EFEAE2] p-4">
-              <div className="rounded-xl rounded-tl-none bg-white p-3.5 text-[13px] text-slate-900 shadow-xs">
+            <div className="bg-[var(--butter-cream)] p-4">
+              <div className="rounded-xl rounded-tl-none bg-[var(--snow-white)] p-3.5 text-[13px] text-[var(--midnight-black)] shadow-xs">
                 {headerType === "DOCUMENT" && (
                   <div className="mb-2 flex items-center gap-2 rounded-lg bg-zinc-100 px-3 py-2 text-xs font-medium text-slate-700">
                     <span>📄</span>
@@ -524,22 +535,22 @@ export function WhatsAppTemplateBuilder({
                   </div>
                 )}
                 {headerType === "TEXT" && headerText.trim() && (
-                  <div className="mb-1.5 text-[13.5px] font-semibold text-slate-900">
+                  <div className="mb-1.5 text-[13.5px] font-semibold text-[var(--midnight-black)]">
                     {replacePreviewVars(headerText)}
                   </div>
                 )}
-                <div className="whitespace-pre-wrap leading-relaxed text-slate-800">
+                <div className="whitespace-pre-wrap leading-relaxed text-[var(--midnight-black)]">
                   {replacePreviewVars(bodyText)}
                 </div>
                 {footerText.trim() && (
-                  <div className="mt-2 text-[11px] text-zinc-500">{footerText}</div>
+                  <div className="mt-2 text-[11px] opacity-65">{footerText}</div>
                 )}
-                <div className="mt-1 text-right text-[10.5px] text-zinc-400 tabular-nums">
+                <div className="mt-1 text-right text-[10.5px] opacity-55 tabular-nums">
                   10:42 AM ✓✓
                 </div>
 
                 {button1Text.trim() && (
-                  <div className="mt-2.5 border-t border-zinc-100 pt-2 text-center text-[13px] font-semibold text-[#008069]">
+                  <div className="mt-2.5 border-t border-zinc-200/60 pt-2 text-center text-[13px] font-semibold text-[var(--forest-green)]">
                     {button1Text}
                   </div>
                 )}

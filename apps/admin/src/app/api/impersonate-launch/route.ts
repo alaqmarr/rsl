@@ -35,14 +35,21 @@ export async function GET(req: NextRequest) {
   <meta name="referrer" content="no-referrer" />
   <title>Opening Audited Support Session…</title>
   <style>
-    body { font-family: system-ui, -apple-system, sans-serif; display: grid; place-items: center; min-height: 100vh; margin: 0; background: #fafafa; color: #18181b; }
-    .card { background: #fff; border: 1px solid #e4e4e7; border-radius: 12px; padding: 24px 28px; max-width: 420px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
-    button { margin-top: 12px; padding: 10px 18px; border-radius: 8px; border: 0; background: #0e8a56; color: #fff; font-weight: 600; cursor: pointer; }
+    :root {
+      --butter-cream: #F4EAD5;
+      --forest-green: #1E3B2F;
+      --snow-white: #F6F4EE;
+      --midnight-black: #090A10;
+    }
+    body { font-family: system-ui, -apple-system, sans-serif; display: grid; place-items: center; min-height: 100vh; margin: 0; background: var(--butter-cream); color: var(--midnight-black); }
+    .card { background: var(--snow-white); border: 1px solid var(--forest-green); border-radius: 14px; padding: 24px 28px; max-width: 420px; text-align: center; }
+    .lead { margin: 0; font-weight: 600; color: var(--forest-green); }
+    button { margin-top: 12px; padding: 10px 18px; border-radius: 10px; border: 0; background: var(--forest-green); color: var(--snow-white); font-weight: 600; cursor: pointer; }
   </style>
 </head>
 <body>
   <div class="card">
-    <p style="margin:0;font-weight:600;">Launching 30-Minute Audited Support View…</p>
+    <p class="lead">Launching 30-Minute Audited Support View…</p>
     <form id="imp-form" method="POST" action="${escapeHtmlAttr(actionUrl)}">
       <input type="hidden" name="code" value="${escapeHtmlAttr(code)}" />
       <noscript><button type="submit">Continue to Client Workspace</button></noscript>

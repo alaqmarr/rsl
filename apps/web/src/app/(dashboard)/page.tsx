@@ -1,5 +1,4 @@
 import {
-  CheckCircle2,
   Clock,
   FileSpreadsheet,
   IndianRupee,
@@ -20,6 +19,7 @@ import { getTallyWorkspaceSummary } from "@rsl/tally";
 import {
   DualSeriesAreaChart,
   EmptyWorkspaceState,
+  GuideDrawerButton,
   MetricCard,
   PageHeader,
   ReceivablesAgingStack,
@@ -60,6 +60,9 @@ export default async function BusinessOverviewPage({
     "tally:invoice.send",
     session.workspace.id
   );
+  const canViewMarketing =
+    canRolePerform(session.roleSlug, "ads:view", session.workspace.id) ||
+    canRolePerform(session.roleSlug, "posts:view", session.workspace.id);
   const canViewAnalyticsRoute = canRoleAccessWebRoute(
     session.roleSlug,
     "/analytics",
@@ -69,8 +72,109 @@ export default async function BusinessOverviewPage({
     canRolePerform(session.roleSlug, "logs:view", session.workspace.id) ||
     canRolePerform(session.roleSlug, "audit:view", session.workspace.id);
 
+  // Marketing-scoped roles (e.g. `marketing`) never see Tally bills, receivables, or accounting data
+  if (!canViewTally && canViewMarketing) {
+    return (
+      <div className="w-full space-y-6">
+        <PageHeader
+          eyebrow={`Marketing & Growth Desk • ${formatRoleLabel(session.roleSlug)}`}
+          title={session.workspace.name}
+          subtitle="Live Meta & Google ad campaigns, scheduled social publishing, website conversion tracking, and Google Business reviews."
+          badge={<StatusPill label="Marketing & Campaigns Desk" tone="emerald" />}
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              {canRoleAccessWebRoute(session.roleSlug, "/reviews", session.workspace.id) && (
+                <ActionLink href="/reviews" className="rsl-btn-secondary">
+                  Google Reviews
+                </ActionLink>
+              )}
+              {canRoleAccessWebRoute(session.roleSlug, "/whatsapp", session.workspace.id) && (
+                <ActionLink href="/whatsapp" className="rsl-btn-secondary">
+                  WhatsApp Broadcasts
+                </ActionLink>
+              )}
+              {canRoleAccessWebRoute(session.roleSlug, "/campaigns", session.workspace.id) && (
+                <ActionLink href="/campaigns" className="rsl-btn-primary">
+                  Open Ads &amp; Social Studio
+                </ActionLink>
+              )}
+            </div>
+          }
+        />
+
+        <FlashBanner notice={sp.notice} error={sp.error} />
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <MetricCard
+            label="Ad Spend (30 Days)"
+            value={formatInr(analytics.kpis.marketingSpendPaise)}
+            changePct={analytics.kpis.marketingSpendChangePct}
+            sublabel="Paid Meta & Google campaign spend"
+            accent="emerald"
+            icon={<TrendingUp className="h-4 w-4" />}
+          />
+          <MetricCard
+            label="Tracked Ad Revenue"
+            value={formatInr(analytics.kpis.salesLinkedPaise)}
+            changePct={analytics.kpis.salesLinkedChangePct}
+            sublabel={
+              analytics.kpis.returnPerRupeeSpent !== null
+                ? `Blended ROAS ${analytics.kpis.returnPerRupeeSpent.toFixed(2)}x`
+                : "Attributed campaign sales"
+            }
+            accent="sky"
+            icon={<TrendingUp className="h-4 w-4" />}
+          />
+          <MetricCard
+            label="WhatsApp Outbound (30d)"
+            value={String(analytics.kpis.messagesOutCount)}
+            sublabel="Template broadcasts & campaign sends"
+            icon={<MessageSquare className="h-4 w-4" />}
+          />
+          <MetricCard
+            label="Google Rating"
+            value={
+              analytics.kpis.reviewsCount > 0
+                ? `${analytics.kpis.averageGoogleRating.toFixed(1)} ★`
+                : "No reviews yet"
+            }
+            sublabel={`${analytics.kpis.reviewsCount} total customer review(s)`}
+            accent="amber"
+            icon={<Star className="h-4 w-4" />}
+          />
+        </div>
+
+        <SectionCard
+          title="Campaign & Audience Engagement (Last 30 Days)"
+          subtitle="Outbound campaign activity and customer engagement trend"
+          action={
+            canRoleAccessWebRoute(session.roleSlug, "/campaigns", session.workspace.id) ? (
+              <ActionLink
+                href="/campaigns"
+                spinnerSize="xs"
+                className="text-xs font-semibold text-emerald-700 hover:underline"
+              >
+                Open Ads &amp; Social Posts →
+              </ActionLink>
+            ) : undefined
+          }
+        >
+          <DualSeriesAreaChart
+            points={analytics.dailySeries.map((d) => ({
+              label: d.label,
+              primary: d.messagesOut,
+              secondary: d.messagesIn,
+            }))}
+            primaryLabel="Campaign Outbound"
+            secondaryLabel="Audience Responses"
+          />
+        </SectionCard>
+      </div>
+    );
+  }
+
   // Support / Inbox-only roles (e.g. `agent`) get a focused Customer Service Overview without confidential financial totals
-  if (!canViewTally && !canViewAnalyticsRoute) {
+  if (!canViewTally) {
     return (
       <div className="w-full space-y-6">
         <PageHeader
@@ -126,7 +230,7 @@ export default async function BusinessOverviewPage({
             value={
               analytics.kpis.reviewsCount > 0
                 ? `${analytics.kpis.averageGoogleRating.toFixed(1)} ★`
-                : "—"
+                : "No reviews yet"
             }
             sublabel={`${analytics.kpis.reviewsCount} total customer review(s)`}
             accent="amber"
@@ -157,15 +261,15 @@ export default async function BusinessOverviewPage({
             }))}
             primaryLabel="Customer Inbound"
             secondaryLabel="Team Outbound"
-            primaryColor="#0284C7"
-            secondaryColor="#059669"
           />
         </SectionCard>
       </div>
     );
   }
 
-  const tally = getTallyWorkspaceSummary(session.workspace.id);
+  const tally = getTallyWorkspaceSummary(session.workspace.id, {
+    userId: session.user.id,
+  });
   const recentLogs = canViewLogs ? listRecentActionLogs(session.workspace.id, 8) : [];
   const hasInvoicingEntitlement = hasActiveEntitlement(session.workspace.id, "tally.invoicing");
   const canSendBillWhatsApp = hasInvoicingEntitlement && canSendTallyWhatsApp;
@@ -195,10 +299,35 @@ export default async function BusinessOverviewPage({
             : "Active Business Overview"
         }
         title={session.workspace.name}
-        subtitle="Live 30-day cashflow, customer bills, and WhatsApp activity — every figure comes directly from your real business records."
+        subtitle="Live 30-day cashflow, customer bills, and WhatsApp activity - every figure comes directly from your real business records."
         badge={<StatusPill label="Live 30-Day View" tone="emerald" />}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {completedSteps < analytics.setupChecklist.length && visibleChecklist.length > 0 && (
+              <GuideDrawerButton
+                label="Need help? • Setup Checklist"
+                badgeText={`${completedSteps}/${analytics.setupChecklist.length}`}
+                guide={{
+                  eyebrow: "Workspace Onboarding",
+                  title: "Quick Business Setup Checklist",
+                  summary:
+                    "Complete these milestones to automate Tally Prime invoice delivery, customer messaging, and daily encrypted backups.",
+                  progress: {
+                    label: "Setup Milestones Completed",
+                    doneCount: completedSteps,
+                    totalCount: analytics.setupChecklist.length,
+                  },
+                  steps: visibleChecklist.map((step) => ({
+                    title: `${step.title} ${step.done ? "✓" : ""}`,
+                    detail: step.done
+                      ? "Completed and verified for your workspace."
+                      : `Open ${step.cta} (${step.href}) to finish this setup milestone.`,
+                  })),
+                  fullGuideHref: "/help",
+                  fullGuideLabel: "Open All Setup Guides",
+                }}
+              />
+            )}
             {canViewTally && (
               <ActionLink href="/tally" className="rsl-btn-secondary">
                 Tally Prime &amp; Bills
@@ -256,54 +385,6 @@ export default async function BusinessOverviewPage({
         />
       </div>
 
-      {completedSteps < analytics.setupChecklist.length && visibleChecklist.length > 0 && (
-        <SectionCard
-          title={`Quick Setup Checklist (${completedSteps} of ${analytics.setupChecklist.length} completed)`}
-          subtitle="Finish these quick steps to automate Tally Prime bill delivery, customer replies, and daily backups."
-          accent="indigo"
-        >
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
-            {visibleChecklist.map((step, idx) => (
-              <div
-                key={step.key}
-                className={`flex flex-col justify-between rounded-xl border p-3.5 text-xs transition ${
-                  step.done
-                    ? "border-emerald-200/90 bg-emerald-50/50"
-                    : "border-zinc-200/90 bg-zinc-50/50 hover:bg-white"
-                }`}
-              >
-                <div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] font-bold tracking-wider text-zinc-400 uppercase">
-                      Step {idx + 1}
-                    </span>
-                    {step.done ? (
-                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                    ) : (
-                      <StatusPill label="Next" tone="amber" />
-                    )}
-                  </div>
-                  <p className="mt-2 font-semibold leading-snug text-slate-900">{step.title}</p>
-                </div>
-                {step.done ? (
-                  <span className="mt-3 text-[11px] font-semibold text-emerald-700">
-                    Completed
-                  </span>
-                ) : (
-                  <ActionLink
-                    href={step.href}
-                    spinnerSize="xs"
-                    className="mt-3 font-semibold text-emerald-700 hover:text-emerald-800 hover:underline"
-                  >
-                    <span>{step.cta} →</span>
-                  </ActionLink>
-                )}
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-      )}
-
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.45fr_1fr]">
         <SectionCard
           title="Payments Collected vs. Bills Raised (Last 30 Days)"
@@ -329,9 +410,7 @@ export default async function BusinessOverviewPage({
             }))}
             primaryLabel="Payments Collected (₹)"
             secondaryLabel="Bills Raised (₹)"
-            primaryColor="#059669"
-            secondaryColor="#4F46E5"
-            formatValue={(v) => `₹${v.toLocaleString("en-IN")}`}
+            formatValue={(v) => formatInr(v * 100)}
             emptyHint="No Tally bills or receipts recorded in the last 30 days."
           />
         </SectionCard>
@@ -371,7 +450,7 @@ export default async function BusinessOverviewPage({
                   title="Zero overdue bills right now"
                   description={
                     tally.vouchers.length > 0
-                      ? `All ${tally.vouchers.length.toLocaleString("en-IN")} synced Tally voucher(s) are settled or within due date — no overdue reminders needed.`
+                      ? `All ${tally.vouchers.length.toLocaleString("en-IN")} synced Tally voucher(s) are settled or within due date - no overdue reminders needed.`
                       : "Connect Tally Prime or import sales bills to track due dates and send 1-click WhatsApp reminders."
                   }
                   actionLabel={
@@ -384,11 +463,20 @@ export default async function BusinessOverviewPage({
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
-                  <thead className="border-b border-zinc-200/80 bg-zinc-50/70 text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
+                  <caption className="sr-only">
+                    Overdue Tally Prime customer bills ready for WhatsApp payment reminders
+                  </caption>
+                  <thead className="border-b border-zinc-200/80 bg-zinc-50/70 text-xs font-semibold tracking-wide text-zinc-500 uppercase">
                     <tr>
-                      <th className="px-5 py-2.5">Bill # &amp; Customer</th>
-                      <th className="px-4 py-2.5">Balance Due</th>
-                      <th className="px-5 py-2.5 text-right">Action</th>
+                      <th scope="col" className="px-5 py-2.5">
+                        Bill # &amp; Customer
+                      </th>
+                      <th scope="col" className="px-4 py-2.5 text-right">
+                        Balance Due
+                      </th>
+                      <th scope="col" className="px-5 py-2.5 text-right">
+                        Action
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100 bg-white">
@@ -398,11 +486,11 @@ export default async function BusinessOverviewPage({
                         <tr key={bill.id} className="hover:bg-zinc-50/60">
                           <td className="px-5 py-3">
                             <div className="font-semibold text-slate-900">{bill.partyName}</div>
-                            <div className="text-[11px] text-zinc-500">
+                            <div className="text-xs text-zinc-500">
                               #{bill.voucherNumber} • {bill.partyPhoneE164 || "No phone"}
                             </div>
                           </td>
-                          <td className="px-4 py-3 font-semibold text-rose-700 tabular-nums">
+                          <td className="px-4 py-3 text-right font-semibold text-rose-700 tabular-nums">
                             {formatInr(balance)}
                           </td>
                           <td className="px-5 py-3 text-right">
@@ -448,7 +536,7 @@ export default async function BusinessOverviewPage({
         {canViewLogs && (
           <SectionCard
             title="Recent Business Activity"
-            subtitle="Permanent record of actions in your workspace — past entries cannot be altered"
+            subtitle="Permanent record of actions in your workspace - past entries cannot be altered"
             action={
               canRoleAccessWebRoute(session.roleSlug, "/activity", session.workspace.id) ? (
                 <ActionLink
@@ -475,8 +563,9 @@ export default async function BusinessOverviewPage({
                       <div className="font-medium text-slate-900">
                         {formatCustomerAuditSummary(log.summary)}
                       </div>
-                      <div className="mt-0.5 text-[11px] text-zinc-500">
-                        {log.category} • {new Date(log.ts).toLocaleString("en-IN")}
+                      <div className="mt-0.5 text-xs text-zinc-500">
+                        {log.category} •{" "}
+                        {new Date(log.ts).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
                       </div>
                     </div>
                     <StatusPill

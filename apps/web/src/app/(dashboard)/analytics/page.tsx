@@ -56,7 +56,7 @@ export default async function DetailedAnalyticsPage({
       <PageHeader
         eyebrow="Performance & Cashflow"
         title="Detailed Business Analytics"
-        subtitle="Cashflow collections, team reply speed, customer conversion funnel, and return per ₹1 spent — computed live from your business records."
+        subtitle="Cashflow collections, team reply speed, customer conversion funnel, and return per ₹1 spent - computed live from your business records."
         actions={
           <div className="flex flex-wrap items-center gap-2.5">
             <div className="inline-flex flex-wrap rounded-xl border border-zinc-200/90 bg-white p-1 shadow-2xs">
@@ -213,8 +213,6 @@ export default async function DetailedAnalyticsPage({
             }))}
             primaryLabel="Sales Linked (₹)"
             secondaryLabel="Ad Spend (₹)"
-            primaryColor="#059669"
-            secondaryColor="#DC2626"
             formatValue={(v) => `₹${v.toLocaleString("en-IN")}`}
           />
         </SectionCard>
@@ -234,8 +232,6 @@ export default async function DetailedAnalyticsPage({
             }))}
             primaryLabel="Customer Inbound"
             secondaryLabel="Team Outbound"
-            primaryColor="#0284C7"
-            secondaryColor="#059669"
           />
         </SectionCard>
 
@@ -282,7 +278,7 @@ export default async function DetailedAnalyticsPage({
                     {row.returnRatio !== null ? (
                       <StatusPill label={`₹${row.returnRatio.toFixed(2)} / ₹1`} tone="emerald" />
                     ) : (
-                      <span className="text-zinc-400">—</span>
+                      <span className="text-zinc-400">-</span>
                     )}
                   </td>
                   <td className="px-5 py-3.5 text-zinc-600 sm:px-6">{row.statusNote}</td>

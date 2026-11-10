@@ -17,6 +17,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "qrcode": "^1.5.4",
     "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6"
   }
 }

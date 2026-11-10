@@ -120,7 +120,7 @@ export function ConfirmWhatsAppReminderButton({
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-emerald-200/80 bg-[#EFEAE2]/70 p-3">
+                <div className="rounded-xl border border-emerald-200/80 bg-zinc-100 p-3">
                   <div className="text-[10.5px] font-bold tracking-wider text-zinc-600 uppercase">
                     Message Preview
                   </div>

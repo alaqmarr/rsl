@@ -36,7 +36,7 @@ export function TurnstileWidget({ siteKey }: { siteKey?: string | null }) {
       containerRef.current.innerHTML = "";
       widgetId = window.turnstile.render(containerRef.current, {
         sitekey: cleanKey,
-        theme: "light",
+        theme: "auto",
         size: "flexible",
         callback: (tok) => setToken(tok),
         "expired-callback": () => setToken(""),
@@ -74,7 +74,9 @@ export function TurnstileWidget({ siteKey }: { siteKey?: string | null }) {
     };
   }, [cleanKey]);
 
-  if (!cleanKey) return null;
+  if (!cleanKey) {
+    return null;
+  }
 
   return (
     <div className="w-full py-1">

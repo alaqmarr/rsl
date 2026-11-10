@@ -190,7 +190,13 @@ export function isTrustedPlatformHost(
   if (!rawHost || !rawHost.trim()) return true;
   const firstHost = firstHeaderToken(rawHost);
   if (!firstHost) return true;
-  if (isLoopbackUrlOrHost(firstHost)) return true;
+  if (isLoopbackUrlOrHost(firstHost)) {
+    const env = getEnv();
+    if (env.NODE_ENV === "production" && !isLoopbackUrlOrHost(env.APP_URL)) {
+      return false;
+    }
+    return true;
+  }
 
   const env = getEnv();
   const parsed = parseClientSubdomainFromHost(firstHost, explicitPrimaryDomain ?? env.PRIMARY_DOMAIN);
@@ -239,11 +245,16 @@ export function resolvePublicEndpoints(opts: ResolveEndpointsOptions = {}): Reso
 
   let cloudBaseUrl = canonicalAppUrl;
   if (safeIncomingHost && !incomingIsLocal) {
-    const proto = rawProto === "http" || rawProto === "https" ? rawProto : "https";
     if (parsedHost.zone === "tally" || parsedHost.zone === "api") {
       cloudBaseUrl = canonicalAppUrl;
-    } else {
-      cloudBaseUrl = `${proto}://${safeIncomingHost}`;
+    } else if (
+      parsedHost.zone === "workspace" &&
+      opts.workspaceSlug &&
+      parsedHost.workspaceSlug !== cleanSubdomain(opts.workspaceSlug, "")
+    ) {
+      cloudBaseUrl = canonicalAppUrl;
+    } else if (parsedHost.zone === "platform" || parsedHost.zone === "workspace") {
+      cloudBaseUrl = `https://${safeIncomingHost}`;
     }
   } else if (env.APP_URL && !isLoopbackUrlOrHost(env.APP_URL)) {
     cloudBaseUrl = stripTrailingSlash(env.APP_URL);
@@ -349,9 +360,15 @@ export function resolveEndpointsFromHeaders(
   hdrs: Pick<Headers, "get">,
   extra: Omit<ResolveEndpointsOptions, "hostHeader" | "forwardedHostHeader" | "forwardedProtoHeader"> = {}
 ): ResolvedPublicEndpoints {
+  const hostHeader = hdrs.get("host");
+  const forwardedHost = hdrs.get("x-forwarded-host");
+  const safeForwardedHost =
+    forwardedHost && isTrustedPlatformHost(forwardedHost) ? forwardedHost : null;
+  const safeHostHeader =
+    hostHeader && isTrustedPlatformHost(hostHeader) ? hostHeader : null;
   return resolvePublicEndpoints({
-    hostHeader: hdrs.get("host"),
-    forwardedHostHeader: hdrs.get("x-forwarded-host"),
+    hostHeader: safeHostHeader,
+    forwardedHostHeader: safeForwardedHost,
     forwardedProtoHeader: hdrs.get("x-forwarded-proto"),
     ...extra,
   });

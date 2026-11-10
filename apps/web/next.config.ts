@@ -1,49 +1,48 @@
-import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs/config";
 
-function loadMonorepoRootEnv(): void {
-  const rootEnv = path.resolve(__dirname, "..", "..", ".env");
-  if (!fs.existsSync(rootEnv)) return;
-  const lines = fs.readFileSync(rootEnv, "utf8").split(/\r?\n/);
-  for (const raw of lines) {
-    const trimmed = raw.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq <= 0) continue;
-    const k = trimmed.slice(0, eq).trim();
-    let v = trimmed.slice(eq + 1).trim();
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-      v = v.slice(1, -1);
-    }
-    if (process.env[k] === undefined) {
-      process.env[k] = v;
-    }
-  }
-}
-
-loadMonorepoRootEnv();
-
 const monorepoRoot = path.resolve(__dirname, "..", "..");
+const requireCjs = createRequire(path.join(monorepoRoot, "package.json"));
+const { loadMonorepoRootEnv } = requireCjs(
+  path.join(monorepoRoot, "scripts", "load-root-env.cjs")
+) as {
+  loadMonorepoRootEnv: (opts?: { rootDir?: string }) => Record<string, string>;
+};
+
+loadMonorepoRootEnv({ rootDir: monorepoRoot });
 
 const isDev = process.env.NODE_ENV !== "production";
+const allowedConnectOrigins = [
+  "'self'",
+  "https://api.razorpay.com",
+  "https://lumberjack.razorpay.com",
+  "https://checkout.razorpay.com",
+  "https://challenges.cloudflare.com",
+  "https://*.ingest.sentry.io",
+  "https://*.ingest.us.sentry.io",
+  "https://*.ingest.de.sentry.io",
+  ...(isDev ? ["http:", "ws:", "wss:"] : []),
+].join(" ");
+
 const webCsp = [
   "default-src 'self'",
   "base-uri 'self'",
   "frame-ancestors 'none'",
-  "form-action 'self' https:",
+  "form-action 'self'",
   "object-src 'none'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data: https:",
   "style-src 'self' 'unsafe-inline'",
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} https://checkout.razorpay.com https://challenges.cloudflare.com`,
-  `connect-src 'self' https:${isDev ? " http: ws: wss:" : ""}`,
+  `connect-src ${allowedConnectOrigins}`,
   "frame-src https://api.razorpay.com https://checkout.razorpay.com https://challenges.cloudflare.com",
 ].join("; ");
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  devIndicators: false,
   turbopack: {
     root: monorepoRoot,
   },
@@ -66,7 +65,10 @@ const nextConfig: NextConfig = {
       {
         source: "/_next/static/:path*",
         headers: [
-          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+          {
+            key: "Cache-Control",
+            value: isDev ? "no-store, must-revalidate" : "public, max-age=31536000, immutable",
+          },
         ],
       },
       {
@@ -89,6 +91,9 @@ const nextConfig: NextConfig = {
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
+          { key: "Cross-Origin-Resource-Policy", value: "same-site" },
+          { key: "Origin-Agent-Cluster", value: "?1" },
           { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
           {
             key: "Content-Security-Policy",

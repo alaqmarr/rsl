@@ -5,7 +5,7 @@ import { getLegalDocumentBySlug } from "@/lib/legal-documents";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy — RapidShift Labs",
+  title: "Privacy Policy - RapidShift Labs",
   description:
     "How RapidShift Labs protects business data, Tally Prime bills, Google API Limited Use backups, and WhatsApp Cloud API messages under India's DPDP Act 2023.",
   alternates: { canonical: "/privacy" },

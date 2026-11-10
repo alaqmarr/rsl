@@ -1,7 +1,15 @@
 import crypto from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { decryptEnvelope, encryptEnvelope, getEnv, newId, RslError } from "@rsl/core";
+import {
+  assertSafeExternalUrl,
+  decryptEnvelope,
+  encryptEnvelope,
+  fetchWithRetry,
+  getEnv,
+  newId,
+  RslError,
+} from "@rsl/core";
 import { controlSchema } from "@rsl/database";
 import { appendActionLog, defineAction } from "@rsl/logging";
 import {
@@ -9,6 +17,7 @@ import {
   getPlatformGoogleAdsConfig,
   getPlatformGoogleOAuthConfig,
   getPlatformMetaAppConfig,
+  isWorkspaceSandboxIntegrationMode,
 } from "@rsl/tenancy";
 
 export interface StoredTokenPayload {
@@ -359,7 +368,8 @@ export function listWorkspaceConnections(workspaceId: string) {
     .from(controlSchema.connections)
     .where(eq(controlSchema.connections.workspaceId, workspaceId))
     .orderBy(desc(controlSchema.connections.createdAt))
-    .all();
+    .all()
+    .filter((c) => c.provider !== "cloudflare");
 
   const attachedAssets = db
     .select()
@@ -444,7 +454,7 @@ export function listWorkspaceConnections(workspaceId: string) {
 }
 
 /**
- * Decrypts tokens strictly inside @rsl/connections (Section 13).
+ * Decrypts tokens strictly inside @rsl/connections.
  * Other packages never inspect raw encrypted blobs.
  */
 export function getDecryptedConnectionTokens(workspaceId: string, connectionId: string): StoredTokenPayload | null {
@@ -568,7 +578,7 @@ export const linkExternalConnection = defineAction({
     const now = Date.now();
     const connectionId = newId();
     const cleanToken = input.accessToken.trim();
-    const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(cleanToken);
+    const isSandbox = isWorkspaceSandboxIntegrationMode(ctx.workspaceId, cleanToken);
 
     const encryptedTokens = encryptEnvelope(
       JSON.stringify({
@@ -701,7 +711,9 @@ export const updateExternalConnection = defineAction({
         } satisfies StoredTokenPayload)
       );
       nextMeta.maskedTokenHint = maskSecretToken(cleanToken);
-      nextMeta.tokenMode = /^(rsl_sandbox_|sandbox_|test_)/i.test(cleanToken) ? "sandbox" : "live";
+      nextMeta.tokenMode = isWorkspaceSandboxIntegrationMode(ctx.workspaceId, cleanToken)
+        ? "sandbox"
+        : "live";
       nextMeta.lastLiveCheckMessage = "Access token rotated and encrypted in vault.";
       rotatedToken = true;
       nextStatus = "healthy";
@@ -826,25 +838,25 @@ export const verifyExternalConnectionHealth = defineAction({
       accessToken = (parsed.accessToken || "").trim();
       if (!accessToken || accessToken.length < 6) {
         nextStatus = "needs_reauth";
-        liveMessage = "Stored access token is empty or malformed — please paste a fresh token.";
+        liveMessage = "Stored access token is empty or malformed - please paste a fresh token.";
       } else if (conn.expiresAt && conn.expiresAt < now) {
         nextStatus = "needs_reauth";
-        liveMessage = "Access token validity window has expired — rotate with a fresh token.";
+        liveMessage = "Access token validity window has expired - rotate with a fresh token.";
       } else if (conn.expiresAt && conn.expiresAt - now < 7 * 86_400_000) {
         nextStatus = "expiring";
-        liveMessage = "Token expires within 7 days — rotate with a Permanent System User token.";
+        liveMessage = "Token expires within 7 days - rotate with a Permanent System User token.";
       }
     } catch {
       nextStatus = "needs_reauth";
-      liveMessage = "Token envelope could not be decrypted — please re-authenticate this channel.";
+      liveMessage = "Token envelope could not be decrypted - please re-authenticate this channel.";
     }
 
     if (input.checkLiveProvider && nextStatus !== "needs_reauth" && accessToken) {
-      const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken);
+      const isSandbox = isWorkspaceSandboxIntegrationMode(ctx.workspaceId, accessToken);
       if (isSandbox) {
         meta.tokenMode = "sandbox";
         liveMessage =
-          "Sandbox test token verified — ready for local webhook & sandbox workflow testing.";
+          "Sandbox test token verified - ready for local webhook & sandbox workflow testing.";
       } else if (conn.provider === "whatsapp" || conn.provider === "meta") {
         const graphTarget =
           meta.phoneNumberId ||
@@ -922,7 +934,7 @@ export const verifyExternalConnectionHealth = defineAction({
                 Object.assign(meta, parseMetadataSafe(upgradedRow.metadataJson));
               }
               if (gbp.gbpDiscoveryStatus === "verified_locations" && gbp.storeName) {
-                liveMessage = `Verified live with Google Business Profile API — ${gbp.storeName}${gbp.storeAddress ? ` (${gbp.storeAddress})` : ""}.`;
+                liveMessage = `Verified live with Google Business Profile API - ${gbp.storeName}${gbp.storeAddress ? ` (${gbp.storeAddress})` : ""}.`;
               } else if (gbp.gbpDiscoveryDetail) {
                 liveMessage = gbp.gbpDiscoveryDetail;
               } else {
@@ -1027,6 +1039,7 @@ export function generateGoogleOAuthPkcePair(): {
 }
 
 export function isGoogleOAuthPurposeConfigured(purpose: GoogleOAuthPurpose = "google_drive"): boolean {
+  const oauthStarted = Date.now();
   const cfg = getPlatformGoogleOAuthConfig();
   if (!cfg.isReady) return false;
   if (purpose === "google_all") {
@@ -1045,6 +1058,7 @@ export function buildGoogleOAuthAuthorizeUrl(params: {
   purpose: GoogleOAuthPurpose;
   codeChallenge?: string;
 }): string {
+  const oauthStarted = Date.now();
   const cfg = getPlatformGoogleOAuthConfig();
   if (!cfg.isReady) {
     throw new RslError(
@@ -1147,26 +1161,63 @@ export async function refreshGoogleConnectionIfNeeded(
     .get();
   if (!conn) return null;
 
+  const now = Date.now();
+  const reconnectCta =
+    conn.provider === "google" ? "Reconnect Google" : "Connect to Google Drive";
+
+  const markNeedsReauth = (reason: string): null => {
+    const meta = parseMetadataSafe(conn.metadataJson);
+    meta.lastLiveCheckMessage = reason;
+    db.update(controlSchema.connections)
+      .set({
+        status: "needs_reauth",
+        metadataJson: JSON.stringify(meta),
+        lastHealthCheckAt: now,
+        updatedAt: now,
+      })
+      .where(eq(controlSchema.connections.id, conn.id))
+      .run();
+    return null;
+  };
+
   let stored: StoredTokenPayload;
   try {
     stored = JSON.parse(decryptEnvelope(conn.encryptedTokens)) as StoredTokenPayload;
   } catch {
-    return null;
+    return markNeedsReauth(
+      `Stored Google OAuth token could not be decrypted. Click '${reconnectCta}' to reconnect.`
+    );
   }
 
-  const now = Date.now();
+  if (stored.accessToken && isWorkspaceSandboxIntegrationMode(workspaceId, stored.accessToken)) {
+    return stored.accessToken;
+  }
+
   const stillFresh = Boolean(conn.expiresAt && conn.expiresAt > now + 90_000 && stored.accessToken);
   if (stillFresh) {
     return stored.accessToken;
   }
 
+  const alreadyExpired = Boolean(conn.expiresAt && conn.expiresAt <= now);
+
   if (!stored.refreshToken) {
-    return stored.accessToken || null;
+    if (alreadyExpired || !stored.accessToken) {
+      return markNeedsReauth(
+        `Google access token expired and no refresh token is stored. Click '${reconnectCta}' to re-authorize.`
+      );
+    }
+    return stored.accessToken;
   }
 
+  const oauthStarted = Date.now();
   const cfg = getPlatformGoogleOAuthConfig();
   if (!cfg.isReady) {
-    return stored.accessToken || null;
+    if (alreadyExpired || !stored.accessToken) {
+      return markNeedsReauth(
+        `Google access token expired while Google OAuth credentials are unconfigured. Click '${reconnectCta}' once OAuth is active.`
+      );
+    }
+    return stored.accessToken;
   }
 
   const body = new URLSearchParams({
@@ -1176,33 +1227,32 @@ export async function refreshGoogleConnectionIfNeeded(
     grant_type: "refresh_token",
   });
 
-  const resp = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-    signal: AbortSignal.timeout(8000),
-  });
-
-  const reconnectCta =
-    conn.provider === "google" ? "Reconnect Google" : "Connect to Google Drive";
+  let resp: Response;
+  try {
+    resp = await fetchWithRetry("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+      timeoutMs: 8000,
+      maxRetries: 2,
+    });
+  } catch (err) {
+    if (alreadyExpired || !stored.accessToken) {
+      return markNeedsReauth(
+        `Google OAuth refresh unreachable (${err instanceof Error ? err.message : "network error"}). Click '${reconnectCta}' to reconnect.`
+      );
+    }
+    return stored.accessToken;
+  }
 
   if (!resp.ok) {
     const errBody = (await resp.json().catch(() => ({}))) as {
       error?: string;
       error_description?: string;
     };
-    const meta = parseMetadataSafe(conn.metadataJson);
-    meta.lastLiveCheckMessage = `Google session expired or was revoked (${errBody.error_description || errBody.error || `HTTP ${resp.status}`}). Click '${reconnectCta}' to reconnect in one click.`;
-    db.update(controlSchema.connections)
-      .set({
-        status: "needs_reauth",
-        metadataJson: JSON.stringify(meta),
-        lastHealthCheckAt: now,
-        updatedAt: now,
-      })
-      .where(eq(controlSchema.connections.id, conn.id))
-      .run();
-    return null;
+    return markNeedsReauth(
+      `Google session expired or was revoked (${errBody.error_description || errBody.error || `HTTP ${resp.status}`}). Click '${reconnectCta}' to reconnect in one click.`
+    );
   }
 
   const data = (await resp.json()) as {
@@ -1211,18 +1261,9 @@ export async function refreshGoogleConnectionIfNeeded(
     refresh_token?: string;
   };
   if (!data.access_token) {
-    const meta = parseMetadataSafe(conn.metadataJson);
-    meta.lastLiveCheckMessage = `Google refresh did not return a fresh access token. Click '${reconnectCta}' to reconnect.`;
-    db.update(controlSchema.connections)
-      .set({
-        status: "needs_reauth",
-        metadataJson: JSON.stringify(meta),
-        lastHealthCheckAt: now,
-        updatedAt: now,
-      })
-      .where(eq(controlSchema.connections.id, conn.id))
-      .run();
-    return null;
+    return markNeedsReauth(
+      `Google refresh did not return a fresh access token. Click '${reconnectCta}' to reconnect.`
+    );
   }
 
   const nextRefresh = data.refresh_token || stored.refreshToken;
@@ -1339,6 +1380,7 @@ export async function completeGoogleOAuthConnection(params: {
   connectedLabels?: string[];
   summaryMessage?: string;
 }> {
+  const oauthStarted = Date.now();
   const cfg = getPlatformGoogleOAuthConfig();
   if (!cfg.isReady) {
     throw new RslError(
@@ -1408,6 +1450,7 @@ export async function completeGoogleOAuthConnection(params: {
 
   const db = controlDb();
   const now = Date.now();
+  const metaOAuthStarted = now;
   const expiresAt = now + expiresInSec * 1000;
 
   const persistSinglePurpose = async (
@@ -1534,7 +1577,7 @@ export async function completeGoogleOAuthConnection(params: {
     if (existingDest) {
       db.update(controlSchema.backupDestinations)
         .set({
-          name: `Google Drive — ${email}`,
+          name: `Google Drive - ${email}`,
           encryptedConfig: destConfigEnc,
           status: "healthy",
           consecutiveFailures: 0,
@@ -1547,7 +1590,7 @@ export async function completeGoogleOAuthConnection(params: {
         .values({
           id: newId(),
           workspaceId: params.workspaceId,
-          name: `Google Drive — ${email}`,
+          name: `Google Drive - ${email}`,
           provider: "gdrive",
           encryptedConfig: destConfigEnc,
           schedule: "daily",
@@ -1570,8 +1613,8 @@ export async function completeGoogleOAuthConnection(params: {
       outcome: "success",
       requestId: newId(),
       correlationId: newId(),
-      durationMs: 15,
-      summary: `Connected Google Drive (${email}) via OAuth Consent Screen — folder '${folder.folderName}' ready`,
+      durationMs: Date.now() - oauthStarted,
+      summary: `Connected Google Drive (${email}) via OAuth Consent Screen - folder '${folder.folderName}' ready`,
     });
 
     return {
@@ -1710,7 +1753,7 @@ export async function completeGoogleOAuthConnection(params: {
       outcome: "success",
       requestId: newId(),
       correlationId: newId(),
-      durationMs: 12,
+      durationMs: Date.now() - oauthStarted,
       summary: `Connected ${displayName} via OAuth Consent Screen`,
     });
 
@@ -1826,7 +1869,7 @@ export async function completeGoogleOAuthConnection(params: {
       outcome: "success",
       requestId: newId(),
       correlationId: newId(),
-      durationMs: 15,
+      durationMs: Date.now() - oauthStarted,
       summary: hydratedAds.formattedCustomerId
         ? `Connected Google Ads Account '${hydratedAds.displayName}' (${hydratedAds.formattedCustomerId})`
         : `Connected Google Ads (${email}) via OAuth Consent Screen`,
@@ -1949,7 +1992,7 @@ export async function completeGoogleOAuthConnection(params: {
     outcome: "success",
     requestId: newId(),
     correlationId: newId(),
-    durationMs: 15,
+    durationMs: Date.now() - oauthStarted,
     summary: hydrated.storeName
       ? `Connected Google Business Profile '${hydrated.storeName}' (${email})`
       : `Connected Google Business Profile (${email}) via OAuth Consent Screen`,
@@ -2012,6 +2055,7 @@ export function selectGoogleSearchConsoleSite(params: {
   connectionId: string;
   siteUrl: string;
 }): { displayName: string; siteUrl: string } {
+  const switchStarted = Date.now();
   const db = controlDb();
   const conn = db
     .select()
@@ -2030,6 +2074,17 @@ export function selectGoogleSearchConsoleSite(params: {
   const nextSite = params.siteUrl.trim();
   if (!nextSite) {
     throw new RslError("RSL-VAL-1001", "Select a valid Search Console website property.");
+  }
+  if (!/^sc-domain:[a-z0-9.-]+\.[a-z]{2,}$/i.test(nextSite)) {
+    let parsedSite: URL;
+    try {
+      parsedSite = new URL(nextSite);
+    } catch {
+      throw new RslError("RSL-VAL-1001", "Search Console property must be a valid https:// URL or sc-domain:example.com.");
+    }
+    if (parsedSite.protocol !== "https:" && parsedSite.protocol !== "http:") {
+      throw new RslError("RSL-VAL-1001", "Search Console property must use https:// or sc-domain:.");
+    }
   }
 
   const meta = parseMetadataSafe(conn.metadataJson);
@@ -2379,7 +2434,7 @@ export async function discoverAndHydrateGoogleBusinessProfile(params: {
   }
 
   // Sandbox tokens bypass external HTTP calls cleanly
-  if (/^(rsl_sandbox_|sandbox_|test_)/i.test(token)) {
+  if (isWorkspaceSandboxIntegrationMode(params.workspaceId, token)) {
     const sandboxTitle = meta.storeName || ws?.name || conn.displayName;
     const sandboxLocId =
       meta.locationId ||
@@ -2442,7 +2497,7 @@ export async function discoverAndHydrateGoogleBusinessProfile(params: {
   let diagnosticFailure: { status: GoogleBusinessDiscoveryStatus; detail: string } | null = null;
   let anyGbpApiSucceeded = false;
 
-  // 1. Account Management API v1 — iterate ALL accounts (PERSONAL, LOCATION_GROUP, ORGANIZATION)
+  // 1. Account Management API v1 - iterate ALL accounts (PERSONAL, LOCATION_GROUP, ORGANIZATION)
   try {
     const accResp = await fetch(
       "https://mybusinessaccountmanagement.googleapis.com/v1/accounts?pageSize=20",
@@ -2478,7 +2533,7 @@ export async function discoverAndHydrateGoogleBusinessProfile(params: {
     // Network timeout on v1 accounts; continue to wildcard locations & v4 fallback
   }
 
-  // 2. Wildcard Business Information API v1 (`accounts/-/locations`) — finds locations across ALL account groups
+  // 2. Wildcard Business Information API v1 (`accounts/-/locations`) - finds locations across ALL account groups
   try {
     const wildcardRes = await fetchGbpV1LocationsForParent(token, "accounts/-");
     if (wildcardRes.ok) {
@@ -2498,7 +2553,7 @@ export async function discoverAndHydrateGoogleBusinessProfile(params: {
     // Continue to per-account discovery
   }
 
-  // 3. Per-Account Business Information API v1 — binds exact `accounts/{id}` + `accountName` & discovers Location Groups
+  // 3. Per-Account Business Information API v1 - binds exact `accounts/{id}` + `accountName` & discovers Location Groups
   // Prioritize non-PERSONAL business/location-group accounts first, then PERSONAL
   const orderedAccounts = [...discoveredAccounts].sort((a, b) => {
     const aIsBiz = a.type && a.type !== "PERSONAL" ? 0 : 1;
@@ -2628,7 +2683,7 @@ export async function discoverAndHydrateGoogleBusinessProfile(params: {
     gbpDiscoveryStatus = "verified_locations";
     gbpDiscoveryDetail =
       availableLocations.length > 1
-        ? `Discovered ${availableLocations.length} Google Business locations under ${emailHint || "your Google account"} — active location: ${selectedLoc.title}.`
+        ? `Discovered ${availableLocations.length} Google Business locations under ${emailHint || "your Google account"} - active location: ${selectedLoc.title}.`
         : `Verified Google Business Profile connected: ${selectedLoc.title}${selectedLoc.storeAddress ? ` (${selectedLoc.storeAddress})` : ""}.`;
   } else if (diagnosticFailure && !anyGbpApiSucceeded) {
     gbpDiscoveryStatus = diagnosticFailure.status;
@@ -2792,6 +2847,7 @@ export function updateGoogleBusinessReviewSyncMetadata(params: {
   syncedAt?: number;
   syncDiagnosticNote?: string;
 }): void {
+  const switchStarted = Date.now();
   const db = controlDb();
   const conn = db
     .select()
@@ -2885,7 +2941,7 @@ export async function uploadFileToWorkspaceGoogleDrive(params: {
   }
 
   const accessToken = await refreshGoogleConnectionIfNeeded(params.workspaceId, conn.id);
-  if (!accessToken || /^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken)) {
+  if (!accessToken || isWorkspaceSandboxIntegrationMode(params.workspaceId, accessToken)) {
     return { uploaded: false };
   }
 
@@ -3049,7 +3105,7 @@ export async function discoverAndHydrateGoogleAdsAccounts(params: {
   }
 
   const now = Date.now();
-  if (/^(rsl_sandbox_|sandbox_|test_)/i.test(token)) {
+  if (isWorkspaceSandboxIntegrationMode(params.workspaceId, token)) {
     const sbCid = normalizeGoogleAdsCustomerId(meta.customerId || conn.externalAccountId) || "1234567890";
     const sbFmt = formatGoogleAdsCustomerId(sbCid);
     const sbName = meta.accountName || `${ws?.name || "Sandbox"} Google Ads`;
@@ -3279,7 +3335,7 @@ export async function discoverAndHydrateGoogleAdsAccounts(params: {
     adsDiscoveryStatus = "verified_customers";
     adsDiscoveryDetail =
       availableAdCustomers.length > 1
-        ? `Discovered ${availableAdCustomers.length} Google Ads accounts — active: ${selected.descriptiveName} (${selected.formattedCustomerId}, ${selected.currencyCode || "INR"}).`
+        ? `Discovered ${availableAdCustomers.length} Google Ads accounts - active: ${selected.descriptiveName} (${selected.formattedCustomerId}, ${selected.currencyCode || "INR"}).`
         : `Connected Google Ads account ${selected.descriptiveName} (${selected.formattedCustomerId}, ${selected.currencyCode || "INR"}).`;
   } else if (apiFailureDetail) {
     adsDiscoveryStatus = "api_error";
@@ -3394,7 +3450,7 @@ export async function resolveWorkspaceGoogleAdsCredentials(params: {
   if (params.billingMode === "rsl_managed_vault") {
     const managedCid = normalizeGoogleAdsCustomerId(adsCfg.managedCustomerId);
     if (managedCid && adsCfg.managedRefreshToken && oauthCfg.isReady) {
-      if (/^(rsl_sandbox_|sandbox_|test_)/i.test(adsCfg.managedRefreshToken)) {
+      if (isWorkspaceSandboxIntegrationMode(params.workspaceId, adsCfg.managedRefreshToken)) {
         return {
           ok: true,
           mode: "sandbox",
@@ -3467,7 +3523,7 @@ export async function resolveWorkspaceGoogleAdsCredentials(params: {
   }
 
   const customerId = normalizeGoogleAdsCustomerId(meta.customerId || conn.externalAccountId);
-  if (/^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken)) {
+  if (isWorkspaceSandboxIntegrationMode(params.workspaceId, accessToken)) {
     return {
       ok: true,
       mode: "sandbox",
@@ -3516,7 +3572,7 @@ export function resolveWorkspaceMetaAdsCredentials(params: {
 
   if (params.billingMode === "rsl_managed_vault" && metaCfg.isManagedAdsReady) {
     const rawAct = metaCfg.managedAdAccountId.replace(/^act_/i, "").trim();
-    const isSb = /^(rsl_sandbox_|sandbox_|test_)/i.test(metaCfg.managedSystemToken);
+    const isSb = isWorkspaceSandboxIntegrationMode(params.workspaceId, metaCfg.managedSystemToken);
     return {
       ok: true,
       mode: isSb ? "sandbox" : "live",
@@ -3590,7 +3646,7 @@ export function resolveWorkspaceMetaAdsCredentials(params: {
   const rawAct = (meta.adAccountId || adsConn.externalAccountId || "")
     .replace(/^act_/i, "")
     .trim();
-  const isSb = /^(rsl_sandbox_|sandbox_|test_)/i.test(token);
+  const isSb = isWorkspaceSandboxIntegrationMode(params.workspaceId, token);
 
   if (!rawAct && !isSb) {
     return {
@@ -3683,7 +3739,7 @@ export function resolveWorkspaceChannelCredentials(params: {
   }
 
   const metadata = parseMetadataSafe(match.metadataJson);
-  const isSb = /^(rsl_sandbox_|sandbox_|test_)/i.test(token);
+  const isSb = isWorkspaceSandboxIntegrationMode(params.workspaceId, token);
 
   return {
     ok: true,
@@ -4180,6 +4236,7 @@ export async function completeMetaOAuthConnection(params: {
 
   const db = controlDb();
   const now = Date.now();
+  const metaOAuthStarted = now;
   const userExpiresAt = now + Math.max(86_400, expiresInSec) * 1000;
   const connectedLabels: string[] = [];
 
@@ -4468,7 +4525,7 @@ export async function completeMetaOAuthConnection(params: {
     outcome: "success",
     requestId: newId(),
     correlationId: newId(),
-    durationMs: 25,
+    durationMs: Date.now() - metaOAuthStarted,
     summary: summaryMessage,
   });
 
@@ -4491,6 +4548,7 @@ export async function selectMetaChannelAsset(params: {
   externalAccountId: string;
   webhookAutoSubscribed: boolean;
 }> {
+  const switchStarted = Date.now();
   const db = controlDb();
   const conn = db
     .select()
@@ -4542,13 +4600,14 @@ export async function selectMetaChannelAsset(params: {
     nextDisplayName = targetPage.pageName;
     nextExternalId = targetPage.pageId;
 
-    if (userToken && !/^(rsl_sandbox_|sandbox_|test_)/i.test(userToken)) {
+    if (userToken && !isWorkspaceSandboxIntegrationMode(params.workspaceId, userToken)) {
       try {
-        const pResp = await fetch(
+        const pResp = await fetchWithRetry(
           `https://graph.facebook.com/${v}/${encodeURIComponent(targetPage.pageId)}?fields=access_token,name`,
           {
             headers: { Authorization: `Bearer ${userToken}` },
-            signal: AbortSignal.timeout(6000),
+            timeoutMs: 6000,
+            maxRetries: 2,
           }
         );
         if (pResp.ok) {
@@ -4587,13 +4646,14 @@ export async function selectMetaChannelAsset(params: {
       : targetIg.name || `Instagram (${targetIg.igUserId})`;
     nextExternalId = targetIg.igUserId;
 
-    if (userToken && !/^(rsl_sandbox_|sandbox_|test_)/i.test(userToken)) {
+    if (userToken && !isWorkspaceSandboxIntegrationMode(params.workspaceId, userToken)) {
       try {
-        const pResp = await fetch(
+        const pResp = await fetchWithRetry(
           `https://graph.facebook.com/${v}/${encodeURIComponent(targetIg.linkedPageId)}?fields=access_token`,
           {
             headers: { Authorization: `Bearer ${userToken}` },
-            signal: AbortSignal.timeout(6000),
+            timeoutMs: 6000,
+            maxRetries: 2,
           }
         );
         if (pResp.ok) {
@@ -4652,7 +4712,7 @@ export async function selectMetaChannelAsset(params: {
     nextDisplayName = targetPhone.verifiedName;
     nextExternalId = targetPhone.phoneNumberId;
 
-    if (userToken && !/^(rsl_sandbox_|sandbox_|test_)/i.test(userToken)) {
+    if (userToken && !isWorkspaceSandboxIntegrationMode(params.workspaceId, userToken)) {
       webhookAutoSubscribed = await autoSubscribeMetaWebhookAsset({
         graphVersion: v,
         assetType: "waba",
@@ -4705,7 +4765,7 @@ export async function selectMetaChannelAsset(params: {
     outcome: "success",
     requestId: newId(),
     correlationId: newId(),
-    durationMs: 12,
+    durationMs: Date.now() - switchStarted,
     summary: `Switched active ${channelKind} asset to ${nextDisplayName} (${nextExternalId})`,
   });
 
@@ -4727,6 +4787,7 @@ export async function refreshMetaChannelAssets(params: {
   discoveredCount: number;
   summaryMessage: string;
 }> {
+  const switchStarted = Date.now();
   const db = controlDb();
   const conn = db
     .select()

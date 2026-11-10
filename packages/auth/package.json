@@ -16,6 +16,7 @@
     "@rsl/logging": "workspace:*",
     "@rsl/rbac": "workspace:*",
     "@rsl/tenancy": "workspace:*",
-    "drizzle-orm": "0.45.4"
+    "drizzle-orm": "0.45.4",
+    "rate-limiter-flexible": "^11.2.3"
   }
 }

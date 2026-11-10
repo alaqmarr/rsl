@@ -3,10 +3,19 @@
 import React, { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { IosSpinner, SectionCard, sileo, StatusPill } from "@rsl/ui";
+import {
+  ConfirmSubmitButton,
+  IosSpinner,
+  PasswordInput,
+  SectionCard,
+  sileo,
+  StatusPill,
+} from "@rsl/ui";
 import { CopyTextButton } from "@/components/client-utils";
 import {
   createNewBusinessJsonAction,
+  deleteWorkspaceAccountAction,
+  exportWorkspaceDpdpDataJsonAction,
   provisionWorkspaceSslJsonAction,
   saveBusinessSettingsJsonAction,
   switchWorkspaceJsonAction,
@@ -39,6 +48,7 @@ export interface BusinessSettingsClientProps {
   };
   gstStates: Array<[string, string]>;
   canEditBusiness: boolean;
+  isOwner?: boolean;
   canProvisionSsl?: boolean;
   canAccessBilling?: boolean;
   canAccessTokens?: boolean;
@@ -69,6 +79,7 @@ export function BusinessSettingsClient({
   workspace,
   gstStates,
   canEditBusiness,
+  isOwner = false,
   canProvisionSsl = false,
   canAccessBilling = true,
   canAccessTokens = true,
@@ -76,6 +87,7 @@ export function BusinessSettingsClient({
   workspaces,
 }: BusinessSettingsClientProps) {
   const router = useRouter();
+  const [isExportingDpdp, startExportDpdp] = useTransition();
   const [selectedState, setSelectedState] = useState(workspace.stateCode || "27");
   const [gstinInput, setGstinInput] = useState(workspace.gstin || "");
   const [cityInput, setCityInput] = useState(workspace.city || "");
@@ -198,7 +210,7 @@ export function BusinessSettingsClient({
           }
           sileo.success({
             title: "IFSC Verified",
-            description: `${json.result.bank || "Bank"} — ${json.result.branch || upper}`,
+            description: `${json.result.bank || "Bank"} - ${json.result.branch || upper}`,
             duration: 3200,
           });
         }
@@ -425,7 +437,7 @@ export function BusinessSettingsClient({
 
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
                     <div className="min-w-0">
-                      <label className="rsl-label">Place of Supply — State / UT *</label>
+                      <label className="rsl-label">Place of Supply - State / UT *</label>
                       <select
                         name="stateCode"
                         value={selectedState}
@@ -435,7 +447,7 @@ export function BusinessSettingsClient({
                       >
                         {gstStates.map(([code, stateName]) => (
                           <option key={code} value={code}>
-                            {code} — {stateName}
+                            {code} - {stateName}
                           </option>
                         ))}
                       </select>
@@ -812,7 +824,7 @@ export function BusinessSettingsClient({
                       <select name="stateCode" defaultValue="27" className="rsl-input">
                         {gstStates.map(([code, stateName]) => (
                           <option key={code} value={code}>
-                            {code} — {stateName}
+                            {code} - {stateName}
                           </option>
                         ))}
                       </select>
@@ -842,6 +854,124 @@ export function BusinessSettingsClient({
           </div>
         </div>
       </div>
+
+      {/* DPDP Act 2023 Data Portability & Right to Erasure (Crypto-Shredding) */}
+      <SectionCard
+        title="DPDP Act 2023 - Data Portability & Right to Erasure"
+        subtitle="Download a complete machine-readable JSON export of your workspace data anytime, or permanently delete and crypto-shred your workspace."
+      >
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 text-xs">
+          <div className="space-y-3 rounded-xl border border-zinc-200/90 bg-zinc-50/75 p-4">
+            <div className="font-bold text-slate-900">
+              1-Click Portable Workspace Data Export (JSON)
+            </div>
+            <p className="leading-relaxed text-zinc-600">
+              Exports your business profile, customer contacts, consent records, message threads,
+              Tally Prime ledgers, vouchers, and templates in structured JSON format under India&apos;s
+              Digital Personal Data Protection (DPDP) Act 2023.
+            </p>
+            {canEditBusiness ? (
+              <button
+                type="button"
+                disabled={isExportingDpdp}
+                onClick={() => {
+                  startExportDpdp(async () => {
+                    const res = await exportWorkspaceDpdpDataJsonAction();
+                    if (res.ok && res.jsonText && res.fileName) {
+                      const blob = new Blob([res.jsonText], { type: "application/json" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = res.fileName;
+                      document.body.appendChild(a);
+                      a.click();
+                      a.remove();
+                      URL.revokeObjectURL(url);
+                      sileo.success({
+                        title: "DPDP Data Export Downloaded",
+                        description: res.message,
+                      });
+                    } else {
+                      sileo.error({
+                        title: "Export Failed",
+                        description: res.message,
+                      });
+                    }
+                  });
+                }}
+                className="rsl-btn-secondary inline-flex items-center gap-2 text-xs"
+              >
+                {isExportingDpdp && <IosSpinner size="xs" />}
+                <span>
+                  {isExportingDpdp ? "Preparing JSON Archive..." : "Download Portable JSON Export"}
+                </span>
+              </button>
+            ) : (
+              <p className="text-zinc-500">
+                Owner or Admin permission is required to export full workspace data.
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-3 rounded-xl border border-rose-200/90 bg-rose-50/50 p-4">
+            <div className="font-bold text-rose-950">
+              Permanent Workspace Erasure &amp; Crypto-Shredding (Owner Only)
+            </div>
+            <p className="leading-relaxed text-rose-900/90">
+              Permanently erases your isolated tenant database, revokes all connected channel OAuth
+              tokens &amp; API keys, invalidates all public Tally bill links, and writes a compliance
+              tombstone. Statutory B2B GST tax invoices remain retained per Indian tax law.
+            </p>
+            {isOwner ? (
+              <form action={deleteWorkspaceAccountAction} className="space-y-3">
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="dpdp-confirm-phrase" className="rsl-label text-rose-950">
+                      Type DELETE MY WORKSPACE *
+                    </label>
+                    <input
+                      id="dpdp-confirm-phrase"
+                      name="confirmPhrase"
+                      required
+                      placeholder="DELETE MY WORKSPACE"
+                      className="rsl-input font-mono text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="dpdp-owner-password" className="rsl-label text-rose-950">
+                      Current Owner Password *
+                    </label>
+                    <PasswordInput
+                      id="dpdp-owner-password"
+                      name="password"
+                      required
+                      autoComplete="current-password"
+                      placeholder="Confirm password"
+                      className="rsl-input text-xs"
+                    />
+                  </div>
+                </div>
+                <input
+                  type="hidden"
+                  name="reason"
+                  value="Owner initiated DPDP Act 2023 right-to-erasure from Business Settings"
+                />
+                <ConfirmSubmitButton
+                  confirmMessage="PERMANENT ACTION: Crypto-shred all workspace secrets, delete your tenant database, and close this business workspace? This cannot be undone."
+                  className="rsl-btn-danger text-xs"
+                >
+                  Permanently Delete &amp; Crypto-Shred Workspace
+                </ConfirmSubmitButton>
+              </form>
+            ) : (
+              <p className="text-rose-900/80">
+                Restricted strictly to the direct Business Owner account (disabled for delegated
+                roles and support sessions).
+              </p>
+            )}
+          </div>
+        </div>
+      </SectionCard>
     </div>
   );
 }

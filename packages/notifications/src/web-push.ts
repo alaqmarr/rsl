@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { and, eq } from "drizzle-orm";
-import { newEntityId, RslError } from "@rsl/core";
+import { fetchWithRetry, newEntityId, RslError } from "@rsl/core";
 import { controlSchema } from "@rsl/database";
 import { controlDb, ensurePlatformVapidConfig } from "@rsl/tenancy";
 
@@ -306,18 +306,21 @@ export async function sendWorkspaceWebPushNotification(
           privateKeyJwkJson: vapid.privateKeyJwkJson,
         });
 
-        const resp = await fetch(sub.endpoint, {
-          method: "POST",
-          headers: {
-            Authorization: authHeader,
-            "Content-Type": "application/octet-stream",
-            "Content-Encoding": "aes128gcm",
-            TTL: "86400",
-            Urgency: "high",
+        const resp = await fetchWithRetry(
+          sub.endpoint,
+          {
+            method: "POST",
+            headers: {
+              Authorization: authHeader,
+              "Content-Type": "application/octet-stream",
+              "Content-Encoding": "aes128gcm",
+              TTL: "86400",
+              Urgency: "high",
+            },
+            body: new Uint8Array(bodyBuf),
           },
-          body: new Uint8Array(bodyBuf),
-          signal: AbortSignal.timeout(6000),
-        });
+          { retries: 1, timeoutMs: 6000 }
+        );
 
         if (resp.status >= 200 && resp.status < 300) {
           delivered++;
@@ -328,8 +331,7 @@ export async function sendWorkspaceWebPushNotification(
             .run();
         } else if (resp.status === 404 || resp.status === 410) {
           controlDb()
-            .update(controlSchema.webPushSubscriptions)
-            .set({ active: false })
+            .delete(controlSchema.webPushSubscriptions)
             .where(eq(controlSchema.webPushSubscriptions.id, sub.id))
             .run();
         }

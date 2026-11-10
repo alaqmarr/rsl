@@ -11,6 +11,8 @@ export const webhookInbox = sqliteTable(
     signatureValid: integer("signature_valid", { mode: "boolean" }).notNull(),
     routedTenantId: text("routed_tenant_id"),
     status: text("status").notNull().default("received"), // received | enqueued | processed | dead | ignored
+    attempts: integer("attempts").notNull().default(0),
+    nextRetryAt: integer("next_retry_at"),
     errorMessage: text("error_message"),
     receivedAt: integer("received_at").notNull(),
     processedAt: integer("processed_at"),
@@ -18,5 +20,6 @@ export const webhookInbox = sqliteTable(
   (t) => [
     uniqueIndex("uq_webhook_provider_event").on(t.provider, t.eventId),
     index("idx_webhook_status_ts").on(t.status, t.receivedAt),
+    index("idx_webhook_retry_due").on(t.status, t.nextRetryAt),
   ]
 );

@@ -20,6 +20,7 @@ import { controlDb } from "@rsl/tenancy";
 import {
   AccessRestrictedState,
   FlashBanner,
+  GuideDrawerButton,
   MetricCard,
   PageHeader,
   SectionCard,
@@ -129,22 +130,43 @@ export default async function AdminServicePricingPage({
         title="Bank Account & UPI QR Receiving Details"
         subtitle="Enter your registered UPI ID (VPA) so GPay, PhonePe, Paytm & BHIM instantly fetch your verified Banking Name on scan, plus your Bank Account + IFSC for IMPS / NEFT & Bank-over-UPI."
         action={
-          upiDiagnostics.bankingNameWarning ? (
-            <StatusPill label="Action Needed for Banking Name" tone="amber" />
-          ) : (
-            <StatusPill label="Verified UPI Ready" tone="emerald" />
-          )
+          <div className="flex flex-wrap items-center gap-2">
+            <GuideDrawerButton
+              drawerId="admin-upi-banking-name-guide"
+              label="Need help? • UPI Banking Name Guide"
+              guide={{
+                eyebrow: "UPI QR & Banking Name Setup",
+                title: "Ensuring GPay, PhonePe & Paytm Fetch Your Verified Banking Name",
+                summary:
+                  "Follow these steps so every client's UPI scanner immediately displays your registered corporate banking name.",
+                steps: [
+                  {
+                    title: "Use a registered bank or merchant VPA handle",
+                    detail:
+                      "Enter a real bank/merchant UPI ID (such as @okhdfcbank, @icici, @ybl, or @paytm) and select 'Standard UPI ID / VPA' routing mode.",
+                  },
+                  {
+                    title: "Why @IFSC.ifsc.npci Bank-over-UPI QRs sometimes hide the name",
+                    detail:
+                      upiDiagnostics.bankingNameWarning ||
+                      "Direct Account+IFSC UPI URIs (@IFSC.ifsc.npci) transfer funds over NPCI rails, but several consumer UPI camera scanners only look up verified Banking Names on VPA handles.",
+                  },
+                  {
+                    title: "Scan the Live ₹1.00 Test QR on the right",
+                    detail:
+                      "After clicking Save UPI & Bank Details, scan the ₹1.00 test QR with GPay or PhonePe to confirm your corporate payee name appears before completing payment.",
+                  },
+                ],
+              }}
+            />
+            {upiDiagnostics.bankingNameWarning ? (
+              <StatusPill label="Action Needed for Banking Name" tone="amber" />
+            ) : (
+              <StatusPill label="Verified UPI Ready" tone="emerald" />
+            )}
+          </div>
         }
       >
-        {upiDiagnostics.bankingNameWarning && (
-          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-xs leading-relaxed text-amber-950">
-            <div className="font-bold text-amber-900">
-              Why UPI apps show &ldquo;Could not fetch banking name&rdquo;:
-            </div>
-            <p className="mt-1">{upiDiagnostics.bankingNameWarning}</p>
-          </div>
-        )}
-
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_250px]">
           <form action={staffSaveBillingSettingsAction} className="space-y-4 text-[13px]">
             <input type="hidden" name="returnTo" value="/pricing" />
@@ -162,7 +184,7 @@ export default async function AdminServicePricingPage({
                   className="adm-input"
                 >
                   <option value="upi_id">
-                    Standard UPI ID / VPA (Recommended — Universal Banking Name)
+                    Standard UPI ID / VPA (Recommended - Universal Banking Name)
                   </option>
                   <option value="bank_account">
                     Direct Bank Account + IFSC over UPI (@IFSC.ifsc.npci)
@@ -197,7 +219,7 @@ export default async function AdminServicePricingPage({
                   name="bankName"
                   required
                   defaultValue={billingSettings.bankName}
-                  placeholder="HDFC Bank — Corporate"
+                  placeholder="HDFC Bank - Corporate"
                   className="adm-input"
                 />
               </div>
@@ -260,9 +282,11 @@ export default async function AdminServicePricingPage({
               </div>
             </div>
 
-            <div className="flex flex-col items-stretch justify-between gap-3 border-t border-zinc-100 pt-3.5 sm:flex-row sm:items-center">
+            <div className="flex flex-col items-stretch justify-between gap-3 border-t border-zinc-200/70 pt-3.5 sm:flex-row sm:items-center">
               <span className="text-xs text-zinc-500">
-                Tip: Use a real bank/merchant UPI ID (such as <code className="font-mono text-slate-800">@okhdfcbank</code>, <code className="font-mono text-slate-800">@icici</code>, <code className="font-mono text-slate-800">@ybl</code>, <code className="font-mono text-slate-800">@paytm</code>) so every UPI scanner displays your verified Banking Name.
+                {upiDiagnostics.bankingNameWarning
+                  ? "Action recommended: add a VPA handle above or open 'Need help?' for banking name details."
+                  : "Verified VPA & Bank receiving details active across all client checkout modals."}
               </span>
               <SubmitButton className="adm-btn-primary shrink-0" pendingText="Saving Details...">
                 Save UPI &amp; Bank Details
@@ -271,7 +295,7 @@ export default async function AdminServicePricingPage({
           </form>
 
           {/* Live Scannable ₹1.00 Test QR Preview */}
-          <div className="flex flex-col items-center justify-between rounded-2xl border border-zinc-200/90 bg-[#F8F9FB] p-4 text-center">
+          <div className="flex flex-col items-center justify-between rounded-2xl border border-zinc-200/90 bg-zinc-50 p-4 text-center">
             <div className="w-full">
               <div className="text-[11px] font-bold tracking-wider text-zinc-500 uppercase">
                 Live ₹1.00 Test Scan

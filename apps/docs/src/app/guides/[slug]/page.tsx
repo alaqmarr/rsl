@@ -45,26 +45,25 @@ export default async function GuideDetailPage({
     <div className="grid gap-8 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[260px_minmax(0,1fr)_220px] lg:items-start">
       {/* Left Categorized Guide Sidebar */}
       <aside className="space-y-4 lg:sticky lg:top-20">
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-2xs">
-          <div className="space-y-4">
+        <div className="rsl-frost-card rsl-sidebar-scroll max-h-[calc(100vh-7rem)] overflow-y-auto rounded-2xl p-4">
+          <div className="space-y-3">
             {groupedSections.map((group) => (
-              <div key={group.section}>
-                <p className="px-2.5 text-[10.5px] font-bold tracking-wider text-zinc-500 uppercase">
-                  {group.section}
-                </p>
-                <ul className="mt-1.5 space-y-0.5 text-[13px]">
+              <div key={group.section} className="rsl-nav-section">
+                <div className="rsl-nav-section-btn cursor-default">
+                  <span className="truncate">{group.section}</span>
+                  <span className="rsl-nav-section-pill">{group.items.length}</span>
+                </div>
+                <ul className="rsl-nav-group-rail space-y-0.5 text-[13px]">
                   {group.items.map((a) => (
                     <li key={a.slug}>
                       <ActionLink
                         href={`/guides/${a.slug}`}
                         variant="card"
-                        className={`block rounded-xl px-3 py-1.5 transition ${
-                          a.slug === article.slug
-                            ? "bg-emerald-50/90 font-semibold text-emerald-800 ring-1 ring-emerald-200/80"
-                            : "font-medium text-zinc-600 hover:bg-zinc-50 hover:text-slate-900"
+                        className={`rsl-nav-item ${
+                          a.slug === article.slug ? "rsl-nav-item-active" : ""
                         }`}
                       >
-                        {a.title}
+                        <span className="truncate">{a.title}</span>
                       </ActionLink>
                     </li>
                   ))}
@@ -121,7 +120,7 @@ export default async function GuideDetailPage({
         <div className="rounded-2xl border border-zinc-200/90 bg-white p-5 shadow-2xs sm:p-6">
           {sp.thanks === "1" ? (
             <p className="text-[13px] font-semibold text-emerald-700">
-              Thank you — your feedback was saved to help us keep this guide clear and practical.
+              Thank you - your feedback was saved to help us keep this guide clear and practical.
             </p>
           ) : (
             <form action={submitFeedbackAction} className="space-y-3.5">

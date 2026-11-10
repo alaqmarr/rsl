@@ -109,6 +109,23 @@ export function AdminSetupForm({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const passwordsMismatch = confirmPassword.length > 0 && password !== confirmPassword;
+
+  useEffect(() => {
+    // Scrub ?key= from browser address bar & history immediately after reading into state
+    if (typeof window !== "undefined" && window.location.search.includes("key=")) {
+      const sp = new URLSearchParams(window.location.search);
+      if (sp.has("key")) {
+        sp.delete("key");
+        const qs = sp.toString();
+        window.history.replaceState(
+          null,
+          "",
+          `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`
+        );
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (state.error) {
@@ -146,13 +163,13 @@ export function AdminSetupForm({
             className="adm-input min-h-10 font-mono text-xs"
           />
           {prefilledKey && (
-            <p className="mt-1 text-[11px] font-medium text-emerald-700">
-              Setup key pre-filled from your one-click server setup link.
+            <p className="mt-1 text-xs font-medium text-emerald-700">
+              Setup key pre-filled and scrubbed from your browser address bar.
             </p>
           )}
         </div>
       ) : (
-        <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 text-[11px] text-zinc-600">
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 text-xs text-zinc-600">
           Local development mode detected (<code className="font-mono">SETUP_BOOTSTRAP_TOKEN</code>{" "}
           not set). In production, <code className="font-mono">setup.sh</code> enforces a
           cryptographic one-time setup key automatically.
@@ -206,6 +223,7 @@ export function AdminSetupForm({
             required
             minLength={8}
             autoComplete="new-password"
+            showStrengthMeter
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Min 8 characters"
@@ -225,17 +243,23 @@ export function AdminSetupForm({
             required
             minLength={8}
             autoComplete="new-password"
+            aria-invalid={passwordsMismatch}
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
             placeholder="Re-enter password"
             className="adm-input min-h-10"
           />
+          {passwordsMismatch ? (
+            <p role="alert" className="mt-1 text-xs font-medium text-rose-700">
+              Passwords do not match yet.
+            </p>
+          ) : null}
         </div>
       </div>
 
       <button
         type="submit"
-        disabled={isPending}
+        disabled={isPending || passwordsMismatch}
         className="adm-btn-primary min-h-11 w-full py-2.5 text-sm"
       >
         {isPending ? (

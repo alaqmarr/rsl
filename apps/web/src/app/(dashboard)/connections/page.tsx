@@ -14,8 +14,10 @@ import {
   getPublicGoogleAdsStatus,
   getPublicGoogleOAuthStatus,
   getPublicMetaOAuthStatus,
+  getWorkspaceCloudflareStatus,
 } from "@rsl/tenancy";
 import { AccessRestrictedState, PageHeader } from "@rsl/ui";
+import { CloudflareOneClickConnectCard } from "@/components/cloudflare-one-click-card";
 import { ConnectionsHub } from "@/components/connections-hub";
 import { FlashBanner } from "@/components/flash-banner";
 import { SettingsNav } from "@/components/settings-nav";
@@ -73,6 +75,7 @@ export default async function ConnectedAccountsPage({
   const googleOAuth = getPublicGoogleOAuthStatus();
   const metaOAuth = getPublicMetaOAuthStatus();
   const googleAdsStatus = getPublicGoogleAdsStatus();
+  const cloudflareStatus = getWorkspaceCloudflareStatus(session.workspace.id);
   const canManage = canRolePerform(session.roleSlug, "connections:manage", session.workspace.id);
   const allowManualCredentials = Boolean(data.allowManualCredentials);
 
@@ -118,6 +121,8 @@ export default async function ConnectedAccountsPage({
       <SettingsNav />
 
       <FlashBanner notice={sp.notice} error={sp.error} />
+
+      <CloudflareOneClickConnectCard initialStatus={cloudflareStatus} canManage={canManage} />
 
       <ConnectionsHub
         initialKind={initialKind}

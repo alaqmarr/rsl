@@ -5,7 +5,7 @@ import { getAllLegalDocuments, getLegalEntityContext } from "@/lib/legal-documen
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Legal, Privacy & Compliance Center — RapidShift Labs",
+  title: "Legal, Privacy & Compliance Center - RapidShift Labs",
   description:
     "Public Privacy Policy, Terms & Conditions, GST Payment Terms, Refund & Cancellation Policy, Service Delivery, Acceptable Use, Cookie Policy, and Data Deletion disclosures.",
   alternates: { canonical: "/legal" },

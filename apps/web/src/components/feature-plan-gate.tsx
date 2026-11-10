@@ -61,8 +61,8 @@ export async function FeaturePlanGate({
           <StatusPill
             label={
               anyPending
-                ? "Requested — Awaiting Payment Verification"
-                : "Locked — Requires Active Plan"
+                ? "Requested - Awaiting Payment Verification"
+                : "Locked - Requires Active Plan"
             }
             tone={anyPending ? "amber" : "stone"}
           />
@@ -79,7 +79,7 @@ export async function FeaturePlanGate({
       <FlashBanner notice={notice} error={error} />
 
       {/* Crisp Activation Summary + Live UPI & Bank Details */}
-      <div className="rounded-2xl border border-zinc-200/90 bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.03)] sm:p-6">
+      <div className="rsl-frost-card rounded-2xl p-5 sm:p-6">
         <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -89,7 +89,7 @@ export async function FeaturePlanGate({
               <StatusPill label="Monthly • Quarterly • Yearly" tone="emerald" />
             </div>
             <p className="mt-1.5 max-w-2xl text-[13px] leading-relaxed text-zinc-600">
-              Click <strong>Request Activation</strong> on an individual tool or save more with a bundled package below. Scan the live UPI QR code with exact GST amount &amp; transaction note pre-filled — our billing desk unlocks your tools and issues an official 18% GST tax invoice.
+              Click <strong>Request Activation</strong> on an individual tool or save more with a bundled package below. Scan the live UPI QR code with exact GST amount &amp; transaction note pre-filled - our billing desk unlocks your tools and issues an official 18% GST tax invoice.
             </p>
           </div>
 
@@ -147,7 +147,7 @@ export async function FeaturePlanGate({
           return (
             <div
               key={plan.key}
-              className="flex flex-col justify-between overflow-hidden rounded-2xl border border-zinc-200/90 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.03)]"
+              className="rsl-frost-card flex flex-col justify-between overflow-hidden rounded-2xl"
             >
               <div>
                 <div className="flex flex-wrap items-start justify-between gap-4 border-b border-zinc-100 bg-zinc-50/60 px-6 py-5">
@@ -282,7 +282,7 @@ export async function FeaturePlanGate({
 
       {/* Matching Dependency Bundles & Full Software Package */}
       {matchingBundles.length > 0 && (
-        <div className="space-y-4 rounded-2xl border border-zinc-200/90 bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.03)] sm:p-6">
+        <div className="rsl-frost-card space-y-4 rounded-2xl p-5 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <div className="flex flex-wrap items-center gap-2">
@@ -292,7 +292,7 @@ export async function FeaturePlanGate({
                 <StatusPill label="Dependency & Full-Suite Bundles" tone="emerald" />
               </div>
               <p className="mt-1 text-xs text-zinc-600">
-                Unlock dependent tools together — or get the entire 15-tool RSL Marketing platform on one invoice.
+                Unlock dependent tools together - or get the entire 15-tool RSL Marketing platform on one invoice.
               </p>
             </div>
           </div>

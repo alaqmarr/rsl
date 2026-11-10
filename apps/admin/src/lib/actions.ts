@@ -1,6 +1,5 @@
 "use server";
 
-import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { cookies } from "next/headers";
@@ -8,13 +7,16 @@ import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import {
   ADMIN_SESSION_COOKIE,
-  bootstrapFirstPlatformStaff,
+  assertPlatformStaffStepUp,
+  beginPlatformStaffTotpEnrollment,
+  bootstrapFirstPlatformStaffAsync,
   canStaffPerform,
+  confirmPlatformStaffTotpEnrollment,
   countPlatformStaff,
   createImpersonationSession,
   formatStaffRoleLabel,
-  registerUserWithWorkspace,
-  signInPlatformStaff,
+  registerUserWithWorkspaceAsync,
+  signInPlatformStaffAsync,
   signOutPlatformStaff,
   STAFF_PERMISSION_CATALOG,
   staffCreatePlatformMember,
@@ -22,6 +24,8 @@ import {
   staffUpdateClientWorkspace,
   staffUpdatePlatformMember,
   staffVerifyClientUserEmail,
+  verifyPlatformStaffSessionMfa,
+  verifyPlatformStaffStepUp,
   type StaffPermission,
 } from "@rsl/auth";
 import {
@@ -97,7 +101,13 @@ import {
   staffUpdateWhatsAppTemplateStatus,
   TALLY_TEMPLATE_VARIABLE_FIELDS,
 } from "@rsl/whatsapp";
-import { clearStaffCookie, requireStaffSession, setStaffCookie } from "./session";
+import {
+  clearStaffCookie,
+  getPendingMfaStaffSession,
+  requireStaffSession,
+  setSignedAdminFlashToast,
+  setStaffCookie,
+} from "./session";
 
 function safeReturnTo(raw: FormDataEntryValue | null, fallback = "/"): string {
   const s = String(raw || "").trim();
@@ -110,20 +120,28 @@ async function flashAdminRedirect(
   kind: "notice" | "error",
   message: string
 ): Promise<never> {
-  const payload = {
-    id: `adm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    type: kind === "error" ? ("error" as const) : ("success" as const),
-    message,
-  };
-  const encoded = `b64_${Buffer.from(JSON.stringify(payload), "utf8").toString("base64url")}`;
-  const jar = await cookies();
-  jar.set("rsl_admin_toast", encoded, {
-    path: "/",
-    maxAge: 30,
-    httpOnly: false,
-    sameSite: "lax",
-  });
+  await setSignedAdminFlashToast(kind === "error" ? "error" : "success", message);
   redirect(targetPath);
+}
+
+async function requireStaffStepUpOrRedirect(formData: FormData, returnTo: string): Promise<void> {
+  const sess = await requireStaffSession();
+  const stepUpCode = String(formData.get("stepUpCode") || "").trim() || undefined;
+  const stepUpPassword = String(formData.get("stepUpPassword") || "") || undefined;
+  try {
+    assertPlatformStaffStepUp(sess, {
+      totpOrBackupCode: stepUpCode,
+      currentPassword: stepUpPassword,
+    });
+  } catch (err) {
+    await setSignedAdminFlashToast(
+      "warning",
+      err instanceof Error
+        ? err.message
+        : "Confirm your MFA authenticator code to authorize this privileged action."
+    );
+    redirect(`/mfa?stepUp=1&returnTo=${encodeURIComponent(returnTo)}`);
+  }
 }
 
 async function requireStaffWithPermission(
@@ -177,8 +195,10 @@ export async function staffLoginFormStateAction(
     };
   }
 
+  let mfaRequired = false;
   try {
-    const out = signInPlatformStaff({ email, password });
+    const out = await signInPlatformStaffAsync({ email, password });
+    mfaRequired = out.mfaRequired;
     await setStaffCookie(out.rawToken);
   } catch (err) {
     return {
@@ -187,7 +207,23 @@ export async function staffLoginFormStateAction(
     };
   }
 
-  redirect("/");
+  redirect(mfaRequired ? "/mfa" : "/");
+}
+
+function resolveConfiguredSetupToken(): string {
+  const env = getEnv();
+  const fromEnv = (env.SETUP_BOOTSTRAP_TOKEN || "").trim();
+  if (fromEnv) return fromEnv;
+  try {
+    const envFile = path.join(env.REPO_ROOT, ".env");
+    if (fs.existsSync(envFile)) {
+      const m = fs.readFileSync(envFile, "utf8").match(/^SETUP_BOOTSTRAP_TOKEN=(.+)$/m);
+      if (m?.[1]) return m[1].trim().replace(/^['"]|['"]$/g, "");
+    }
+  } catch {
+    // Ignore disk fallback error
+  }
+  return "";
 }
 
 export async function completeSetupFormStateAction(
@@ -199,7 +235,7 @@ export async function completeSetupFormStateAction(
   const email = String(formData.get("email") || "").trim().toLowerCase();
   const password = String(formData.get("password") || "");
   const confirmPassword = String(formData.get("confirmPassword") || "");
-  const fields = { setupKey, name, email };
+  const fields = { name, email };
 
   if (countPlatformStaff() > 0) {
     return {
@@ -208,36 +244,9 @@ export async function completeSetupFormStateAction(
     };
   }
 
-  const env = getEnv();
-  let expectedToken = (env.SETUP_BOOTSTRAP_TOKEN || "").trim();
-  if (!expectedToken) {
-    try {
-      const envFile = path.join(env.REPO_ROOT, ".env");
-      if (fs.existsSync(envFile)) {
-        const m = fs.readFileSync(envFile, "utf8").match(/^SETUP_BOOTSTRAP_TOKEN=(.+)$/m);
-        if (m?.[1]) expectedToken = m[1].trim().replace(/^['"]|['"]$/g, "");
-      }
-    } catch {
-      // Ignore disk fallback error
-    }
-  }
-
-  if (expectedToken.length > 0) {
-    const a = Buffer.from(setupKey, "utf8");
-    const b = Buffer.from(expectedToken, "utf8");
-    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-      return {
-        error:
-          "Invalid Server Setup Key. Copy the SETUP_BOOTSTRAP_TOKEN printed by setup.sh (or in your server .env).",
-        fields,
-      };
-    }
-  } else if (env.NODE_ENV === "production") {
-    return {
-      error:
-        "SETUP_BOOTSTRAP_TOKEN is not configured in your server .env. Run bash setup.sh on the server first.",
-      fields,
-    };
+  if (!process.env.SETUP_BOOTSTRAP_TOKEN) {
+    const diskToken = resolveConfiguredSetupToken();
+    if (diskToken) process.env.SETUP_BOOTSTRAP_TOKEN = diskToken;
   }
 
   if (name.length < 2) {
@@ -254,7 +263,12 @@ export async function completeSetupFormStateAction(
   }
 
   try {
-    const out = bootstrapFirstPlatformStaff({ name, email, password });
+    const out = await bootstrapFirstPlatformStaffAsync({
+      name,
+      email,
+      password,
+      setupBootstrapToken: setupKey,
+    });
     await setStaffCookie(out.rawToken);
   } catch (err) {
     return {
@@ -282,8 +296,10 @@ export async function staffBootstrapOrLoginAction(formData: FormData) {
     );
   }
 
+  let mfaRequired = false;
   try {
-    const out = signInPlatformStaff({ email, password });
+    const out = await signInPlatformStaffAsync({ email, password });
+    mfaRequired = out.mfaRequired;
     await setStaffCookie(out.rawToken);
   } catch (err) {
     return flashAdminRedirect(
@@ -292,7 +308,7 @@ export async function staffBootstrapOrLoginAction(formData: FormData) {
       err instanceof Error ? err.message : "Login failed"
     );
   }
-  redirect("/");
+  redirect(mfaRequired ? "/mfa" : "/");
 }
 
 export async function completeInitialPlatformSetupAction(formData: FormData) {
@@ -304,39 +320,11 @@ export async function completeInitialPlatformSetupAction(formData: FormData) {
     );
   }
 
-  const env = getEnv();
-  let expectedToken = (env.SETUP_BOOTSTRAP_TOKEN || "").trim();
-  if (!expectedToken) {
-    try {
-      const envFile = path.join(env.REPO_ROOT, ".env");
-      if (fs.existsSync(envFile)) {
-        const m = fs.readFileSync(envFile, "utf8").match(/^SETUP_BOOTSTRAP_TOKEN=(.+)$/m);
-        if (m?.[1]) expectedToken = m[1].trim().replace(/^['"]|['"]$/g, "");
-      }
-    } catch {
-      // Ignore disk fallback error
-    }
+  if (!process.env.SETUP_BOOTSTRAP_TOKEN) {
+    const diskToken = resolveConfiguredSetupToken();
+    if (diskToken) process.env.SETUP_BOOTSTRAP_TOKEN = diskToken;
   }
   const providedToken = String(formData.get("setupKey") || "").trim();
-
-  if (expectedToken.length > 0) {
-    const a = Buffer.from(providedToken, "utf8");
-    const b = Buffer.from(expectedToken, "utf8");
-    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-      return flashAdminRedirect(
-        "/setup",
-        "error",
-        "Invalid Server Setup Key. Copy the SETUP_BOOTSTRAP_TOKEN printed by setup.sh (or in your server .env)."
-      );
-    }
-  } else if (env.NODE_ENV === "production") {
-    return flashAdminRedirect(
-      "/setup",
-      "error",
-      "SETUP_BOOTSTRAP_TOKEN is not configured in your server .env. Run bash setup.sh on the server first."
-    );
-  }
-
   const name = String(formData.get("name") || "").trim();
   const email = String(formData.get("email") || "").trim().toLowerCase();
   const password = String(formData.get("password") || "");
@@ -356,7 +344,12 @@ export async function completeInitialPlatformSetupAction(formData: FormData) {
   }
 
   try {
-    const out = bootstrapFirstPlatformStaff({ name, email, password });
+    const out = await bootstrapFirstPlatformStaffAsync({
+      name,
+      email,
+      password,
+      setupBootstrapToken: providedToken,
+    });
     await setStaffCookie(out.rawToken);
   } catch (err) {
     return flashAdminRedirect(
@@ -371,6 +364,132 @@ export async function completeInitialPlatformSetupAction(formData: FormData) {
     "notice",
     "Primary Super Admin created and bootstrap locked! Your platform is ready."
   );
+}
+
+export interface AdminMfaFormState {
+  error: string | null;
+  notice: string | null;
+  enrollmentSecret?: string | null;
+  enrollmentUri?: string | null;
+  enrollmentQrDataUri?: string | null;
+  enrollmentAccountEmail?: string | null;
+  enrollmentIssuer?: string | null;
+  backupCodes?: string[] | null;
+}
+
+export async function staffBeginTotpEnrollmentAction(
+  _prevState: AdminMfaFormState
+): Promise<AdminMfaFormState> {
+  const pending = await getPendingMfaStaffSession();
+  if (!pending) {
+    return { error: "Staff session expired. Sign in again.", notice: null };
+  }
+  try {
+    const enrolled = beginPlatformStaffTotpEnrollment(pending.staff.id);
+    return {
+      error: null,
+      notice: "Scan the QR code (or enter the Base32 key) in your authenticator app, then confirm a 6-digit code.",
+      enrollmentSecret: enrolled.secret,
+      enrollmentUri: enrolled.otpauthUri,
+      enrollmentQrDataUri: enrolled.qrCodeDataUri,
+      enrollmentAccountEmail: enrolled.accountEmail,
+      enrollmentIssuer: enrolled.issuer,
+      backupCodes: null,
+    };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Failed to start authenticator enrollment.",
+      notice: null,
+    };
+  }
+}
+
+export async function staffConfirmTotpEnrollmentAction(
+  prevState: AdminMfaFormState,
+  formData: FormData
+): Promise<AdminMfaFormState> {
+  const pending = await getPendingMfaStaffSession();
+  if (!pending) {
+    return { error: "Staff session expired. Sign in again.", notice: null };
+  }
+  const code = String(formData.get("code") || "").trim();
+  try {
+    const out = confirmPlatformStaffTotpEnrollment({
+      staffId: pending.staff.id,
+      code,
+      sessionId: pending.sessionId,
+    });
+    return {
+      error: null,
+      notice:
+        "Authenticator verified! Save these 8 one-time recovery codes in a password vault now - they will not be shown again.",
+      enrollmentSecret: null,
+      enrollmentUri: null,
+      enrollmentQrDataUri: null,
+      enrollmentAccountEmail: null,
+      enrollmentIssuer: null,
+      backupCodes: out.backupCodes,
+    };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Invalid 6-digit authenticator code.",
+      notice: null,
+      enrollmentSecret: prevState.enrollmentSecret ?? null,
+      enrollmentUri: prevState.enrollmentUri ?? null,
+      enrollmentQrDataUri: prevState.enrollmentQrDataUri ?? null,
+      enrollmentAccountEmail: prevState.enrollmentAccountEmail ?? null,
+      enrollmentIssuer: prevState.enrollmentIssuer ?? null,
+      backupCodes: null,
+    };
+  }
+}
+
+export async function staffVerifyMfaSessionAction(
+  _prevState: AdminMfaFormState,
+  formData: FormData
+): Promise<AdminMfaFormState> {
+  const jar = await cookies();
+  const rawToken = jar.get(ADMIN_SESSION_COOKIE)?.value || "";
+  const code = String(formData.get("code") || "").trim();
+  const returnTo = safeReturnTo(formData.get("returnTo"), "/");
+  try {
+    verifyPlatformStaffSessionMfa({ rawToken, code });
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Invalid MFA code.",
+      notice: null,
+    };
+  }
+  await setSignedAdminFlashToast("success", "Multi-factor verification succeeded.");
+  redirect(returnTo);
+}
+
+export async function staffVerifyStepUpAction(
+  _prevState: AdminMfaFormState,
+  formData: FormData
+): Promise<AdminMfaFormState> {
+  const sess = await requireStaffSession();
+  const code = String(formData.get("code") || "").trim() || undefined;
+  const password = String(formData.get("password") || "") || undefined;
+  const returnTo = safeReturnTo(formData.get("returnTo"), "/");
+  try {
+    verifyPlatformStaffStepUp({
+      sessionId: sess.sessionId,
+      staffId: sess.staff.id,
+      totpOrBackupCode: code,
+      currentPassword: password,
+    });
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Step-up verification failed.",
+      notice: null,
+    };
+  }
+  await setSignedAdminFlashToast(
+    "success",
+    "Privileged step-up re-authentication active for the next 15 minutes."
+  );
+  redirect(returnTo);
 }
 
 export async function staffLogoutAction() {
@@ -469,7 +588,7 @@ export async function staffRecordPlanPaymentAction(formData: FormData) {
   return flashAdminRedirect(
     returnTo,
     "notice",
-    `Payment verified — Unlocked '${out.serviceName}' (${BILLING_CYCLE_META[out.billingCycle].label}) & issued GST Invoice ${out.invoiceNumber}`
+    `Payment verified - Unlocked '${out.serviceName}' (${BILLING_CYCLE_META[out.billingCycle].label}) & issued GST Invoice ${out.invoiceNumber}`
   );
 }
 
@@ -520,7 +639,7 @@ export async function staffBulkUnlockBundleAction(formData: FormData) {
       action: "plan.bundle_activated",
       targetTenantId: workspaceId,
       ticketReference: paymentReference,
-      summary: `Unlocked ${out.bundleLabel} (${out.unlockedCount} plans, ${BILLING_CYCLE_META[billingCycle].label}) for ${workspaceId} — GST Invoice ${out.invoiceNumber}`,
+      summary: `Unlocked ${out.bundleLabel} (${out.unlockedCount} plans, ${BILLING_CYCLE_META[billingCycle].label}) for ${workspaceId} - GST Invoice ${out.invoiceNumber}`,
       correlationId: newEntityId("req", workspaceId),
     })
     .run();
@@ -528,7 +647,7 @@ export async function staffBulkUnlockBundleAction(formData: FormData) {
   return flashAdminRedirect(
     returnTo,
     "notice",
-    `Bundle unlocked — ${out.bundleLabel} (${out.unlockedCount} tools, ${BILLING_CYCLE_META[billingCycle].label}) & GST Invoice ${out.invoiceNumber}`
+    `Bundle unlocked - ${out.bundleLabel} (${out.unlockedCount} tools, ${BILLING_CYCLE_META[billingCycle].label}) & GST Invoice ${out.invoiceNumber}`
   );
 }
 
@@ -844,7 +963,7 @@ export async function staffGrantFreeAllToolsAction(formData: FormData) {
   return flashAdminRedirect(
     returnTo,
     "notice",
-    `Free access activated — All 15 tools unlocked until ${untilLabel} (${out.remainingDays} days).`
+    `Free access activated - All 15 tools unlocked until ${untilLabel} (${out.remainingDays} days).`
   );
 }
 
@@ -871,7 +990,7 @@ export async function staffRevokeFreeAllToolsAction(formData: FormData) {
   return flashAdminRedirect(
     returnTo,
     "notice",
-    "Ended complimentary free access — standard paid plan locks now apply."
+    "Ended complimentary free access - standard paid plan locks now apply."
   );
 }
 
@@ -963,7 +1082,7 @@ export async function staffRunBillingReminderSweepAction(formData: FormData) {
       ts: Date.now(),
       staffId: staff.id,
       action: "billing.reminder_sweep",
-      summary: `Ran renewal reminder sweep across ${res.checkedWorkspaces} client(s) — dispatched ${res.sentCount} reminder(s)`,
+      summary: `Ran renewal reminder sweep across ${res.checkedWorkspaces} client(s) - dispatched ${res.sentCount} reminder(s)`,
       correlationId: newEntityId("req", "rsl"),
     })
     .run();
@@ -972,8 +1091,8 @@ export async function staffRunBillingReminderSweepAction(formData: FormData) {
     returnTo,
     "notice",
     res.sentCount > 0
-      ? `Renewal sweep completed — Sent ${res.sentCount} upcoming/due reminder(s) across ${res.checkedWorkspaces} client(s).`
-      : `Checked ${res.checkedWorkspaces} client account(s) — all renewals are up to date.`
+      ? `Renewal sweep completed - Sent ${res.sentCount} upcoming/due reminder(s) across ${res.checkedWorkspaces} client(s).`
+      : `Checked ${res.checkedWorkspaces} client account(s) - all renewals are up to date.`
   );
 }
 
@@ -1136,7 +1255,7 @@ export async function staffCreateNewClientAction(formData: FormData) {
 
   let created: { workspaceId: string };
   try {
-    created = registerUserWithWorkspace({
+    created = await registerUserWithWorkspaceAsync({
       name: ownerName,
       email: ownerEmail,
       password,
@@ -1281,6 +1400,7 @@ export async function staffResetClientPasswordAction(formData: FormData) {
   const newPassword = String(formData.get("newPassword") || "").trim();
   const returnTo = safeReturnTo(formData.get("returnTo"), `/clients/${workspaceId}`);
   const staff = await requireStaffWithPermission("staff:clients.manage", returnTo);
+  await requireStaffStepUpOrRedirect(formData, returnTo);
 
   let res: { email: string };
   try {
@@ -1379,7 +1499,7 @@ export async function staffCreateCustomInvoiceAction(formData: FormData) {
       action: "invoice.issued",
       targetTenantId: workspaceId,
       ticketReference: paymentReference || inv.invoiceNumber,
-      summary: `Issued GST Invoice ${inv.invoiceNumber} (${formatInr(inv.totalPaise)} incl. GST, status: ${status}) — ${description}`,
+      summary: `Issued GST Invoice ${inv.invoiceNumber} (${formatInr(inv.totalPaise)} incl. GST, status: ${status}) - ${description}`,
       correlationId: newEntityId("req", workspaceId),
     })
     .run();
@@ -1563,7 +1683,7 @@ export async function staffSaveBillingSettingsAction(formData: FormData) {
   return flashAdminRedirect(
     returnTo,
     "notice",
-    `Saved UPI & Bank receiving details (${updated.upiQrMode === "upi_id" ? `VPA: ${updated.upiId}` : `Bank A/C: ${updated.accountNumber}`}) — scan the ₹1 Test QR below to verify your Banking Name.`
+    `Saved UPI & Bank receiving details (${updated.upiQrMode === "upi_id" ? `VPA: ${updated.upiId}` : `Bank A/C: ${updated.accountNumber}`}) - scan the ₹1 Test QR below to verify your Banking Name.`
   );
 }
 
@@ -1694,7 +1814,7 @@ export async function staffSeedStarterTemplatesAction(formData: FormData) {
       name: "tally_payment_receipt_thankyou",
       category: "utility",
       headerType: "TEXT",
-      headerText: "Payment Received — Thank You",
+      headerText: "Payment Received - Thank You",
       bodyText:
         "Namaste {{1}}, we have received your payment of {{3}} against receipt #{{2}}. Remaining balance: {{4}}.",
       footerText: "Reply STOP to opt out",
@@ -1822,6 +1942,7 @@ export async function staffCreateStaffMemberAction(formData: FormData) {
 
 export async function staffUpdateStaffMemberAction(formData: FormData) {
   const staff = await requireStaffWithPermission("staff:team.manage", "/staff");
+  await requireStaffStepUpOrRedirect(formData, "/staff");
   const targetStaffId = String(formData.get("targetStaffId") || "").trim();
   const roleRaw = String(formData.get("staffRole") || "").trim();
   const activeRaw = formData.get("active");
@@ -1932,6 +2053,7 @@ export async function staffStartImpersonationAction(formData: FormData) {
   const reason = String(formData.get("reason") || "").trim();
   const returnTo = safeReturnTo(formData.get("returnTo"), "/");
   const staff = await requireStaffWithPermission("staff:impersonate", returnTo);
+  await requireStaffStepUpOrRedirect(formData, returnTo);
 
   let tokenOut: { handoffCode: string };
   try {
@@ -2231,6 +2353,7 @@ function logStaffCredentialAction(staffId: string, action: string, summary: stri
 
 export async function staffSaveGoogleOAuthCredentialsAction(formData: FormData) {
   const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  await requireStaffStepUpOrRedirect(formData, "/credentials");
 
   let oauthJsonRaw = String(formData.get("oauthJsonRaw") || "").trim();
   const uploadedJson = formData.get("oauthJsonFile");
@@ -2281,6 +2404,7 @@ export async function staffSaveGoogleOAuthCredentialsAction(formData: FormData) 
 
 export async function staffSaveSmtpCredentialsAction(formData: FormData) {
   const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  await requireStaffStepUpOrRedirect(formData, "/credentials");
 
   try {
     const port = Number(formData.get("port") || 465);
@@ -2368,6 +2492,7 @@ export async function staffSendTestSmtpEmailAction(formData: FormData) {
 
 export async function staffSaveManagedR2CredentialsAction(formData: FormData) {
   const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  await requireStaffStepUpOrRedirect(formData, "/credentials");
 
   try {
     const saved = savePlatformManagedR2Config({
@@ -2404,6 +2529,7 @@ export async function staffSaveManagedR2CredentialsAction(formData: FormData) {
 
 export async function staffSaveMetaAppCredentialsAction(formData: FormData) {
   const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  await requireStaffStepUpOrRedirect(formData, "/credentials");
 
   try {
     const saved = savePlatformMetaAppConfig({
@@ -2442,6 +2568,7 @@ export async function staffSaveMetaAppCredentialsAction(formData: FormData) {
 
 export async function staffSaveGoogleAdsCredentialsAction(formData: FormData) {
   const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  await requireStaffStepUpOrRedirect(formData, "/credentials");
 
   try {
     const saved = savePlatformGoogleAdsConfig({
@@ -2476,6 +2603,7 @@ export async function staffSaveGoogleAdsCredentialsAction(formData: FormData) {
 
 export async function staffSaveRazorpayCredentialsAction(formData: FormData) {
   const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  await requireStaffStepUpOrRedirect(formData, "/credentials");
 
   try {
     const saved = savePlatformRazorpayConfig({
@@ -2508,6 +2636,7 @@ export async function staffSaveRazorpayCredentialsAction(formData: FormData) {
 
 export async function staffSaveCloudflareTurnstileAction(formData: FormData) {
   const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  await requireStaffStepUpOrRedirect(formData, "/credentials");
   try {
     const saved = savePlatformCloudflareTurnstileConfig({
       enabled: formData.get("enabled") === "on",
@@ -2536,6 +2665,7 @@ export async function staffSaveCloudflareTurnstileAction(formData: FormData) {
 
 export async function staffSaveCloudflareAiAction(formData: FormData) {
   const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  await requireStaffStepUpOrRedirect(formData, "/credentials");
   try {
     const saved = savePlatformCloudflareAiConfig({
       enabled: formData.get("enabled") === "on",
@@ -2568,6 +2698,7 @@ export async function staffSaveCloudflareAiAction(formData: FormData) {
 
 export async function staffSaveCloudflareEmailRoutingAction(formData: FormData) {
   const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  await requireStaffStepUpOrRedirect(formData, "/credentials");
   try {
     const saved = savePlatformCloudflareEmailConfig({
       enabled: formData.get("enabled") === "on",
@@ -2596,6 +2727,7 @@ export async function staffSaveCloudflareEmailRoutingAction(formData: FormData) 
 
 export async function staffSaveWebPushVapidAction(formData: FormData) {
   const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  await requireStaffStepUpOrRedirect(formData, "/credentials");
   try {
     const autoGenerate = formData.get("autoGenerate") === "1";
     const saved = savePlatformVapidConfig({
@@ -2629,6 +2761,7 @@ export async function staffSaveWebPushVapidAction(formData: FormData) {
 
 export async function staffSaveBhashiniCredentialsAction(formData: FormData) {
   const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  await requireStaffStepUpOrRedirect(formData, "/credentials");
   try {
     const saved = savePlatformBhashiniConfig({
       enabled: formData.get("enabled") === "on",
@@ -2658,6 +2791,7 @@ export async function staffSaveBhashiniCredentialsAction(formData: FormData) {
 
 export async function staffBulkSeedPlatformCredentialsJsonAction(formData: FormData) {
   const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  await requireStaffStepUpOrRedirect(formData, "/credentials");
   try {
     let rawJson = String(formData.get("credentialsJson") || "").trim();
     const uploaded = formData.get("credentialsJsonFile");
@@ -2712,6 +2846,7 @@ export async function staffBulkSeedPlatformCredentialsJsonAction(formData: FormD
 
 export async function staffClearPlatformCredentialAction(formData: FormData) {
   const staff = await requireStaffWithPermission("staff:team.manage", "/credentials");
+  await requireStaffStepUpOrRedirect(formData, "/credentials");
   const providerKey = String(formData.get("providerKey") || "").trim() as PlatformCredentialProviderKey;
   const allowedKeys: PlatformCredentialProviderKey[] = [
     "google_oauth",

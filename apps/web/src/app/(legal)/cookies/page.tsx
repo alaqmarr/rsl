@@ -5,7 +5,7 @@ import { getLegalDocumentBySlug } from "@/lib/legal-documents";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Cookie & Session Security Policy — RapidShift Labs",
+  title: "Cookie & Session Security Policy - RapidShift Labs",
   description:
     "Complete inventory of strictly necessary HttpOnly session cookies used by RapidShift Labs, with zero third-party ad trackers.",
   alternates: { canonical: "/cookies" },

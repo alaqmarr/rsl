@@ -316,7 +316,7 @@ export default async function TallyVoucherDetailPage({
           value={formatInr(detail.pendingPaise, { showDecimals: true })}
           sublabel={
             detail.pendingPaise === 0
-              ? "₹0 pending — cleared"
+              ? "₹0 pending - cleared"
               : voucher.dueDate
                 ? `Due ${formatFullDate(voucher.dueDate)}`
                 : "Open receivable / payable"
@@ -333,7 +333,7 @@ export default async function TallyVoucherDetailPage({
                 : `${formatInr(Math.abs(party.closingBalancePaise))} ${
                     party.closingBalancePaise > 0 ? "Dr" : "Cr"
                   }`
-              : "—"
+              : "-"
           }
           sublabel={party ? `${party.parentGroup} • ${party.name}` : voucher.partyName}
           icon={<IndianRupee className="h-4 w-4" />}
@@ -585,7 +585,7 @@ export default async function TallyVoucherDetailPage({
       {detail.lineItems.length > 0 && (
         <SectionCard
           title={`Itemized Inventory Particulars (${detail.lineItems.length})`}
-          subtitle="Synced from Tally Prime ALLINVENTORYENTRIES / INVENTORYENTRIES — automatically reflected in your Stock & Godown Register"
+          subtitle="Synced from Tally Prime ALLINVENTORYENTRIES / INVENTORYENTRIES - automatically reflected in your Stock & Godown Register"
           noPadding
         >
           <div className="overflow-x-auto">
@@ -614,7 +614,7 @@ export default async function TallyVoucherDetailPage({
                       {li.godownName}
                       {li.batchName && li.batchName !== "Primary Batch" ? ` • ${li.batchName}` : ""}
                     </td>
-                    <td className="px-4 py-3.5 font-mono text-zinc-600">{li.hsnCode || "—"}</td>
+                    <td className="px-4 py-3.5 font-mono text-zinc-600">{li.hsnCode || "-"}</td>
                     <td className="px-4 py-3.5 text-right font-semibold text-slate-900 tabular-nums">
                       {li.billedQty.toLocaleString("en-IN")} {li.uom}
                     </td>
@@ -622,7 +622,7 @@ export default async function TallyVoucherDetailPage({
                       {formatInr(li.ratePaise, { showDecimals: true })}
                     </td>
                     <td className="px-4 py-3.5 text-right text-zinc-600 tabular-nums">
-                      {li.gstRateBps > 0 ? `${li.gstRateBps / 100}%` : "—"}
+                      {li.gstRateBps > 0 ? `${li.gstRateBps / 100}%` : "-"}
                     </td>
                     <td className="px-6 py-3.5 text-right font-extrabold text-slate-900 tabular-nums">
                       {formatInr(li.amountPaise, { showDecimals: true })}

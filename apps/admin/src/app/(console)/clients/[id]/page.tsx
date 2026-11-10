@@ -153,7 +153,7 @@ export default async function AdminClientDetailPage({
         title={workspace.name}
         subtitle={`Client ID: ${workspace.id} • State Code ${workspace.stateCode} (${
           workspace.stateCode === supplierStateCode ? "CGST + SGST" : "IGST 18%"
-        }) • Created ${new Date(workspace.createdAt).toLocaleDateString("en-IN")}`}
+        }) • Created ${new Date(workspace.createdAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {canViewBilling && (

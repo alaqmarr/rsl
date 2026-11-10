@@ -11,6 +11,17 @@ import {
 import { tenantDataSchema } from "@rsl/database";
 import { defineAction } from "@rsl/logging";
 import { tenantDataDb } from "@rsl/tenancy";
+import {
+  getWorkspaceConfidentialityPolicy,
+  isConfidentialityUnmaskActive,
+  maskConfidentialCompanyName,
+  maskConfidentialEmail,
+  maskConfidentialGstin,
+  maskConfidentialPan,
+  maskConfidentialPhone,
+  runWorkspaceDataRetentionSweep,
+  shouldMaskWorkspacePortalData,
+} from "./confidentiality";
 
 export type TallySuiteVoucherType =
   | "Sales"
@@ -696,10 +707,24 @@ export interface TallyAgeingBucketSummary {
 
 export function getWorkspacePartiesLedgerSummary(
   workspaceId: string,
-  companyIdFilter?: string
+  companyIdFilter?: string,
+  opts?: {
+    forPublicApi?: boolean;
+    userId?: string | null;
+    unmaskSessionActive?: boolean;
+  }
 ) {
+  runWorkspaceDataRetentionSweep(workspaceId);
   const db = tenantDataDb({ workspaceId });
   const now = Date.now();
+  const confidentialityPolicy = getWorkspaceConfidentialityPolicy(workspaceId);
+  const unmaskStatus = isConfidentialityUnmaskActive(workspaceId, opts?.userId, now);
+  const isMaskedInPortal = shouldMaskWorkspacePortalData(workspaceId, {
+    forPublicApi: opts?.forPublicApi,
+    userId: opts?.userId,
+    unmaskSessionActive: opts?.unmaskSessionActive || unmaskStatus.active,
+    policy: confidentialityPolicy,
+  });
 
   const companies = db
     .select()
@@ -829,6 +854,14 @@ export function getWorkspacePartiesLedgerSummary(
 
     return {
       ...p,
+      name: isMaskedInPortal ? maskConfidentialCompanyName(p.name) : p.name,
+      gstin: isMaskedInPortal ? maskConfidentialGstin(p.gstin) : p.gstin,
+      pan: isMaskedInPortal ? maskConfidentialPan(p.pan) : p.pan,
+      phoneE164: isMaskedInPortal ? maskConfidentialPhone(p.phoneE164) : p.phoneE164,
+      email: isMaskedInPortal ? maskConfidentialEmail(p.email) : p.email,
+      contactPerson: isMaskedInPortal
+        ? maskConfidentialCompanyName(p.contactPerson)
+        : p.contactPerson,
       companyName: compNameMap.get(p.companyId) ?? "Primary Tally Company",
       isCreditor,
       creditLimitBreached,
@@ -841,6 +874,12 @@ export function getWorkspacePartiesLedgerSummary(
 
   return {
     companies,
+    confidentiality: {
+      policy: confidentialityPolicy,
+      isMasked: isMaskedInPortal,
+      unmaskActive: unmaskStatus.active,
+      unmaskExpiresAt: unmaskStatus.expiresAt,
+    },
     kpis: {
       totalPartiesCount: enrichedParties.length,
       debtorsCount,
@@ -875,8 +914,18 @@ export interface PartyStatementRow {
   settlementSummary: string | null;
 }
 
-export function getWorkspacePartyLedgerDetail(workspaceId: string, partyId: string) {
+export function getWorkspacePartyLedgerDetail(
+  workspaceId: string,
+  partyId: string,
+  opts?: {
+    forPublicApi?: boolean;
+    userId?: string | null;
+    unmaskSessionActive?: boolean;
+  }
+) {
+  runWorkspaceDataRetentionSweep(workspaceId);
   const db = tenantDataDb({ workspaceId });
+  const isMaskedInPortal = shouldMaskWorkspacePortalData(workspaceId, opts);
   const party = db
     .select()
     .from(tenantDataSchema.tallyParties)
@@ -1158,8 +1207,21 @@ export function getWorkspacePartyLedgerDetail(workspaceId: string, partyId: stri
     (a, b) => b.totalAmountPaise - a.totalAmountPaise
   );
 
+  const visibleParty = isMaskedInPortal
+    ? {
+        ...party,
+        name: maskConfidentialCompanyName(party.name),
+        gstin: maskConfidentialGstin(party.gstin),
+        pan: maskConfidentialPan(party.pan),
+        phoneE164: maskConfidentialPhone(party.phoneE164),
+        email: maskConfidentialEmail(party.email),
+        contactPerson: maskConfidentialCompanyName(party.contactPerson),
+      }
+    : party;
+
   return {
-    party,
+    party: visibleParty,
+    isMasked: isMaskedInPortal,
     companyName: company?.name ?? "Primary Tally Company",
     financialYearFrom: company?.financialYearFrom ?? "2026-04-01",
     isCreditor: /creditor/i.test(party.parentGroup),
@@ -1178,8 +1240,18 @@ export function getWorkspacePartyLedgerDetail(workspaceId: string, partyId: stri
   };
 }
 
-export function getWorkspaceVoucherDetail(workspaceId: string, voucherId: string) {
+export function getWorkspaceVoucherDetail(
+  workspaceId: string,
+  voucherId: string,
+  opts?: {
+    forPublicApi?: boolean;
+    userId?: string | null;
+    unmaskSessionActive?: boolean;
+  }
+) {
+  runWorkspaceDataRetentionSweep(workspaceId);
   const db = tenantDataDb({ workspaceId });
+  const isMaskedInPortal = shouldMaskWorkspacePortalData(workspaceId, opts);
   const voucher = db
     .select()
     .from(tenantDataSchema.tallyVouchers)
@@ -1269,9 +1341,27 @@ export function getWorkspaceVoucherDetail(workspaceId: string, voucherId: string
   }
 
   return {
-    voucher,
+    voucher: isMaskedInPortal
+      ? {
+          ...voucher,
+          partyName: maskConfidentialCompanyName(voucher.partyName),
+          partyPhoneE164: maskConfidentialPhone(voucher.partyPhoneE164),
+        }
+      : voucher,
+    isMasked: isMaskedInPortal,
     companyName: company?.name ?? "Primary Tally Company",
-    party,
+    party:
+      party && isMaskedInPortal
+        ? {
+            ...party,
+            name: maskConfidentialCompanyName(party.name),
+            gstin: maskConfidentialGstin(party.gstin),
+            pan: maskConfidentialPan(party.pan),
+            phoneE164: maskConfidentialPhone(party.phoneE164),
+            email: maskConfidentialEmail(party.email),
+            contactPerson: maskConfidentialCompanyName(party.contactPerson),
+          }
+        : party,
     lineItems,
     pendingPaise:
       voucher.voucherType === "Sales" || voucher.voucherType === "Purchase"

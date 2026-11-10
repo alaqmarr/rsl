@@ -125,6 +125,10 @@ export function RazorpayCheckoutButton({
         return;
       }
 
+      const accentThemeColor = getComputedStyle(document.documentElement)
+        .getPropertyValue("--forest-green")
+        .trim();
+
       const instance = new window.Razorpay({
         key: orderRes.keyId,
         amount: orderRes.amountWithGstPaise,
@@ -132,15 +136,15 @@ export function RazorpayCheckoutButton({
         name: "RapidShift Labs",
         description:
           purpose === "ad_spend_topup"
-            ? `Managed Ad Spend Vault Deposit — ${orderRes.businessName}`
-            : `Prepaid Wallet Recharge — ${orderRes.businessName}`,
+            ? `Managed Ad Spend Vault Deposit - ${orderRes.businessName}`
+            : `Prepaid Wallet Recharge - ${orderRes.businessName}`,
         order_id: orderRes.orderId,
         prefill: {
           name: orderRes.prefill.name,
           email: orderRes.prefill.email,
           contact: orderRes.prefill.contact,
         },
-        theme: { color: "#059669" },
+        theme: { color: accentThemeColor },
         modal: {
           ondismiss: () => {
             setBusy(false);
@@ -207,8 +211,7 @@ export function RazorpayCheckoutButton({
             value={amountRupees}
             onChange={(e) => setAmountRupees(e.target.value)}
             disabled={busy}
-            className="rsl-input w-32 tabular-nums"
-            style={{ width: "8rem" }}
+            className="rsl-input !w-32 tabular-nums"
           />
           <button
             type="submit"

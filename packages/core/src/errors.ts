@@ -52,6 +52,36 @@ export const ERROR_CATALOG = {
     retryable: false,
     domain: "auth",
   },
+  "RSL-AUTH-1004": {
+    code: "RSL-AUTH-1004",
+    httpStatus: 429,
+    title: "Too many sign-in attempts",
+    userMessage: "Too many authentication attempts were received. Please wait before trying again.",
+    remediation: "Wait 15 minutes or reset your password if you cannot recall it.",
+    docsSlug: "errors/RSL-AUTH-1004",
+    retryable: true,
+    domain: "auth",
+  },
+  "RSL-AUTH-1005": {
+    code: "RSL-AUTH-1005",
+    httpStatus: 403,
+    title: "Email verification required",
+    userMessage: "Verify your email address first before running live customer messaging, billing, or team invitations.",
+    remediation: "Enter the 6-digit verification code sent to your inbox under Profile & Security.",
+    docsSlug: "errors/RSL-AUTH-1005",
+    retryable: false,
+    domain: "auth",
+  },
+  "RSL-AUTH-1006": {
+    code: "RSL-AUTH-1006",
+    httpStatus: 403,
+    title: "Multi-factor verification required",
+    userMessage: "Complete multi-factor or step-up authentication before performing this sensitive action.",
+    remediation: "Enter a fresh 6-digit authenticator code to verify your session.",
+    docsSlug: "errors/RSL-AUTH-1006",
+    retryable: false,
+    domain: "auth",
+  },
   "RSL-RBAC-1001": {
     code: "RSL-RBAC-1001",
     httpStatus: 403,
@@ -280,15 +310,19 @@ export class RslError extends Error {
   }
 
   toPublicObject(correlationId?: string) {
+    const isProd = process.env.NODE_ENV === "production";
+    const entry = ERROR_CATALOG[this.code];
+    const safePublicMessage =
+      isProd && this.code === "RSL-SYS-1001" ? entry.userMessage : this.message;
     return {
       code: this.code,
-      title: ERROR_CATALOG[this.code].title,
-      message: this.message,
+      title: entry.title,
+      message: safePublicMessage,
       remediation: this.remediation,
       docsSlug: this.docsSlug,
       retryable: this.retryable,
       correlationId,
-      details: this.details,
+      ...(isProd ? {} : { details: this.details }),
     };
   }
 }

@@ -1,12 +1,20 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { cookies } from "next/headers";
+import { Fraunces, JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import { SileoToastProvider } from "@rsl/ui";
+import { readVerifiedAdminFlashToast } from "@/lib/session";
 import "sileo/styles.css";
 import "./globals.css";
 
-const sans = Inter({
+const display = Fraunces({
   subsets: ["latin"],
-  variable: "--font-inter",
+  variable: "--font-fraunces",
+  display: "swap",
+});
+
+const sans = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  variable: "--font-jakarta",
   display: "swap",
 });
 
@@ -18,7 +26,7 @@ const mono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.ADMIN_URL || "https://admin.rapidshiftlabs.in"),
-  title: "RSL Staff Portal — Billing, Plans & Client Operations",
+  title: "RSL Staff Portal - Billing, Plans & Client Operations",
   description:
     "Verify client payments, unlock plans, credit wallets, manage WhatsApp setups, and support customer accounts.",
   manifest: "/site.webmanifest",
@@ -32,7 +40,7 @@ export const metadata: Metadata = {
     apple: "/apple-touch-icon.png",
   },
   openGraph: {
-    title: "RapidShift Labs — Staff Operations Portal",
+    title: "RapidShift Labs - Staff Operations Portal",
     description: "Staff billing, client support, GST ledger, and platform health console.",
     images: [{ url: "/og-image.png", width: 1200, height: 630, alt: "RapidShift Labs" }],
   },
@@ -42,11 +50,23 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const [verifiedToast, cookieStore] = await Promise.all([
+    readVerifiedAdminFlashToast(),
+    cookies(),
+  ]);
+  const rawTheme = cookieStore.get("rsl_theme")?.value;
+  const dataTheme = rawTheme === "dark" || rawTheme === "light" ? rawTheme : undefined;
+
   return (
-    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
-      <body className="min-h-screen bg-[#F8F9FB] font-sans text-slate-900 antialiased">
-        <SileoToastProvider cookieName="rsl_admin_toast" />
+    <html
+      lang="en"
+      data-theme={dataTheme}
+      suppressHydrationWarning
+      className={`${display.variable} ${sans.variable} ${mono.variable}`}
+    >
+      <body className="min-h-screen bg-[var(--canvas)] font-sans text-[var(--ink)] antialiased">
+        <SileoToastProvider cookieName="rsl_admin_toast" verifiedToast={verifiedToast} />
         {children}
       </body>
     </html>

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import http from "node:http";
 import zlib from "node:zlib";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { dispatchWorkspaceWebhookEvent } from "@rsl/api-keys";
 import { canDebitWalletUsage, getWalletBalancePaise } from "@rsl/billing";
@@ -17,7 +17,9 @@ import {
   RslError,
   rupeesToPaise,
   signHmac,
+  signPurposeHmac,
   verifyHmac,
+  verifyPurposeHmac,
   type ActorType,
 } from "@rsl/core";
 import { controlSchema, tenantDataSchema, tenantLogsSchema } from "@rsl/database";
@@ -31,7 +33,7 @@ import {
   registerJobProcessor,
   reserveSendGuard,
 } from "@rsl/queue";
-import { controlDb, tenantDataDb, tenantLogsDb } from "@rsl/tenancy";
+import { controlDb, isWorkspaceSandboxIntegrationMode, tenantDataDb, tenantLogsDb } from "@rsl/tenancy";
 import {
   collectVoucherStockItemIdsBeforeDelete,
   extractInventoryLineItemsFromVoucherXml,
@@ -61,11 +63,21 @@ import {
 export * from "./inventory";
 export * from "./ledgers";
 export * from "./free-tally-tools";
+export * from "./confidentiality";
 import {
   buildSignedPublicTallyBillPayUrl,
   buildWorkspaceSupplierBillInboxAddress,
   listSupplierBillDrafts,
 } from "./free-tally-tools";
+import {
+  getWorkspaceConfidentialityPolicy,
+  isConfidentialityUnmaskActive,
+  maskConfidentialCompanyName,
+  maskConfidentialGstin,
+  maskConfidentialPhone,
+  runWorkspaceDataRetentionSweep,
+  shouldMaskWorkspacePortalData,
+} from "./confidentiality";
 
 export const AGENT_HEARTBEAT_STALE_MS = 120_000;
 export const LATEST_TALLY_TDL_VERSION = "2.9";
@@ -146,7 +158,7 @@ export function buildTallyDisplayBrandTitle(
 
 // =========================================================================
 // Exact Native Tally-Printed PDF Storage & Signed URL Engine
-// Stores Tally Prime's exact printed PDF bytes (%PDF-1.x) untouched without
+// Stores Tally Prime's native printed PDF bytes (%PDF-1.x) without
 // modifying or redesigning the client's invoice format.
 // =========================================================================
 
@@ -259,11 +271,56 @@ export function saveNativeTallyVoucherPdf(params: {
   const effectiveType = matchedVoucher?.voucherType ?? params.voucherType ?? "Sales";
   const filename = sanitizePdfFilename(effectiveNumber, effectiveType);
   const sha256 = crypto.createHash("sha256").update(params.pdfBuffer).digest("hex");
-  const pdfBase64 = params.pdfBuffer.toString("base64");
   const byteSize = params.pdfBuffer.byteLength;
   const alterId = Math.max(0, Math.trunc(params.alterId ?? matchedVoucher?.alterId ?? 0));
   const capturedFrom = (params.capturedFrom || "tally_native").slice(0, 60);
   const now = Date.now();
+
+  const existingPdfRow = raw
+    .prepare(
+      `SELECT voucher_id, voucher_guid, voucher_number, company_name, filename, byte_size, sha256, alter_id, master_id, captured_from, updated_at
+       FROM tally_voucher_pdfs
+       WHERE voucher_id = ? OR (voucher_guid = ? AND voucher_guid != '')
+       LIMIT 1`
+    )
+    .get(effectiveVoucherId, effectiveGuid) as
+    | {
+        voucher_id: string;
+        voucher_guid: string;
+        voucher_number: string;
+        company_name: string;
+        filename: string;
+        byte_size: number;
+        sha256: string;
+        alter_id: number;
+        master_id: string | null;
+        captured_from: string;
+        updated_at: number;
+      }
+    | undefined;
+
+  if (
+    existingPdfRow &&
+    existingPdfRow.voucher_id === effectiveVoucherId &&
+    existingPdfRow.sha256 === sha256 &&
+    existingPdfRow.alter_id >= alterId
+  ) {
+    return {
+      voucherId: existingPdfRow.voucher_id,
+      voucherGuid: existingPdfRow.voucher_guid,
+      voucherNumber: existingPdfRow.voucher_number,
+      companyName: existingPdfRow.company_name,
+      filename: existingPdfRow.filename,
+      byteSize: existingPdfRow.byte_size,
+      sha256: existingPdfRow.sha256,
+      alterId: existingPdfRow.alter_id,
+      masterId: existingPdfRow.master_id,
+      capturedFrom: existingPdfRow.captured_from,
+      updatedAt: existingPdfRow.updated_at,
+    };
+  }
+
+  const pdfBase64 = params.pdfBuffer.toString("base64");
 
   if (matchedVoucher && cleanGuid) {
     // Clean up any pre-staged pending row for this GUID before saving canonical voucher_id
@@ -503,17 +560,21 @@ export function buildSignedTallyVoucherPdfUrl(params: {
   baseUrl?: string;
   ttlMs?: number;
 }): string {
-  const expiresAt = Date.now() + (params.ttlMs ?? 30 * 24 * 3600_000);
-  const canonical = `${params.workspaceId}.${params.voucherId}.${expiresAt}`;
-  const sig = signHmac(canonical, getEnv().KMS_MASTER_KEY);
+  const ws = controlDb()
+    .select({
+      slug: controlSchema.workspaces.slug,
+      publicLinkEpoch: controlSchema.workspaces.publicLinkEpoch,
+    })
+    .from(controlSchema.workspaces)
+    .where(eq(controlSchema.workspaces.id, params.workspaceId))
+    .get();
+  const epoch = Number(ws?.publicLinkEpoch ?? 1);
+  const expiresAt = Date.now() + (params.ttlMs ?? 72 * 3600_000);
+  const canonical = `pdf.${params.workspaceId}.${params.voucherId}.e${epoch}.${expiresAt}`;
+  const sig = signPurposeHmac("public-bill-link:v1", canonical);
 
   let resolvedBase = params.baseUrl?.trim().replace(/\/+$/, "") ?? "";
   if (!resolvedBase) {
-    const ws = controlDb()
-      .select({ slug: controlSchema.workspaces.slug })
-      .from(controlSchema.workspaces)
-      .where(eq(controlSchema.workspaces.id, params.workspaceId))
-      .get();
     const endpoints = resolvePublicEndpoints({ workspaceSlug: ws?.slug ?? null });
     resolvedBase = endpoints.tallyCloudBaseUrl;
   }
@@ -534,8 +595,14 @@ export function verifySignedTallyVoucherPdfToken(params: {
   if (!params.sig || params.sig.length < 32) {
     return false;
   }
-  const canonical = `${params.workspaceId}.${params.voucherId}.${Math.trunc(params.expiresAt)}`;
-  return verifyHmac(canonical, params.sig, getEnv().KMS_MASTER_KEY);
+  const ws = controlDb()
+    .select({ publicLinkEpoch: controlSchema.workspaces.publicLinkEpoch })
+    .from(controlSchema.workspaces)
+    .where(eq(controlSchema.workspaces.id, params.workspaceId))
+    .get();
+  const epoch = Number(ws?.publicLinkEpoch ?? 1);
+  const canonical = `pdf.${params.workspaceId}.${params.voucherId}.e${epoch}.${Math.trunc(params.expiresAt)}`;
+  return verifyPurposeHmac("public-bill-link:v1", canonical, params.sig);
 }
 
 export function buildLocalTallyNativeVoucherPdfXml(params: {
@@ -999,7 +1066,7 @@ export function computeTallyWebhookLiveStatus(endpoint: {
       state: "handshake_verified",
       label: "Handshake Verified",
       tone: "info",
-      detail: `Endpoint & token verified (${endpoint.pingsReceivedCount} check(s)) — waiting for first Tally voucher.`,
+      detail: `Endpoint & token verified (${endpoint.pingsReceivedCount} check(s)) - waiting for first Tally voucher.`,
     };
   }
 
@@ -1008,7 +1075,7 @@ export function computeTallyWebhookLiveStatus(endpoint: {
     label: "Awaiting Connection",
     tone: "warning",
     detail:
-      "Endpoint provisioned — run Live Endpoint Check or load the .tdl add-on in Tally Prime.",
+      "Endpoint provisioned - run Live Endpoint Check or load the .tdl add-on in Tally Prime.",
   };
 }
 
@@ -1064,7 +1131,7 @@ export function computeAgentDeviceLiveStatus(
       tone: "neutral",
       detail: device.lastHeartbeatAt
         ? "No heartbeat received from this office PC in the last 2 minutes."
-        : "Paired — waiting for first background heartbeat from office PC.",
+        : "Paired - waiting for first background heartbeat from office PC.",
       isOnline: false,
     };
   }
@@ -1198,10 +1265,81 @@ export function recordTallyWebhookError(params: {
     .run();
 }
 
-export function getTallyWorkspaceSummary(workspaceId: string) {
+export function listWorkspaceTallyVouchers(
+  workspaceId: string,
+  opts?: {
+    limit?: number;
+    offset?: number;
+    forPublicApi?: boolean;
+    userId?: string | null;
+    unmaskSessionActive?: boolean;
+  }
+): {
+  items: Array<typeof tenantDataSchema.tallyVouchers.$inferSelect>;
+  totalCount: number;
+  limit: number;
+  offset: number;
+} {
+  runWorkspaceDataRetentionSweep(workspaceId);
+  const dataDb = tenantDataDb({ workspaceId });
+  const limit = Math.min(500, Math.max(1, Math.trunc(opts?.limit ?? 100)));
+  const offset = Math.max(0, Math.trunc(opts?.offset ?? 0));
+  const countRow = dataDb
+    .select({ c: sql<number>`count(*)` })
+    .from(tenantDataSchema.tallyVouchers)
+    .get();
+  const rawItems = dataDb
+    .select()
+    .from(tenantDataSchema.tallyVouchers)
+    .orderBy(desc(tenantDataSchema.tallyVouchers.voucherDate))
+    .limit(limit)
+    .offset(offset)
+    .all();
+
+  const shouldMask = shouldMaskWorkspacePortalData(workspaceId, {
+    forPublicApi: opts?.forPublicApi,
+    userId: opts?.userId,
+    unmaskSessionActive: opts?.unmaskSessionActive,
+  });
+
+  const items = shouldMask
+    ? rawItems.map((v) => ({
+        ...v,
+        partyName: maskConfidentialCompanyName(v.partyName),
+        partyPhoneE164: maskConfidentialPhone(v.partyPhoneE164),
+      }))
+    : rawItems;
+
+  return {
+    items,
+    totalCount: Number(countRow?.c ?? 0),
+    limit,
+    offset,
+  };
+}
+
+export function getTallyWorkspaceSummary(
+  workspaceId: string,
+  opts?: {
+    voucherLimit?: number;
+    voucherOffset?: number;
+    forPublicApi?: boolean;
+    userId?: string | null;
+    unmaskSessionActive?: boolean;
+  }
+) {
+  runWorkspaceDataRetentionSweep(workspaceId);
   const dataDb = tenantDataDb({ workspaceId });
   const ctrl = controlDb();
   const now = Date.now();
+  const confidentialityPolicy = getWorkspaceConfidentialityPolicy(workspaceId);
+  const unmaskStatus = isConfidentialityUnmaskActive(workspaceId, opts?.userId, now);
+  const isMaskedInPortal = shouldMaskWorkspacePortalData(workspaceId, {
+    forPublicApi: opts?.forPublicApi,
+    userId: opts?.userId,
+    unmaskSessionActive: opts?.unmaskSessionActive || unmaskStatus.active,
+    policy: confidentialityPolicy,
+  });
 
   const companies = dataDb
     .select()
@@ -1209,11 +1347,20 @@ export function getTallyWorkspaceSummary(workspaceId: string) {
     .orderBy(desc(tenantDataSchema.tallyCompanies.createdAt))
     .all();
 
+  const voucherLimit = Math.min(500, Math.max(1, Math.trunc(opts?.voucherLimit ?? 200)));
+  const voucherOffset = Math.max(0, Math.trunc(opts?.voucherOffset ?? 0));
+  const totalVouchersRow = dataDb
+    .select({ c: sql<number>`count(*)` })
+    .from(tenantDataSchema.tallyVouchers)
+    .get();
+  const vouchersTotalCount = Number(totalVouchersRow?.c ?? 0);
+
   const vouchers = dataDb
     .select()
     .from(tenantDataSchema.tallyVouchers)
     .orderBy(desc(tenantDataSchema.tallyVouchers.voucherDate))
-    .limit(200)
+    .limit(voucherLimit)
+    .offset(voucherOffset)
     .all();
 
   const rules = dataDb
@@ -1318,7 +1465,7 @@ export function getTallyWorkspaceSummary(workspaceId: string) {
             ? "PC Online • Tally Port 9000 Closed"
             : "Endpoint Verified • Awaiting Tally Voucher"
           : overallState === "attention_needed"
-            ? "Webhook Error — Check Diagnostics"
+            ? "Webhook Error - Check Diagnostics"
             : "Awaiting Tally Prime Connection",
     overallTone:
       overallState === "live_connected"
@@ -1369,7 +1516,7 @@ export function getTallyWorkspaceSummary(workspaceId: string) {
             : webhookEndpoint.eventsReceivedCount > 0
               ? `Tally Prime .tdl / API has pushed ${webhookEndpoint.eventsReceivedCount} voucher(s).`
               : webhookEndpoint.lastUserAgent?.startsWith("TallyPrime")
-                ? "Tally Prime desktop .tdl verified — save any voucher in Tally to sync."
+                ? "Tally Prime desktop .tdl verified - save any voucher in Tally to sync."
                 : tallyUnreachablePcCount > 0
                   ? "Office PC connector is online, but Tally Prime port 9000 is not open."
                   : "Load the .tdl add-on in Tally Prime or pair your office Windows PC.",
@@ -1522,13 +1669,41 @@ export function getTallyWorkspaceSummary(workspaceId: string) {
   }
 
   const companyRouting = getTallyCompanyRoutingConfig(workspaceId);
-  const supplierBillDrafts = listSupplierBillDrafts(workspaceId);
+  const rawSupplierBillDrafts = listSupplierBillDrafts(workspaceId);
+  const supplierBillDrafts = isMaskedInPortal
+    ? rawSupplierBillDrafts.map((d) => ({
+        ...d,
+        supplierName: maskConfidentialCompanyName(d.supplierName),
+        supplierGstin: maskConfidentialGstin(d.supplierGstin),
+      }))
+    : rawSupplierBillDrafts;
   const supplierBillInbox = buildWorkspaceSupplierBillInboxAddress(workspaceId);
+
+  const visibleVouchers = isMaskedInPortal
+    ? enrichedVouchers.map((v) => ({
+        ...v,
+        partyName: maskConfidentialCompanyName(v.partyName),
+        partyPhoneE164: maskConfidentialPhone(v.partyPhoneE164),
+        settlements: v.settlements.map((s) => ({
+          ...s,
+          partyName: maskConfidentialCompanyName(s.partyName),
+        })),
+      }))
+    : enrichedVouchers;
 
   return {
     companies,
     companyRouting,
-    vouchers: enrichedVouchers,
+    confidentiality: {
+      policy: confidentialityPolicy,
+      isMasked: isMaskedInPortal,
+      unmaskActive: unmaskStatus.active,
+      unmaskExpiresAt: unmaskStatus.expiresAt,
+    },
+    vouchers: visibleVouchers,
+    vouchersTotalCount,
+    voucherLimit,
+    voucherOffset,
     supplierBillDrafts,
     supplierBillInbox,
     nextSuggestedBillNumber,
@@ -1665,6 +1840,91 @@ export function exchangePairingCodeForAgentDevice(params: {
   return { deviceId, signingSecret, workspaceId: codeRow.workspaceId };
 }
 
+export function buildTallyWebhookSignedHeaders(
+  signingSecret: string,
+  rawBody: string | Buffer,
+  timestampMs = Date.now(),
+  nonce = crypto.randomBytes(12).toString("hex")
+): {
+  "x-rsl-timestamp": string;
+  "x-rsl-nonce": string;
+  "x-rsl-signature": string;
+} {
+  const ts = String(Math.trunc(timestampMs));
+  const bodyBuf = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(rawBody, "utf8");
+  const hmac = crypto.createHmac("sha256", signingSecret);
+  hmac.update(`${ts}.`, "utf8");
+  hmac.update(bodyBuf);
+  return {
+    "x-rsl-timestamp": ts,
+    "x-rsl-nonce": nonce,
+    "x-rsl-signature": hmac.digest("hex"),
+  };
+}
+
+export function verifyTallyWebhookSignedPayload(params: {
+  workspaceId: string;
+  signingSecret: string;
+  timestampHeader: string;
+  signatureHex: string;
+  nonceHeader?: string | null;
+  rawBody: string | Buffer;
+}): void {
+  const ts = Number(params.timestampHeader);
+  const now = Date.now();
+  if (!Number.isFinite(ts) || Math.abs(now - ts) > 5 * 60 * 1000) {
+    throw new RslError(
+      "RSL-TALLY-1002",
+      "Tally webhook timestamp is missing or outside the 5-minute replay window."
+    );
+  }
+  const cleanSig = String(params.signatureHex ?? "").trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(cleanSig)) {
+    throw new RslError("RSL-TALLY-1002", "Missing or invalid X-RSL-Signature HMAC header.");
+  }
+
+  const bodyBuf = Buffer.isBuffer(params.rawBody) ? params.rawBody : Buffer.from(params.rawBody, "utf8");
+  const dotHmac = crypto.createHmac("sha256", params.signingSecret);
+  dotHmac.update(`${ts}.`, "utf8");
+  dotHmac.update(bodyBuf);
+  const expectedDotHex = dotHmac.digest("hex");
+
+  const concatHmac = crypto.createHmac("sha256", params.signingSecret);
+  concatHmac.update(String(ts), "utf8");
+  concatHmac.update(bodyBuf);
+  const expectedConcatHex = concatHmac.digest("hex");
+
+  const sigBuf = Buffer.from(cleanSig, "hex");
+  const validDot = crypto.timingSafeEqual(sigBuf, Buffer.from(expectedDotHex, "hex"));
+  const validConcat = crypto.timingSafeEqual(sigBuf, Buffer.from(expectedConcatHex, "hex"));
+  if (!validDot && !validConcat) {
+    throw new RslError("RSL-TALLY-1002", "Tally webhook payload HMAC verification failed.");
+  }
+
+  const noncePart = (params.nonceHeader || "").trim().slice(0, 64) || cleanSig.slice(0, 32);
+  const replayKey = `tally_replay:${ts}:${noncePart}`;
+  const inserted = controlDb()
+    .insert(controlSchema.idempotencyRecords)
+    .values({
+      id: newEntityId("idp", params.workspaceId),
+      workspaceId: params.workspaceId,
+      idempotencyKey: replayKey,
+      method: "POST",
+      path: "/api/webhooks/tally",
+      requestHash: cleanSig,
+      statusCode: 200,
+      responseJson: "{}",
+      expiresAt: now + 10 * 60 * 1000,
+      createdAt: now,
+    })
+    .onConflictDoNothing()
+    .run();
+
+  if (inserted.changes === 0) {
+    throw new RslError("RSL-TALLY-1002", "Duplicate or replayed Tally webhook signature rejected.");
+  }
+}
+
 export function verifyAgentSignedRequest(params: {
   deviceId: string;
   timestampHeader: string;
@@ -1673,7 +1933,6 @@ export function verifyAgentSignedRequest(params: {
 }): { workspaceId: string; deviceId: string } {
   const ts = Number(params.timestampHeader);
   const now = Date.now();
-  // 5-minute replay window (Section 17)
   if (!Number.isFinite(ts) || Math.abs(now - ts) > 5 * 60 * 1000) {
     throw new RslError("RSL-TALLY-1002", "Agent timestamp outside 5-minute security window.");
   }
@@ -2196,6 +2455,8 @@ export const recordTallyVoucher = defineAction({
       }
     }
 
+    runWorkspaceDataRetentionSweep(ctx.workspaceId);
+
     return { voucherId: savedVoucher?.id ?? voucherId, guid, queuedJobs };
   },
 });
@@ -2246,7 +2507,7 @@ function assertTemplateIsMetaApproved(
 
   if (wabaConn && wabaConn.status === "healthy") {
     const token = extractWabaTokenFromEncrypted(wabaConn.encryptedTokens);
-    const isSandbox = /^(rsl_sandbox_|sandbox_|test_)/i.test(token);
+    const isSandbox = isWorkspaceSandboxIntegrationMode(workspaceId, token);
     if (!isSandbox && !tmpl.metaTemplateId) {
       throw new RslError(
         "RSL-VAL-1001",
@@ -2395,7 +2656,7 @@ async function executeQueuedTallyReminderJob(params: {
         ? {
             url: signedPdfUrl,
             filename: nativePdf.filename,
-            caption: `Payment reminder — Bill #${voucher.voucherNumber}`,
+            caption: `Payment reminder - Bill #${voucher.voucherNumber}`,
             sizeBytes: nativePdf.byteSize,
           }
         : undefined,
@@ -2418,7 +2679,7 @@ async function executeQueuedTallyReminderJob(params: {
         requestId: params.correlationId,
         correlationId: params.correlationId,
         durationMs: 10,
-        summary: `Overdue reminder skipped for Bill #${voucher.voucherNumber} (${sendRes.skippedReason || "provider error"}) — ₹0.00 deducted`,
+        summary: `Overdue reminder skipped for Bill #${voucher.voucherNumber} (${sendRes.skippedReason || "provider error"})`,
       });
     }
     return false;
@@ -2537,7 +2798,7 @@ export async function sweepDueTallyPaymentReminders(params: {
       evaluatedCount: openVouchers.length,
     };
   }
-  const isSandboxWaba = /^(rsl_sandbox_|sandbox_|test_)/i.test(wabaToken);
+  const isSandboxWaba = isWorkspaceSandboxIntegrationMode(params.workspaceId, wabaToken);
 
   const allTemplates = dataDb.select().from(tenantDataSchema.whatsappTemplates).all();
   const approvedTemplateByName = new Map(
@@ -2631,7 +2892,7 @@ export async function sweepDueTallyPaymentReminders(params: {
 
   let confirmedSentCount = enqueuedCount;
   if (enqueuedCount > 0 && !isRedisConfigured()) {
-    await processDueSqliteOutboxForTenant(params.workspaceId);
+    await processDueSqliteOutboxForTenant(params.workspaceId, { queueName: "reminders" });
     confirmedSentCount = 0;
     for (const target of enqueuedTargets) {
       const updatedVoucher = dataDb
@@ -2729,12 +2990,12 @@ export const sendTallyBillOnWhatsApp = defineAction({
     if (!wabaConn || wabaConn.status !== "healthy") {
       throw new RslError(
         "RSL-VAL-1001",
-        "Connect your WhatsApp Business Account under Connected Channels before sending Tally bills on WhatsApp (₹0.00 deducted)."
+        "Connect your WhatsApp Business Account under Connected Channels before sending Tally bills on WhatsApp."
       );
     }
 
     const wabaToken = extractWabaTokenFromEncrypted(wabaConn.encryptedTokens);
-    const isSandboxWaba = /^(rsl_sandbox_|sandbox_|test_)/i.test(wabaToken);
+    const isSandboxWaba = isWorkspaceSandboxIntegrationMode(ctx.workspaceId, wabaToken);
 
     const allTemplates = dataDb.select().from(tenantDataSchema.whatsappTemplates).all();
     let selectedTemplate: typeof tenantDataSchema.whatsappTemplates.$inferSelect | undefined;
@@ -2766,7 +3027,7 @@ export const sendTallyBillOnWhatsApp = defineAction({
       if (!selectedTemplate) {
         throw new RslError(
           "RSL-VAL-1001",
-          "An approved Meta WhatsApp template is required before sending bills or reminders. Submit and approve a template under WhatsApp & Templates first (₹0.00 deducted)."
+          "An approved Meta WhatsApp template is required before sending bills or reminders. Submit and approve a template under WhatsApp & Templates first."
         );
       }
     }
@@ -2843,7 +3104,7 @@ export const sendTallyBillOnWhatsApp = defineAction({
     if (!sendRes.sent) {
       throw new RslError(
         "RSL-VAL-1001",
-        sendRes.skippedReason || "WhatsApp Cloud API could not deliver this bill (₹0.00 deducted)."
+        sendRes.skippedReason || "WhatsApp Cloud API could not deliver this bill."
       );
     }
 
@@ -2868,7 +3129,7 @@ export const sendTallyBillOnWhatsApp = defineAction({
 });
 
 function formatTallyXmlDate(ts: number): string {
-  // Format strictly in Asia/Kolkata (IST = UTC + 05:30) so early-morning Indian bills never shift to prior day (P1-21)
+  // Format strictly in Asia/Kolkata (IST = UTC + 05:30) so early-morning Indian bills never shift to prior day.
   const ist = new Date(ts + 5.5 * 3600_000);
   const y = ist.getUTCFullYear();
   const m = String(ist.getUTCMonth() + 1).padStart(2, "0");
@@ -2942,7 +3203,7 @@ function escapeXml(str: string): string {
 
 /**
  * Exports workspace Tally vouchers as a balanced double-entry Tally Prime XML Envelope
- * ready for `Import Data -> Vouchers` in Tally Prime (P0-05, ACT-1.1..3.3).
+ * ready for `Import Data -> Vouchers` in Tally Prime.
  */
 export function exportTallyVouchersAsXml(workspaceId: string): string {
   const db = tenantDataDb({ workspaceId });
@@ -4208,18 +4469,10 @@ export function generateTallyPrimeTdlAddOn(params: {
     // Keep raw URL if non-standard
   }
 
-  const postUrl = extractedToken
-    ? `${cleanEndpoint}?token=${encodeURIComponent(extractedToken)}`
-    : cleanEndpoint;
-  const pingUrl = extractedToken
-    ? `${cleanEndpoint}?mode=ping&token=${encodeURIComponent(extractedToken)}`
-    : `${cleanEndpoint}?mode=ping`;
-  const reconcileUrl = extractedToken
-    ? `${cleanEndpoint}?mode=reconcile&token=${encodeURIComponent(extractedToken)}`
-    : `${cleanEndpoint}?mode=reconcile`;
-  const mastersUrl = extractedToken
-    ? `${cleanEndpoint}?mode=masters&token=${encodeURIComponent(extractedToken)}`
-    : `${cleanEndpoint}?mode=masters`;
+  const postUrl = cleanEndpoint;
+  const pingUrl = `${cleanEndpoint}?mode=ping`;
+  const reconcileUrl = `${cleanEndpoint}?mode=reconcile`;
+  const mastersUrl = `${cleanEndpoint}?mode=masters`;
 
   const tokenHeaderLine = extractedToken
     ? `\n    Header          : "X-Tally-Webhook-Token: ${extractedToken}"`
@@ -5897,14 +6150,14 @@ export function generateStandaloneTallyConnectorMjs(params: {
 
   return `#!/usr/bin/env node
 /**
- * ${brandTitle} — Standalone Windows Tally Prime Connector (Zero Dependencies)
+ * ${brandTitle} - Standalone Windows Tally Prime Connector (Zero Dependencies)
  * Workspace     : ${safeName}
  * Cloud Ingress : ${defaultServer}
  *
  * Features:
  *   - Multi-Company Live Sync (Sales, Receipt, Payment, Credit Note, Debit Note, Purchase + Paid-in-Tally Settlements)
  *   - Client & Supplier Ledgers + Inventory & Godown Masters Sync
- *   - Exact Native Tally-Printed PDF Capture (%PDF-1.x via Tally Voucher Print Engine — zero design modifications!)
+ *   - Exact Native Tally-Printed PDF Capture (%PDF-1.x via Tally Voucher Print Engine - zero design modifications!)
  *   - Automatic Over-The-Air .tdl Self-Updater (never manually re-download .tdl files!)
  *
  * Commands:
@@ -6249,8 +6502,9 @@ async function autoUpdateLocalTdlIfConfigured(state) {
   if (!state.tdlPath || !state.webhookToken) return;
   try {
     const devParam = state.deviceId ? \`&deviceId=\${encodeURIComponent(state.deviceId)}\` : "";
-    const manifestUrl = \`\${state.serverUrl}/api/webhooks/tally?mode=tdl-manifest&token=\${encodeURIComponent(state.webhookToken)}\${devParam}\`;
-    const mRes = await fetch(manifestUrl);
+    const manifestUrl = \`\${state.serverUrl}/api/webhooks/tally?mode=tdl-manifest\${devParam}\`;
+    const authHeaders = { "X-Tally-Webhook-Token": state.webhookToken };
+    const mRes = await fetch(manifestUrl, { headers: authHeaders });
     if (!mRes.ok) return;
     const manifest = await mRes.json();
     const versionLabel = manifest.version || manifest.tdlVersion || manifest.latestTdlVersion || "latest";
@@ -6262,13 +6516,13 @@ async function autoUpdateLocalTdlIfConfigured(state) {
     }
     if (currentSha === manifest.sha256) return;
 
-    const latestUrl = \`\${state.serverUrl}/api/webhooks/tally?mode=tdl-latest&token=\${encodeURIComponent(state.webhookToken)}\`;
-    const dlRes = await fetch(latestUrl);
+    const latestUrl = \`\${state.serverUrl}/api/webhooks/tally?mode=tdl-latest\`;
+    const dlRes = await fetch(latestUrl, { headers: authHeaders });
     if (!dlRes.ok) return;
     const tdlContent = await dlRes.text();
     if (!tdlContent.includes("[#Menu: Gateway of Tally]")) return;
 
-    // Cryptographic SHA-256 + HMAC verification BEFORE touching disk (P1-03 / SEC-05)
+    // Cryptographic SHA-256 + HMAC verification before writing to disk
     const downloadedSha = crypto.createHash("sha256").update(tdlContent, "utf8").digest("hex");
     if (downloadedSha !== String(manifest.sha256).toLowerCase()) {
       console.error("[RSL Connector] Security block: downloaded .tdl SHA-256 did not match signed manifest; refusing update.");
@@ -6481,7 +6735,7 @@ async function main() {
   const state = loadState();
   if (!state) {
     console.error("\\n==========================================================");
-    console.error(" RapidShift Labs Tally Connector — First-Time PC Pairing");
+    console.error(" RapidShift Labs Tally Connector - First-Time PC Pairing");
     console.error("==========================================================");
     console.error("1. Open RapidShift Labs -> Tally Prime -> Connect Your Office PC");
     console.error("2. Click 'Generate Pairing Code' (or download the 1-Click .bat Installer)");
@@ -6581,8 +6835,8 @@ main().catch((err) => {
 }
 
 /**
- * Generates a 1-Click Windows Setup & Auto-Start Launcher (.bat) for non-technical
- * accountants so they never need to type PowerShell commands or open taskschd.msc (P1-14 / LAY-05).
+ * Generates a Windows Setup & Auto-Start Launcher (.bat) for accountants
+ * so they do not need to type PowerShell commands or open taskschd.msc.
  */
 export function generateWindowsTallyInstallerBat(params: {
   serverUrl: string;
@@ -6629,7 +6883,7 @@ export function generateWindowsTallyInstallerBat(params: {
     "",
     "echo [Step 1/4] Downloading verified Tally Connector and TDL Add-On...",
     whToken
-      ? `powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -UseBasicParsing -Uri '${cleanServer}/api/webhooks/tally?mode=tdl-latest&token=${whToken}' -OutFile '%RSL_DIR%\\${tdlFilename}'"`
+      ? `powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -UseBasicParsing -Headers @{'X-Tally-Webhook-Token'='${whToken}'} -Uri '${cleanServer}/api/webhooks/tally?mode=tdl-latest' -OutFile '%RSL_DIR%\\${tdlFilename}'"`
       : "rem TDL file can also be downloaded from the Connect Tally screen",
     `powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -UseBasicParsing -Uri '${cleanServer}/api/agent/connector-script' -OutFile '%RSL_DIR%\\rsl-tally-connector.mjs'" 2>nul`,
     "",
@@ -6784,7 +7038,7 @@ function resolveCanonicalVoucherGuid(
       }
       // Non-Destructive Bill Number Collision Shield:
       // An older .tdl (<= v2.7) in Create Mode accidentally sent an earlier bill's GUID (e.g. Bill #8)
-      // when creating Bill #9. NEVER overwrite Bill #8 — allocate a separate canonical key for Bill #9!
+      // when creating Bill #9. NEVER overwrite Bill #8 - allocate a separate canonical key for Bill #9!
       collidedWithDifferentBillNumber = true;
     }
 
@@ -6913,7 +7167,7 @@ function resolveCanonicalVoucherGuid(
     }
   }
 
-  // Fallback 2: No GUID / collided stale GUID — never let unnumbered or cross-party bills overwrite an existing saved bill!
+  // Fallback 2: No GUID / collided stale GUID - never let unnumbered or cross-party bills overwrite an existing saved bill!
   const baseKey = `vch_${companyId}_${voucherType}_${voucherNumber}`;
   const existingBase = db
     .select({
@@ -7111,7 +7365,7 @@ export function reconcileTallyCompanySnapshot(params: {
     (row) => !row.guid.startsWith("vch_") && !row.voucherNumber.startsWith("SIM-")
   );
 
-  // Catastrophic empty-snapshot circuit breaker (P0-01 / LOGIC-CRIT-01):
+  // Empty-snapshot circuit breaker:
   // Never wipe synced company vouchers when Tally returns an empty 0-voucher snapshot
   // (e.g. during Tally company reload, F1 menu lock, or transient XML export error).
   if (activeSet.size === 0 && syncableRows.length > 0 && !params.allowEmptyCompanyPurge) {
@@ -8448,6 +8702,8 @@ export async function ingestTallyBillEventAndEnqueueAutomation(params: {
       } via ${params.sourceLabel ?? "webhook"} (${queuedJobs} WhatsApp message(s) queued)`,
     });
   }
+
+  runWorkspaceDataRetentionSweep(params.workspaceId);
 
   return {
     upserted: savedVouchers.length,

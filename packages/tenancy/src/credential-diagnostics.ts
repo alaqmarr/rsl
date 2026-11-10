@@ -2123,8 +2123,19 @@ export async function verifyStaffClientConnectionLive(params: {
   }
 
   if (nextStatus !== "needs_reauth" && accessToken) {
-    if (/^(rsl_sandbox_|sandbox_|test_)/i.test(accessToken)) {
-      liveMessage = "Sandbox test token verified intact for local workflow testing.";
+    const wsRow = controlDb()
+      .select({ mode: controlSchema.workspaces.mode })
+      .from(controlSchema.workspaces)
+      .where(eq(controlSchema.workspaces.id, conn.workspaceId))
+      .get();
+    if (
+      accessToken.trim().startsWith("rsl_sandbox_") &&
+      (wsRow?.mode === "test" || process.env.NODE_ENV === "test" || Boolean(process.env.VITEST))
+    ) {
+      liveMessage = "Sandbox test token verified intact for test-mode workspace.";
+    } else if (accessToken.trim().startsWith("rsl_sandbox_")) {
+      nextStatus = "needs_reauth";
+      liveMessage = "Sandbox token is not permitted on a live workspace. Reconnect live provider credentials.";
     } else if (conn.provider === "whatsapp" || conn.provider === "meta") {
       const metaCfg = getPlatformMetaAppConfig();
       const graphVer = metaCfg.graphVersion || "v21.0";

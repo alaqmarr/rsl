@@ -39,28 +39,7 @@ const NEXT_DOCS_BIN = resolveNodeBinScript("next/dist/bin/next", [
 ]);
 const WORKER_DIST_BIN = path.join(REPO_ROOT, "apps", "worker", "dist", "worker.cjs");
 const CLEANUP_DIST_BIN = path.join(REPO_ROOT, "apps", "worker", "dist", "cleanup.cjs");
-
-function parseRootDotEnv(envFilePath) {
-  const parsed = {};
-  if (!fs.existsSync(envFilePath)) return parsed;
-  const content = fs.readFileSync(envFilePath, "utf8");
-  for (const rawLine of content.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const eqIdx = line.indexOf("=");
-    if (eqIdx <= 0) continue;
-    const key = line.slice(0, eqIdx).trim();
-    let val = line.slice(eqIdx + 1).trim();
-    if (
-      (val.startsWith('"') && val.endsWith('"')) ||
-      (val.startsWith("'") && val.endsWith("'"))
-    ) {
-      val = val.slice(1, -1);
-    }
-    parsed[key] = val;
-  }
-  return parsed;
-}
+const { parseRootDotEnv } = require(path.join(REPO_ROOT, "scripts", "load-root-env.cjs"));
 
 const fileEnv = parseRootDotEnv(path.join(REPO_ROOT, ".env"));
 const effectiveLogDir = process.env.LOG_DIR || fileEnv.LOG_DIR;

@@ -16,8 +16,8 @@ export default function GlobalError({
 
   return (
     <html lang="en">
-      <body className="flex min-h-screen items-center justify-center bg-[#F8F9FB] p-6 font-sans text-slate-900 antialiased">
-        <div className="max-w-md rounded-2xl border border-zinc-200 bg-white p-7 shadow-sm">
+      <body className="rsl-ambient-canvas flex min-h-screen items-center justify-center p-6 font-sans text-slate-900 antialiased">
+        <div className="rsl-frost-card max-w-md rounded-2xl p-7">
           <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-700">
             Unexpected Issue
           </span>

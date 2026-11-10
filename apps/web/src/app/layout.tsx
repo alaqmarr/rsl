@@ -1,12 +1,21 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { cookies } from "next/headers";
+import { Fraunces, JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import { SileoToastProvider } from "@rsl/ui";
+import { DpdpConsentBanner } from "@/components/dpdp-consent-banner";
+import { getWebLocale, readVerifiedWebFlashToast } from "@/lib/session";
 import "sileo/styles.css";
 import "./globals.css";
 
-const sans = Inter({
+const display = Fraunces({
   subsets: ["latin"],
-  variable: "--font-inter",
+  variable: "--font-fraunces",
+  display: "swap",
+});
+
+const sans = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  variable: "--font-jakarta",
   display: "swap",
 });
 
@@ -18,7 +27,7 @@ const mono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.APP_URL || "https://app.rapidshiftlabs.in"),
-  title: "RSL Marketing — Business Growth, Tally Sync & Customer Messages",
+  title: "RSL Marketing - Business Growth, Tally Sync & Customer Messages",
   description:
     "Unified customer messages, Tally Prime billing & reminders, WhatsApp broadcasts, ad analytics, and encrypted cloud backups.",
   manifest: "/site.webmanifest",
@@ -32,24 +41,38 @@ export const metadata: Metadata = {
     apple: "/apple-touch-icon.png",
   },
   openGraph: {
-    title: "RapidShift Labs — Tally Prime Sync, WhatsApp Cloud & Growth Suite",
+    title: "RapidShift Labs - Tally Prime Sync, WhatsApp Cloud & Growth Suite",
     description:
       "Automate Tally Prime GST invoice PDFs on WhatsApp, manage shared team inbox replies, and protect backups in 1 click.",
     images: [{ url: "/og-image.png", width: 1200, height: 630, alt: "RapidShift Labs Suite" }],
   },
   twitter: {
     card: "summary_large_image",
-    title: "RapidShift Labs — Tally Prime Sync, WhatsApp Cloud & Growth Suite",
+    title: "RapidShift Labs - Tally Prime Sync, WhatsApp Cloud & Growth Suite",
     images: ["/og-image.png"],
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const [locale, verifiedToast, cookieStore] = await Promise.all([
+    getWebLocale(),
+    readVerifiedWebFlashToast(),
+    cookies(),
+  ]);
+  const rawTheme = cookieStore.get("rsl_theme")?.value;
+  const dataTheme = rawTheme === "dark" || rawTheme === "light" ? rawTheme : undefined;
+
   return (
-    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
-      <body className="min-h-screen bg-[#F8F9FB] font-sans text-slate-900 antialiased">
-        <SileoToastProvider cookieName="rsl_toast" />
+    <html
+      lang={locale}
+      data-theme={dataTheme}
+      suppressHydrationWarning
+      className={`${display.variable} ${sans.variable} ${mono.variable}`}
+    >
+      <body className="min-h-screen bg-[var(--canvas)] font-sans text-[var(--ink)] antialiased">
+        <SileoToastProvider cookieName="rsl_toast" verifiedToast={verifiedToast} />
         {children}
+        <DpdpConsentBanner />
       </body>
     </html>
   );

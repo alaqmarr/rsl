@@ -811,6 +811,72 @@ export const CONTROL_MIGRATIONS: SqlMigration[] = [
       ALTER TABLE workspaces ADD COLUMN allow_manual_credentials INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 12,
+    name: "0012_audit_security_mfa_outbox_and_webhooks",
+    sql: `
+      ALTER TABLE users ADD COLUMN failed_login_attempts INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE users ADD COLUMN locked_until INTEGER;
+
+      ALTER TABLE sessions ADD COLUMN last_active_at INTEGER;
+      ALTER TABLE sessions ADD COLUMN step_up_at INTEGER;
+
+      ALTER TABLE platform_staff ADD COLUMN totp_secret_encrypted TEXT;
+      ALTER TABLE platform_staff ADD COLUMN totp_backup_codes_json TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE platform_staff ADD COLUMN totp_enrolled_at INTEGER;
+      ALTER TABLE platform_staff ADD COLUMN failed_login_attempts INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE platform_staff ADD COLUMN locked_until INTEGER;
+
+      ALTER TABLE platform_staff_sessions ADD COLUMN mfa_verified_at INTEGER;
+      ALTER TABLE platform_staff_sessions ADD COLUMN step_up_at INTEGER;
+      ALTER TABLE platform_staff_sessions ADD COLUMN last_active_at INTEGER;
+
+      ALTER TABLE workspaces ADD COLUMN public_link_epoch INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE workspaces ADD COLUMN storage_quota_bytes INTEGER NOT NULL DEFAULT 5368709120;
+      ALTER TABLE workspaces ADD COLUMN deleted_at INTEGER;
+
+      ALTER TABLE tenant_registry ADD COLUMN next_outbox_at INTEGER;
+      CREATE INDEX IF NOT EXISTS idx_tenant_registry_next_outbox ON tenant_registry(status, next_outbox_at);
+
+      ALTER TABLE payments ADD COLUMN external_ref_utr TEXT;
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_ws_utr
+        ON payments(workspace_id, external_ref_utr)
+        WHERE external_ref_utr IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS webhook_deliveries (
+        id TEXT PRIMARY KEY,
+        endpoint_id TEXT NOT NULL REFERENCES outbound_webhook_endpoints(id) ON DELETE CASCADE,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        http_status INTEGER,
+        response_snippet TEXT,
+        last_error TEXT,
+        next_retry_at INTEGER,
+        created_at INTEGER NOT NULL,
+        delivered_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_ws_ts ON webhook_deliveries(workspace_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_retry ON webhook_deliveries(status, next_retry_at);
+
+      CREATE TABLE IF NOT EXISTS idempotency_records (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        idempotency_key TEXT NOT NULL,
+        method TEXT NOT NULL,
+        path TEXT NOT NULL,
+        request_hash TEXT NOT NULL,
+        status_code INTEGER NOT NULL,
+        response_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_idempotency_ws_key ON idempotency_records(workspace_id, idempotency_key);
+      CREATE INDEX IF NOT EXISTS idx_idempotency_expires ON idempotency_records(expires_at);
+    `,
+  },
 ];
 
 export const INGRESS_MIGRATIONS: SqlMigration[] = [
@@ -838,6 +904,15 @@ export const INGRESS_MIGRATIONS: SqlMigration[] = [
         version INTEGER PRIMARY KEY,
         applied_at INTEGER NOT NULL
       );
+    `,
+  },
+  {
+    version: 2,
+    name: "0002_ingress_retry_and_dlq",
+    sql: `
+      ALTER TABLE webhook_inbox ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE webhook_inbox ADD COLUMN next_retry_at INTEGER;
+      CREATE INDEX IF NOT EXISTS idx_webhook_retry_due ON webhook_inbox(status, next_retry_at);
     `,
   },
 ];
@@ -1498,6 +1573,19 @@ export const TENANT_DATA_MIGRATIONS: SqlMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_supplier_drafts_status_ts ON supplier_bill_drafts(status, received_at);
     `,
   },
+  {
+    version: 8,
+    name: "0008_analytics_rollups_and_dedupe_indexes",
+    sql: `
+      CREATE TABLE IF NOT EXISTS analytics_rollups (
+        key TEXT PRIMARY KEY,
+        payload_json TEXT NOT NULL,
+        computed_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_vouchers_date ON tally_vouchers(voucher_date);
+      CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+    `,
+  },
 ];
 
 export const TENANT_LOGS_MIGRATIONS: SqlMigration[] = [
@@ -1670,6 +1758,7 @@ export const EXPECTED_TENANT_DATA_TABLES = new Set([
   "sync_runs",
   "outbox",
   "settings",
+  "analytics_rollups",
   "schema_meta",
 ]);
 

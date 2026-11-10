@@ -112,7 +112,7 @@ function safePdfText(input: unknown, maxLen = 140): string {
   const s = String(input ?? "")
     .replace(/₹/g, "Rs. ")
     .replace(/[•·]/g, " | ")
-    .replace(/[—–]/g, "-")
+    .replace(/[-–]/g, "-")
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
     .replace(/[^\x20-\x7E\xA0-\xFF]/g, "")
@@ -137,6 +137,7 @@ function pdfDate(ts: number | null | undefined): string {
     day: "2-digit",
     month: "short",
     year: "numeric",
+    timeZone: "Asia/Kolkata",
   });
 }
 
@@ -663,7 +664,7 @@ export async function generateGstInvoicePdfBytes(inv: GstInvoicePdfInput): Promi
 
   doc.setTitle(`${docTitleLabel} ${inv.invoiceNumber}`);
   doc.setAuthor(safePdfText(inv.seller.payeeName));
-  doc.setCreator("RapidShift Labs — RSL Marketing & Tally Suite");
+  doc.setCreator("RapidShift Labs - RSL Marketing & Tally Suite");
   doc.setSubject(`${docTitleLabel} for ${safePdfText(inv.buyerName)}`);
 
   const ctx = await createStationeryContext(doc);
@@ -1032,7 +1033,7 @@ export async function generateWalletStatementPdfBytes(
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   doc.setTitle(`Wallet & Billing Statement - ${safePdfText(data.workspaceName)}`);
-  doc.setCreator("RapidShift Labs — RSL Marketing & Tally Suite");
+  doc.setCreator("RapidShift Labs - RSL Marketing & Tally Suite");
 
   const ctx = await createStationeryContext(doc);
   const { fontRegular, fontBold } = ctx;
@@ -1250,7 +1251,7 @@ export async function generateTallyReceivablesPdfBytes(
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   doc.setTitle(`Tally Prime Receivables Report - ${safePdfText(data.workspaceName)}`);
-  doc.setCreator("RapidShift Labs — RSL Marketing & Tally Suite");
+  doc.setCreator("RapidShift Labs - RSL Marketing & Tally Suite");
 
   const ctx = await createStationeryContext(doc);
   const { fontRegular, fontBold } = ctx;
@@ -1374,7 +1375,7 @@ export async function generateAnalyticsReportPdfBytes(
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   doc.setTitle(`Business Performance Report - ${safePdfText(data.workspaceName)}`);
-  doc.setCreator("RapidShift Labs — RSL Marketing & Tally Suite");
+  doc.setCreator("RapidShift Labs - RSL Marketing & Tally Suite");
 
   const ctx = await createStationeryContext(doc);
   const { fontRegular, fontBold } = ctx;
@@ -1580,7 +1581,7 @@ export async function generatePartyLedgerStatementPdfBytes(
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   doc.setTitle(`Ledger Statement - ${safePdfText(data.partyName)}`);
-  doc.setCreator("RapidShift Labs — RSL All-in-One Tally Suite");
+  doc.setCreator("RapidShift Labs - RSL All-in-One Tally Suite");
 
   const ctx = await createStationeryContext(doc);
   const { fontRegular, fontBold } = ctx;
@@ -1840,7 +1841,7 @@ export async function generateTallyVoucherDetailPdfBytes(
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   doc.setTitle(`${safePdfText(data.voucherType)} #${safePdfText(data.voucherNumber)}`);
-  doc.setCreator("RapidShift Labs — RSL All-in-One Tally Suite");
+  doc.setCreator("RapidShift Labs - RSL All-in-One Tally Suite");
 
   const ctx = await createStationeryContext(doc);
   const { fontRegular, fontBold } = ctx;

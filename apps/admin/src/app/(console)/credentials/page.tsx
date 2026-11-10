@@ -1,7 +1,6 @@
 import { headers } from "next/headers";
 import {
   Activity,
-  AlertTriangle,
   CheckCircle2,
   Database,
   KeyRound,
@@ -9,7 +8,6 @@ import {
   Play,
   RefreshCw,
   Server,
-  ShieldCheck,
 } from "lucide-react";
 import { canStaffAccessAdminRoute, formatStaffRoleLabel } from "@rsl/auth";
 import { getEnv, isLoopbackUrlOrHost, resolveEndpointsFromHeaders } from "@rsl/core";
@@ -17,7 +15,6 @@ import {
   ALL_PLATFORM_CREDENTIAL_PROVIDERS,
   buildCloudflareEmailWorkerSnippet,
   buildPlatformCredentialsSeedTemplate,
-  getPlatformCloudflareEmailConfig,
   getSafePlatformCredentialsAdminSnapshot,
   probePlatformSystemStatuses,
   type CredentialSource,
@@ -26,10 +23,12 @@ import {
 import {
   AccessRestrictedState,
   FlashBanner,
+  GuideDrawerButton,
   MetricCard,
   PageHeader,
   SectionCard,
   StatusPill,
+  type GuideDrawerContent,
 } from "@rsl/ui";
 import { ActionLink, AdminCopyButton, SubmitButton } from "@/components/ios-feedback";
 import {
@@ -118,7 +117,7 @@ function ProviderLiveTestFooter({
             {verifyStatusPill(lastVerifyStatus, isReady)}
             <span className="text-[11px] font-medium text-zinc-500">
               {lastVerifiedAt
-                ? `Last tested ${new Date(lastVerifiedAt).toLocaleString("en-IN")}`
+                ? `Last tested ${new Date(lastVerifiedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`
                 : "No live test recorded yet"}
             </span>
           </div>
@@ -200,9 +199,158 @@ export default async function AdminPlatformCredentialsPage({
   const metaScopesText =
     "public_profile, business_management, ads_management, ads_read, pages_show_list, pages_read_engagement, pages_manage_posts, pages_manage_ads, pages_messaging, leads_retrieval, instagram_basic, instagram_content_publish, instagram_manage_messages, whatsapp_business_management, whatsapp_business_messaging";
 
-  const cfEmailFull = getPlatformCloudflareEmailConfig();
   const cfEmailWorkerCode = buildCloudflareEmailWorkerSnippet(googleOrigin);
   const seedTemplateJson = JSON.stringify(buildPlatformCredentialsSeedTemplate(), null, 2);
+
+  const credentialsGuideContent: GuideDrawerContent = {
+    eyebrow: "Platform Vault • 2026 Setup Guides",
+    title: "Google Auth Platform, Cloud Ads Access Levels, Meta Use Cases & Cloudflare Workers",
+    summary:
+      "Select a provider tab below to copy exact Redirect URIs, Webhook URLs, Scopes, and Worker scripts.",
+    roleNote: "Super Admin Vault",
+    tabs: [
+      {
+        id: "google",
+        label: "1. Google Auth Platform & Ads",
+        summary:
+          "Configure ONE Google OAuth 2.0 Web Application Client in the 2026 Google Auth Platform so every customer can connect Google Drive (drive.file, zero CASA audit), Google Business Profile, Google Sheets, Search Console, and Google Ads in 1 click.",
+        copyValues: [
+          { label: "Authorized JavaScript Origin", value: googleOrigin },
+          { label: "Authorized Redirect URI", value: googleRedirectUri },
+          { label: "Authorized Domain", value: endpoints.primaryDomain },
+          { label: "Developer Contact Email", value: "app@rapidshiftlabs.in" },
+          { label: "Required OAuth Scopes", value: googleScopesText },
+        ],
+        steps: [
+          {
+            title: "Enable Required APIs in Google Cloud Console",
+            detail:
+              "Open console.cloud.google.com -> Select your project ('RapidShift Labs') -> APIs & Services -> Library -> Enable Google Drive API, Google Sheets API, Google Search Console API, My Business Account Management API, My Business Business Information API, and Google Ads API.",
+          },
+          {
+            title: "Configure Google Auth Platform -> Branding & Audience",
+            detail: `Open Google Auth Platform -> Branding -> App Information: set App name 'RapidShift Labs', User support email 'app@rapidshiftlabs.in', App home page '${googleOrigin}', Privacy policy '${googleOrigin}/privacy', Terms of service '${googleOrigin}/terms', and Authorized domain '${endpoints.primaryDomain}'. Then open Audience -> select External -> click Publish App so status moves from Testing to In production (prevents 7-day refresh-token expiry).`,
+          },
+          {
+            title: "Configure Google Auth Platform -> Data Access & Clients",
+            detail:
+              "Open Google Auth Platform -> Data Access -> Add or remove scopes -> paste the Required OAuth Scopes above and Save. Next, open Google Auth Platform -> Clients -> + Create Client -> Application type: Web application -> paste the Authorized JavaScript Origin and Redirect URI above -> download client_secret_*.json and upload it in Section 1.",
+          },
+          {
+            title: "Google Cloud Console -> Google Ads API Access Levels (No Developer Token Needed)",
+            detail:
+              "Google Ads API retired legacy Developer Tokens. API access levels are managed exclusively in Google Cloud Console -> APIs & Services -> Google Ads API. New projects start at Test access (15,000 daily API operations on test accounts + developer sandboxing). Click 'Upgrade access level' -> 'Apply for access' under Next access level: Explorer (allows 2,880 daily operations on production accounts), and later upgrade to Standard when scaling.",
+          },
+          {
+            title: "Fixing 'Your application for explorer-level access was not approved'",
+            detail:
+              "If Google Cloud Console displays the red banner 'Your application for explorer-level access was not approved', fix these 4 items before clicking 'Apply for access' again: (1) In Google Ads Manager (MCC) -> Tools -> API Center, set your API contact email to your verified corporate domain email (app@rapidshiftlabs.in, never a free @gmail.com address) and verify that email; (2) Ensure an active Google Cloud Billing Account is linked to this Cloud project; (3) Ensure Google Auth Platform -> Branding has live, publicly reachable Privacy Policy (/privacy) and Terms (/terms) URLs matching your Authorized Domain; (4) In the Explorer re-application form, clearly state that RapidShift Labs is an authorized multi-tenant marketing & accounting SaaS platform syncing campaign metrics and budgets for verified business owners.",
+          },
+        ],
+        cautions: [
+          "Never create a Google 'Service account' JSON key. Service accounts have 0 GB personal Drive quota and cannot display Sign in with Google. Our form automatically rejects Service Account JSON files.",
+          "Until Explorer access is approved in Google Cloud Console -> Google Ads API, your project remains on Test access (works immediately with Google Ads Test Manager accounts).",
+        ],
+      },
+      {
+        id: "meta",
+        label: "2. Meta Use Cases & Webhooks",
+        summary:
+          "Configure ONE Meta App using the 2026 Meta Developer Console Use Cases & Facebook Login for Business Configurations so customers can connect WhatsApp Cloud API, Instagram Business, Facebook Pages, and Meta Ads/Pixels in 1 click.",
+        copyValues: [
+          { label: "Valid OAuth Redirect URI", value: metaRedirectUri },
+          { label: "Meta Pages / IG Webhook URL", value: metaWebhookUri },
+          { label: "WhatsApp Cloud Webhook URL", value: whatsappWebhookUri },
+          { label: "Login for Business Scopes", value: metaScopesText },
+          { label: "App Basic Legal URLs", value: metaLegalUrlsText },
+        ],
+        steps: [
+          {
+            title: "Create App with 2026 Meta Use Cases & Basic Settings",
+            detail: `Open developers.facebook.com/apps -> Create App -> connect your verified Meta Business Portfolio -> under Use Cases select 'Authenticate and request data from users with Facebook Login' + 'Other' -> Business ('RapidShift Labs'). Under App Settings -> Basic, set Contact Email 'app@rapidshiftlabs.in', App Domain 'app.${endpoints.primaryDomain}', and paste the Privacy, Terms, and Data Deletion URLs above.`,
+          },
+          {
+            title: "Attach Required Use Cases (WhatsApp, Marketing API, Pages & Instagram)",
+            detail:
+              "In the left sidebar click Use Cases -> Add use cases -> enable Facebook Login for Business, WhatsApp (Cloud API), Marketing API (Ads & Pixels), Manage messaging & content on Instagram, and Manage everything on your Page. Under Facebook Login for Business -> Settings, enable Client OAuth Login + Web OAuth Login + Embedded Browser OAuth Login and paste the Valid OAuth Redirect URI above.",
+          },
+          {
+            title: "Create Facebook Login for Business Configuration IDs",
+            detail:
+              "Open Facebook Login for Business -> Configurations -> + Create configuration. Create a General Business Login configuration (System User access token, non-expiring, with the Login for Business Scopes above) and optionally a second configuration using the 'WhatsApp Embedded Signup' variation (60-day token + whatsapp_business_management + whatsapp_business_messaging). Paste the Configuration ID into Section 4.",
+          },
+          {
+            title: "Configure Webhooks & System User Token",
+            detail:
+              "Under Webhooks, subscribe Page/Instagram (messages, messaging_postbacks, feed, leadgen) to /api/webhooks/meta and WhatsApp Business Account (messages, message_template_status_update, account_update) to /api/webhooks/whatsapp using your Global Verify Token. Switch App Mode from Development to Live once Business Verification is complete.",
+          },
+        ],
+      },
+      {
+        id: "cloudflare",
+        label: "3. Cloudflare Email Worker",
+        summary:
+          "Route supplier GST invoices emailed to bills+<workspace-slug>@<domain> straight into each client's Tally Purchase Draft Inbox using $0 Cloudflare Email Routing + Email Workers.",
+        copyValues: [
+          {
+            label: "Inbound Webhook Endpoint",
+            value: `${googleOrigin}/api/webhooks/cloudflare-email`,
+          },
+          {
+            label: "Recommended Inbound Subdomain",
+            value: snap.cloudflareEmail.inboundDomain || `bills.${endpoints.primaryDomain}`,
+          },
+        ],
+        steps: [
+          {
+            title: "Save Inbound Domain & HMAC Secret in Section 9",
+            detail:
+              "Save your inbound subdomain in Section 9 on this page (leave the secret blank to auto-generate a 48-character HMAC key).",
+          },
+          {
+            title: "Deploy the Cloudflare Email Worker Script",
+            detail:
+              "In dash.cloudflare.com → Email → Email Routing → Email Workers, create a Worker, set environment variable RSL_EMAIL_WEBHOOK_SECRET to your saved secret, and paste the script below:",
+            code: cfEmailWorkerCode,
+            codeLanguage: "javascript",
+          },
+          {
+            title: "Enable Catch-All Rule to Worker",
+            detail:
+              "Under Email Routing → Routing Rules, route Catch-All addresses on your bills subdomain to this Email Worker.",
+          },
+        ],
+      },
+      {
+        id: "seeder",
+        label: "4. JSON & CLI Seeder",
+        summary:
+          "Seed or rotate all 11 encrypted providers at once from a single JSON bundle via the paste/upload box on this page or from an SSH terminal.",
+        copyValues: [
+          {
+            label: "CLI Seed Command",
+            value: "pnpm db:seed-credentials --file ./credentials.seed.json",
+          },
+        ],
+        steps: [
+          {
+            title: "Copy the JSON Seed Template",
+            detail:
+              "Any omitted or blank provider key is left untouched. Setting web_push_vapid.autoGenerate to true generates fresh P-256 ECDSA keys automatically:",
+            code: seedTemplateJson,
+            codeLanguage: "json",
+          },
+          {
+            title: "Paste in 'Bulk JSON Seed' or run CLI",
+            detail:
+              "Expand 'Bulk Seed Credentials (JSON)' on this page to encrypt into control.db immediately, or run the CLI command above on your server.",
+          },
+        ],
+      },
+    ],
+    fullGuideHref: "/runbooks",
+    fullGuideLabel: "All Staff SOP Runbooks →",
+  };
 
   const matrixRows: Array<{
     key: PlatformCredentialProviderKey;
@@ -350,6 +498,12 @@ export default async function AdminPlatformCredentialsPage({
         subtitle="Configure, encrypt, and live-test all 11 platform credential providers plus runtime ports, SQLite databases, KMS ciphers, and open SMB APIs directly from the staff console."
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <GuideDrawerButton
+              drawerId="admin-credentials-setup-guide"
+              label="Need help? • Setup Guides"
+              badgeText="4 guides"
+              guide={credentialsGuideContent}
+            />
             <ActionLink
               href={
                 sp.probeSystem === "1"
@@ -427,7 +581,7 @@ export default async function AdminPlatformCredentialsPage({
         <div id="system-status-probe" className="scroll-mt-24">
           <SectionCard
             title={`Live Platform Runtime, Ports, Databases & Open API Status (${systemReport.summary.healthy}/${systemReport.items.length} Healthy)`}
-            subtitle={`Probed live at ${new Date(systemReport.checkedAt).toLocaleTimeString("en-IN")} across ports 4500-4520, SQLite WAL files, KMS AES-256-GCM cipher, and public Indian SMB directories`}
+            subtitle={`Probed live at ${new Date(systemReport.checkedAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" })} across ports 4500-4520, SQLite WAL files, KMS AES-256-GCM cipher, and public Indian SMB directories`}
             action={
               <ActionLink
                 href={`/credentials?probeSystem=1&ts=${Date.now()}#system-status-probe`}
@@ -543,7 +697,7 @@ export default async function AdminPlatformCredentialsPage({
                       {verifyStatusPill(row.lastVerifyStatus, row.isReady)}
                       {row.lastVerifiedAt && (
                         <span className="text-[10.5px] text-zinc-400 tabular-nums">
-                          {new Date(row.lastVerifiedAt).toLocaleString("en-IN")}
+                          {new Date(row.lastVerifiedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
                         </span>
                       )}
                     </div>
@@ -576,34 +730,35 @@ export default async function AdminPlatformCredentialsPage({
         </div>
       </SectionCard>
 
-      {/* Bulk Database Credential Seeder (1-Click JSON Seed or CLI Command) */}
-      <details className="group rounded-2xl border border-emerald-200/90 bg-emerald-50/35 shadow-2xs">
+      {/* Bulk Database Credential Seeder (1-Click JSON Seed) */}
+      <details className="rsl-frost-card group rounded-2xl">
         <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 px-6 py-4 select-none">
           <div className="flex items-center gap-2.5">
             <Database className="h-4 w-4 text-emerald-700" />
             <div>
               <div className="text-sm font-bold text-slate-900">
-                Bulk Seed Credentials Directly into Database (JSON Bundle or CLI Seeder)
+                Bulk Seed Credentials into Database (JSON Bundle)
               </div>
               <div className="text-xs text-zinc-600">
-                Seed all 11 providers at once via encrypted JSON paste/upload here, or via CLI:{" "}
-                <code className="rounded bg-white px-1.5 py-0.5 font-mono text-[11px] font-semibold text-emerald-900">
-                  pnpm db:seed-credentials --file ./credentials.seed.json
-                </code>
+                Paste or upload a JSON bundle to encrypt up to all 11 providers in one step.
               </div>
             </div>
           </div>
-          <AdminCopyButton text={seedTemplateJson} label="Copy JSON Seed Template" />
+          <div className="flex flex-wrap items-center gap-2">
+            <GuideDrawerButton
+              drawerId="admin-credentials-seeder-guide"
+              label="Need help? • CLI & Template"
+              initialTabId="seeder"
+              guide={credentialsGuideContent}
+            />
+            <AdminCopyButton text={seedTemplateJson} label="Copy JSON Seed Template" />
+          </div>
         </summary>
-        <div className="space-y-3.5 border-t border-emerald-200/60 bg-white p-6 text-xs">
-          <p className="text-zinc-600">
-            Paste a partial or complete JSON object matching the template (any blank or omitted provider is untouched;{" "}
-            <code className="font-mono">web_push_vapid.autoGenerate: true</code> generates fresh P-256 keys automatically).
-          </p>
+        <div className="space-y-3 border-t border-zinc-200/70 p-6 text-xs">
           <form action={staffBulkSeedPlatformCredentialsJsonAction} className="space-y-3">
             <textarea
               name="credentialsJson"
-              rows={7}
+              rows={6}
               placeholder={seedTemplateJson}
               className="adm-input font-mono text-[11px]"
             />
@@ -623,313 +778,22 @@ export default async function AdminPlatformCredentialsPage({
         </div>
       </details>
 
-      {/* Complete Minute-by-Minute Admin Guide for Google OAuth Consent Screen (Auto-expands until Google OAuth is Ready) */}
-      <details
-        open={!snap.google.isReady}
-        className="group rounded-2xl border border-zinc-200/90 bg-white shadow-2xs"
-      >
-        <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 px-6 py-4 select-none">
-          <div>
-            <div className="text-sm font-bold text-slate-900">
-              Complete Admin Setup Guide — RapidShift Labs Google OAuth Screen (1-Click Customer Drive)
-            </div>
-            <div className="text-xs text-zinc-500">
-              {snap.google.isReady
-                ? "Google OAuth is active — click to review the 6 Google Cloud Console setup steps or copy Authorized Callback URLs"
-                : "Do this ONCE on the Admin side so every RapidShift Labs customer can connect their own Google Drive in 2 clicks"}
-            </div>
-          </div>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-800">
-            <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-            <span>Zero CASA Audit Needed (drive.file)</span>
-          </span>
-        </summary>
-        <div className="space-y-5 border-t border-zinc-100 p-6 text-xs">
-          {/* Why Service Account JSON Fails Callout */}
-          <div className="rounded-2xl border border-amber-300/90 bg-amber-50/85 p-4 text-amber-950">
-            <div className="flex items-start gap-2.5">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
-              <div className="space-y-1">
-                <div className="text-[13px] font-bold">
-                  Why Google&apos;s &ldquo;Service Account&rdquo; JSON Confused Everyone (Do NOT Create a Service Account!)
-                </div>
-                <p className="leading-relaxed text-amber-950/90">
-                  In Google Cloud Console, clicking{" "}
-                  <code className="rounded bg-white/80 px-1.5 py-0.5 font-mono text-[11px]">
-                    Create Credentials → Service account
-                  </code>{" "}
-                  generates a robot JSON key (<code className="font-mono">&quot;type&quot;: &quot;service_account&quot;</code>). Service accounts have{" "}
-                  <strong>0 GB personal Google Drive storage quota</strong> and{" "}
-                  <strong>cannot show Google&apos;s &ldquo;Sign in with Google&rdquo; screen</strong>! Instead, follow the 6 exact steps below to create{" "}
-                  <strong>ONE OAuth 2.0 Web Application Client</strong> for <strong>RapidShift Labs</strong>. Our form below automatically blocks accidental Service Account JSONs so you can never paste the wrong file.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Exact Copy-Paste URLs for Google Cloud Console */}
-          <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
-            <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-3.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-900">
-                  1. Authorized JavaScript Origin (Copy into Google Cloud)
-                </span>
-                <AdminCopyButton text={googleOrigin} label="Copy Origin" />
-              </div>
-              <div className="mt-1.5 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-[11px] font-semibold text-emerald-800">
-                {googleOrigin}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-3.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-900">
-                  2. Authorized Redirect URI (Exact Callback URL)
-                </span>
-                <AdminCopyButton text={googleRedirectUri} label="Copy Redirect URI" />
-              </div>
-              <div className="mt-1.5 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-[11px] font-semibold text-emerald-800">
-                {googleRedirectUri}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-3.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-900">
-                  3. Authorized Domain (OAuth Consent Branding)
-                </span>
-                <AdminCopyButton text={endpoints.primaryDomain} label="Copy Domain" />
-              </div>
-              <div className="mt-1.5 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-[11px] font-semibold text-slate-900">
-                {endpoints.primaryDomain}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-3.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-900">
-                  4. Required OAuth Scopes (Non-Sensitive drive.file)
-                </span>
-                <AdminCopyButton text={googleScopesText} label="Copy Scopes" />
-              </div>
-              <div className="mt-1.5 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-[11px] text-slate-800">
-                {googleScopesText}
-              </div>
-            </div>
-          </div>
-
-          {/* 6 Minute-by-Minute Steps */}
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-            <div className="rounded-xl border border-zinc-200/90 bg-white p-3.5">
-              <div className="font-bold text-slate-900">
-                Step 1 • Create Google Cloud Project
-              </div>
-              <p className="mt-1 leading-relaxed text-zinc-600">
-                Open <code className="font-mono">console.cloud.google.com</code>, sign in with your founder Google account, click the project dropdown at top-left → <strong>New Project</strong> → Name it{" "}
-                <strong>RapidShift Labs</strong> → click <strong>Create</strong> and make sure it is selected at top-left.
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-zinc-200/90 bg-white p-3.5">
-              <div className="font-bold text-slate-900">
-                Step 2 • Enable Google Drive API
-              </div>
-              <p className="mt-1 leading-relaxed text-zinc-600">
-                In the left sidebar, open <strong>APIs &amp; Services → Library</strong>. Search for{" "}
-                <strong>Google Drive API</strong>, click it, and click the blue <strong>Enable</strong> button.{" "}
-                <em>(Optional for Google Reviews: also enable My Business Account Management API &amp; My Business Business Information API.)</em>
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-zinc-200/90 bg-white p-3.5">
-              <div className="font-bold text-slate-900">
-                Step 3 • Configure Consent Screen Branding
-              </div>
-              <p className="mt-1 leading-relaxed text-zinc-600">
-                Open <strong>APIs &amp; Services → OAuth consent screen</strong> (or <strong>Google Auth Platform → Branding</strong>). Select{" "}
-                <strong>External</strong> user type → App name: <strong>RapidShift Labs</strong> → Support email: your email →{" "}
-                <strong>Authorized domains</strong>: add <code className="font-mono">{endpoints.primaryDomain}</code> → Save.
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-zinc-200/90 bg-white p-3.5">
-              <div className="font-bold text-slate-900">
-                Step 4 • Add Non-Sensitive drive.file Scope
-              </div>
-              <p className="mt-1 leading-relaxed text-zinc-600">
-                Open <strong>Data Access / Scopes → Add or remove scopes</strong>. Tick <code className="font-mono">openid</code>,{" "}
-                <code className="font-mono">userinfo.email</code>, <code className="font-mono">userinfo.profile</code>, and{" "}
-                <code className="font-mono">https://www.googleapis.com/auth/drive.file</code>. Because <code className="font-mono">drive.file</code> only touches RapidShift Labs&apos;s own backup folder, Google classifies it as <strong>non-sensitive</strong> (no paid CASA audit!).
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-zinc-200/90 bg-white p-3.5">
-              <div className="font-bold text-slate-900">
-                Step 5 • Click &ldquo;PUBLISH APP&rdquo; (Critical!)
-              </div>
-              <p className="mt-1 leading-relaxed text-zinc-600">
-                Open <strong>Audience</strong> (under Google Auth Platform) and click <strong>PUBLISH APP → Confirm</strong> so status changes from{" "}
-                <em>Testing</em> to <strong>In production</strong>. If left in Testing, only manually listed test emails can sign in AND Google expires refresh tokens after 7 days!
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-zinc-200/90 bg-white p-3.5">
-              <div className="font-bold text-slate-900">
-                Step 6 • Create &ldquo;Web application&rdquo; OAuth Client
-              </div>
-              <p className="mt-1 leading-relaxed text-zinc-600">
-                Go to <strong>APIs &amp; Services → Credentials → + Create Credentials → OAuth client ID</strong>. Choose{" "}
-                <strong>Application type: Web application</strong> (NEVER Service Account!). Paste the{" "}
-                <strong>Authorized JavaScript Origin</strong> and <strong>Authorized Redirect URI</strong> above, click{" "}
-                <strong>Create</strong>, and paste the Client ID &amp; Secret (or <code className="font-mono">client_secret_*.json</code>) below!
-              </p>
-            </div>
-          </div>
-        </div>
-      </details>
-
-      {/* Complete Step-by-Step Admin Guide for Meta / Facebook Login for Business & Webhooks */}
-      <details
-        open={!snap.meta.isReady}
-        className="group rounded-2xl border border-zinc-200/90 bg-white shadow-2xs"
-      >
-        <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 px-6 py-4 select-none">
-          <div>
-            <div className="text-sm font-bold text-slate-900">
-              Complete Admin Setup Guide — Meta / Facebook Login for Business, Ads &amp; WhatsApp OAuth Screen
-            </div>
-            <div className="text-xs text-zinc-500">
-              {snap.meta.isReady
-                ? "Meta App credentials are saved — click to copy Valid OAuth Redirect URIs, Webhook URLs, Legal URLs, or Login for Business Scopes"
-                : "Do this ONCE in developers.facebook.com so clients can connect Facebook Pages, Instagram, Meta Ads, Pixels & WhatsApp in 1 click"}
-            </div>
-          </div>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-bold text-sky-800">
-            <ShieldCheck className="h-3.5 w-3.5 text-sky-600" />
-            <span>Business App + Login Configuration Ready</span>
-          </span>
-        </summary>
-        <div className="space-y-5 border-t border-zinc-100 p-6 text-xs">
-          <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
-            <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-3.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-900">
-                  1. Valid OAuth Redirect URI (Facebook Login → Settings)
-                </span>
-                <AdminCopyButton text={metaRedirectUri} label="Copy OAuth URI" />
-              </div>
-              <div className="mt-1.5 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-[11px] font-semibold text-emerald-800">
-                {metaRedirectUri}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-3.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-900">
-                  2. Meta Pages / Instagram / Lead Ads Webhook URL
-                </span>
-                <AdminCopyButton text={metaWebhookUri} label="Copy Meta Webhook" />
-              </div>
-              <div className="mt-1.5 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-[11px] font-semibold text-emerald-800">
-                {metaWebhookUri}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-3.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-900">
-                  3. WhatsApp Cloud API Webhook Callback URL
-                </span>
-                <AdminCopyButton text={whatsappWebhookUri} label="Copy WA Webhook" />
-              </div>
-              <div className="mt-1.5 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-[11px] font-semibold text-emerald-800">
-                {whatsappWebhookUri}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-3.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-bold text-slate-900">
-                  4. Required Permissions (Login for Business Configuration)
-                </span>
-                <AdminCopyButton text={metaScopesText} label="Copy Scopes" />
-              </div>
-              <div className="mt-1.5 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-[11px] text-slate-800">
-                {metaScopesText}
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/80 p-3.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-bold text-slate-900">
-                App Basic Settings — Required Legal URLs (Already Live on Your App!)
-              </span>
-              <AdminCopyButton text={metaLegalUrlsText} label="Copy All 3 URLs" />
-            </div>
-            <div className="mt-1.5 break-all rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-[11px] text-slate-800">
-              {metaLegalUrlsText}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-            <div className="rounded-xl border border-zinc-200/90 bg-white p-3.5">
-              <div className="font-bold text-slate-900">Step 1 • Create &ldquo;Business&rdquo; Meta App</div>
-              <p className="mt-1 leading-relaxed text-zinc-600">
-                Open <code className="font-mono">developers.facebook.com/apps</code> → <strong>Create App</strong> → Choose{" "}
-                <strong>Other → Business</strong> → App Name: <strong>RapidShift Labs</strong> → attach your Meta Business Portfolio.
-              </p>
-            </div>
-            <div className="rounded-xl border border-zinc-200/90 bg-white p-3.5">
-              <div className="font-bold text-slate-900">Step 2 • App Settings → Basic</div>
-              <p className="mt-1 leading-relaxed text-zinc-600">
-                Add App Domain <code className="font-mono">app.{endpoints.primaryDomain}</code>, upload your square app icon, and paste the{" "}
-                <strong>Privacy Policy</strong>, <strong>Terms of Service</strong>, and <strong>User Data Deletion</strong> URLs above. Copy{" "}
-                <strong>App ID</strong> &amp; <strong>App Secret</strong> into Section 4 below.
-              </p>
-            </div>
-            <div className="rounded-xl border border-zinc-200/90 bg-white p-3.5">
-              <div className="font-bold text-slate-900">Step 3 • Facebook Login for Business</div>
-              <p className="mt-1 leading-relaxed text-zinc-600">
-                Add product <strong>Facebook Login for Business</strong>. Under <strong>Settings</strong>, enable{" "}
-                <em>Client OAuth Login</em> + <em>Web OAuth Login</em> and paste <code className="font-mono">{metaRedirectUri}</code> into{" "}
-                <strong>Valid OAuth Redirect URIs</strong>.
-              </p>
-            </div>
-            <div className="rounded-xl border border-zinc-200/90 bg-white p-3.5">
-              <div className="font-bold text-slate-900">Step 4 • Create Login Configuration ID</div>
-              <p className="mt-1 leading-relaxed text-zinc-600">
-                Open <strong>Facebook Login for Business → Configurations → + Create Configuration</strong> → Token type:{" "}
-                <strong>System user access token</strong> (or User access token) → select Assets &amp; Permissions above → paste the resulting{" "}
-                <strong>Configuration ID</strong> into <em>Embedded Config ID</em> in Section 4 below.
-              </p>
-            </div>
-            <div className="rounded-xl border border-zinc-200/90 bg-white p-3.5">
-              <div className="font-bold text-slate-900">Step 5 • Add Webhooks (Pages, IG, WhatsApp)</div>
-              <p className="mt-1 leading-relaxed text-zinc-600">
-                Add products <strong>Webhooks</strong>, <strong>Marketing API</strong>, <strong>Instagram</strong>, and <strong>WhatsApp</strong>. Point Page/Instagram webhooks (<code className="font-mono">messages, feed, leadgen</code>) to{" "}
-                <code className="font-mono">/api/webhooks/meta</code> and WhatsApp (<code className="font-mono">messages</code>) to{" "}
-                <code className="font-mono">/api/webhooks/whatsapp</code> using your <strong>Global Verify Token</strong>.
-              </p>
-            </div>
-            <div className="rounded-xl border border-zinc-200/90 bg-white p-3.5">
-              <div className="font-bold text-slate-900">Step 6 • Business Verification &amp; Live Mode</div>
-              <p className="mt-1 leading-relaxed text-zinc-600">
-                While in <strong>Development Mode</strong>, your own admin/tester accounts work immediately. To let external clients sign in, complete{" "}
-                <strong>Business Verification</strong> (GST/MSME certificate) + request <strong>Advanced Access</strong> in{" "}
-                <em>App Review → Permissions and Features</em>, then toggle top bar to <strong>Live</strong>.
-              </p>
-            </div>
-          </div>
-        </div>
-      </details>
-
       {/* 1. Google OAuth 2.0 Web Client Vault */}
       <div id="cred-google_oauth" className="scroll-mt-24">
       <SectionCard
         title="1. Google OAuth 2.0 Web Application Credentials (RapidShift Labs Consent Screen)"
-        subtitle="Powers 1-click 'Connect Google Drive with Google' on /backups & /connections, plus 1-click Google Business Profile sign-in"
-        action={sourcePill(snap.google.source, snap.google.isReady)}
+        subtitle="Powers 1-click 'Connect Google Drive with Google' on /backups & /connections, plus 1-click Google Business Profile & Google Ads sign-in"
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <GuideDrawerButton
+              drawerId="admin-credentials-google-guide"
+              label="Setup Guide"
+              initialTabId="google"
+              guide={credentialsGuideContent}
+            />
+            {sourcePill(snap.google.source, snap.google.isReady)}
+          </div>
+        }
       >
         <form action={staffSaveGoogleOAuthCredentialsAction} className="space-y-4 text-xs">
           <div className="rounded-xl border border-emerald-200/90 bg-emerald-50/50 p-4">
@@ -938,7 +802,7 @@ export default async function AdminPlatformCredentialsPage({
               <code className="font-mono">client_secret_*.json</code>
             </label>
             <p className="mb-2.5 text-[11px] text-zinc-600">
-              If you clicked &ldquo;Download JSON&rdquo; after creating your <strong>Web application</strong> OAuth Client ID, upload or paste it here — we auto-extract{" "}
+              If you clicked &ldquo;Download JSON&rdquo; after creating your <strong>Web application</strong> OAuth Client ID, upload or paste it here - we auto-extract{" "}
               <code className="font-mono">web.client_id</code>, <code className="font-mono">web.client_secret</code>, and{" "}
               <code className="font-mono">web.project_id</code> (and automatically warn you if it is a Service Account JSON!). Or leave this blank and fill Client ID + Secret directly below.
             </p>
@@ -985,7 +849,7 @@ export default async function AdminPlatformCredentialsPage({
                 OAuth 2.0 Client Secret{" "}
                 {snap.google.maskedClientSecret ? (
                   <span className="font-mono text-[11px] font-normal text-emerald-700">
-                    (Saved: {snap.google.maskedClientSecret} — leave blank to keep)
+                    (Saved: {snap.google.maskedClientSecret} - leave blank to keep)
                   </span>
                 ) : (
                   <span>(Starts with GOCSPX-...)</span>
@@ -1047,7 +911,7 @@ export default async function AdminPlatformCredentialsPage({
                 defaultValue={snap.google.publishingStatus}
                 className="adm-input"
               >
-                <option value="production">In Production (Published — Recommended)</option>
+                <option value="production">In Production (Published - Recommended)</option>
                 <option value="testing">Testing Mode (Only whitelisted test emails)</option>
               </select>
             </div>
@@ -1095,8 +959,8 @@ export default async function AdminPlatformCredentialsPage({
           <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
             <span className="text-[11px] text-zinc-500">
               {snap.google.updatedAt
-                ? `Last updated in control.db: ${new Date(snap.google.updatedAt).toLocaleString("en-IN")}`
-                : "Not saved in database yet — save above to enable 1-click Google Sign-In."}
+                ? `Last updated in control.db: ${new Date(snap.google.updatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`
+                : "Not saved in database yet - save above to enable 1-click Google Sign-In."}
             </span>
             <SubmitButton
               className="adm-btn-primary"
@@ -1182,7 +1046,7 @@ export default async function AdminPlatformCredentialsPage({
                   SMTP App Password / API Key{" "}
                   {snap.smtp.maskedPassword ? (
                     <span className="font-mono text-[11px] font-normal text-emerald-700">
-                      (Saved: {snap.smtp.maskedPassword} — leave blank to keep)
+                      (Saved: {snap.smtp.maskedPassword} - leave blank to keep)
                     </span>
                   ) : (
                     <span>*</span>
@@ -1269,12 +1133,12 @@ export default async function AdminPlatformCredentialsPage({
       </SectionCard>
       </div>
 
-      {/* 3. Managed Cloud Storage — Cloudflare R2 & 4. Meta / Razorpay Grid */}
+      {/* 3. Managed Cloud Storage - Cloudflare R2 & 4. Meta / Razorpay Grid */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         {/* 3. Managed Cloudflare R2 */}
         <div id="cred-cloudflare_r2" className="scroll-mt-24">
         <SectionCard
-          title="3. Managed Cloud Storage — Cloudflare R2 / S3"
+          title="3. Managed Cloud Storage - Cloudflare R2 / S3"
           subtitle="Powers the 'RSL Managed Cloud Storage' plan for customer invoice PDFs, media, and workspace archives"
           action={sourcePill(snap.r2.source, snap.r2.isReady)}
         >
@@ -1405,7 +1269,17 @@ export default async function AdminPlatformCredentialsPage({
         <SectionCard
           title="4. Meta / WhatsApp Platform App & Managed BM"
           subtitle="Powers 1-Click Facebook/Meta OAuth, X-Hub-Signature-256 webhooks, and optional RSL Managed Ad Spend Vault"
-          action={sourcePill(snap.meta.source, snap.meta.isReady)}
+          action={
+            <div className="flex flex-wrap items-center gap-2">
+              <GuideDrawerButton
+                drawerId="admin-credentials-meta-guide"
+                label="Setup Guide"
+                initialTabId="meta"
+                guide={credentialsGuideContent}
+              />
+              {sourcePill(snap.meta.source, snap.meta.isReady)}
+            </div>
+          }
         >
           <form action={staffSaveMetaAppCredentialsAction} className="space-y-3.5 text-xs">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1476,7 +1350,7 @@ export default async function AdminPlatformCredentialsPage({
 
             <div className="rounded-xl border border-zinc-200/80 bg-zinc-50/70 p-3 space-y-2.5">
               <div className="font-bold text-slate-900">
-                Optional — RSL Managed Ad Spend Vault (Master Business Manager Account)
+                Optional - RSL Managed Ad Spend Vault (Master Business Manager Account)
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div>
@@ -1563,8 +1437,8 @@ export default async function AdminPlatformCredentialsPage({
       {/* 4B. Google Ads Cloud Project Access & Optional Managed MCC */}
       <div id="cred-google_ads" className="scroll-mt-24">
       <SectionCard
-        title="5. Google Ads API & Managed Ad Vault (Cloud Project Access — No Developer Token Required)"
-        subtitle="Google sunset Developer Tokens — Direct Client 1-Click Google Ads works automatically via your Google Cloud OAuth Client ID above once Google Ads API is enabled & upgraded to Explorer/Basic Access in Google Cloud Console. Fill the optional Managed MCC fields below only if running RSL-funded Managed Vault campaigns."
+        title="5. Google Ads API & Managed Ad Vault (Cloud Project Access - No Developer Token Required)"
+        subtitle="Google sunset Developer Tokens - Direct Client 1-Click Google Ads works automatically via your Google Cloud OAuth Client ID above once Google Ads API is enabled & upgraded to Explorer/Basic Access in Google Cloud Console. Fill the optional Managed MCC fields below only if running RSL-funded Managed Vault campaigns."
         action={sourcePill(snap.googleAds.source, snap.googleAds.isReady)}
       >
         <form action={staffSaveGoogleAdsCredentialsAction} className="space-y-3.5 text-xs">
@@ -1574,7 +1448,7 @@ export default async function AdminPlatformCredentialsPage({
                 Legacy Developer Token{" "}
                 {snap.googleAds.maskedDeveloperToken
                   ? `(${snap.googleAds.maskedDeveloperToken})`
-                  : "(Not Required — Sunset)"}
+                  : "(Not Required - Sunset)"}
               </label>
               <input
                 name="developerToken"
@@ -1660,7 +1534,7 @@ export default async function AdminPlatformCredentialsPage({
       {/* 6. Razorpay Automated Gateway */}
       <div id="cred-razorpay" className="scroll-mt-24">
       <SectionCard
-        title="6. Razorpay Automated Checkout Gateway (Optional — Alongside Manual UPI QR / UTR)"
+        title="6. Razorpay Automated Checkout Gateway (Optional - Alongside Manual UPI QR / UTR)"
         subtitle="Leave unconfigured if collecting zero-fee UPI QR & NEFT UTR transfers; add Razorpay keys anytime to unlock instant automated wallet top-up checkout"
         action={sourcePill(snap.razorpay.source, snap.razorpay.isReady)}
       >
@@ -1744,7 +1618,7 @@ export default async function AdminPlatformCredentialsPage({
       {/* 7. Cloudflare Turnstile Bot Protection ($0 Free Unlimited) */}
       <div id="cred-cloudflare_turnstile" className="scroll-mt-24">
       <SectionCard
-        title="7. Cloudflare Turnstile Bot Protection ($0 Unlimited Free — Login, Signup & Password Reset)"
+        title="7. Cloudflare Turnstile Bot Protection ($0 Unlimited Free - Login, Signup & Password Reset)"
         subtitle="Invisible privacy-preserving CAPTCHA replacement from dash.cloudflare.com -> Turnstile -> Add Widget"
         action={sourcePill(snap.turnstile.source, snap.turnstile.isReady)}
       >
@@ -1808,7 +1682,7 @@ export default async function AdminPlatformCredentialsPage({
       {/* 8. Cloudflare Workers AI (10,000 Free Neurons / Day) */}
       <div id="cred-cloudflare_ai" className="scroll-mt-24">
       <SectionCard
-        title="8. Cloudflare Workers AI (10,000 Free Neurons/Day — Smart Reviews, Ad Copy, Meta Risk Linter & Whisper)"
+        title="8. Cloudflare Workers AI (10,000 Free Neurons/Day - Smart Reviews, Ad Copy, Meta Risk Linter & Whisper)"
         subtitle="Create an API Token at dash.cloudflare.com -> My Profile -> API Tokens with 'Workers AI: Read' permission"
         action={sourcePill(snap.cloudflareAi.source, snap.cloudflareAi.isReady)}
       >
@@ -1892,7 +1766,17 @@ export default async function AdminPlatformCredentialsPage({
       <SectionCard
         title="9. Cloudflare Email Routing + Workers ($0 Inbound Vendor Bill-to-Tally Inbox)"
         subtitle="Routes bills+<workspace-slug>@<domain> straight into each client's Tally Purchase Draft Inbox"
-        action={sourcePill(snap.cloudflareEmail.source, snap.cloudflareEmail.isReady)}
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <GuideDrawerButton
+              drawerId="admin-credentials-cloudflare-email-guide"
+              label="Worker Script & Guide"
+              initialTabId="cloudflare"
+              guide={credentialsGuideContent}
+            />
+            {sourcePill(snap.cloudflareEmail.source, snap.cloudflareEmail.isReady)}
+          </div>
+        }
       >
         <form action={staffSaveCloudflareEmailRoutingAction} className="space-y-3.5 text-xs">
           <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
@@ -1933,24 +1817,15 @@ export default async function AdminPlatformCredentialsPage({
               />
               <span>Enable Inbound Supplier Bill Webhook (/api/webhooks/cloudflare-email)</span>
             </label>
-            <SubmitButton className="adm-btn-primary" pendingText="Saving Email Routing...">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              <span>Save Email Routing Config</span>
-            </SubmitButton>
+            <div className="flex flex-wrap items-center gap-2">
+              <AdminCopyButton text={cfEmailWorkerCode} label="Copy Worker Script" />
+              <SubmitButton className="adm-btn-primary" pendingText="Saving Email Routing...">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                <span>Save Email Routing Config</span>
+              </SubmitButton>
+            </div>
           </div>
         </form>
-
-        <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-3.5 text-xs">
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-bold text-slate-900">
-              Copy-Paste Cloudflare Email Worker Script (Email -&gt; Email Routing -&gt; Email Workers)
-            </span>
-            <AdminCopyButton text={cfEmailWorkerCode} label="Copy Worker Script" />
-          </div>
-          <pre className="mt-2 max-h-44 overflow-x-auto rounded-lg border border-zinc-200 bg-white p-3 font-mono text-[11px] text-slate-800">
-            {cfEmailWorkerCode}
-          </pre>
-        </div>
 
         <ProviderLiveTestFooter
           providerKey="cloudflare_email_routing"
@@ -1967,7 +1842,7 @@ export default async function AdminPlatformCredentialsPage({
       {/* 10. W3C Web Push VAPID Keys ($0 Zero External Account Needed) */}
       <div id="cred-web_push_vapid" className="scroll-mt-24">
       <SectionCard
-        title="10. W3C Web Push Notifications — VAPID Keys ($0 Forever • Zero Third-Party Account Required)"
+        title="10. W3C Web Push Notifications - VAPID Keys ($0 Forever • Zero Third-Party Account Required)"
         subtitle="RFC 8292 P-256 ECDSA keys for instant desktop & Android Chrome alerts on WhatsApp chats, Tally payments & Google reviews"
         action={sourcePill(snap.vapid.source, snap.vapid.isReady)}
       >
@@ -2050,7 +1925,7 @@ export default async function AdminPlatformCredentialsPage({
       {/* 11. MeitY Digital India BHASHINI ($0 Regional Indian Language Translation) */}
       <div id="cred-bhashini" className="scroll-mt-24">
       <SectionCard
-        title="11. MeitY Digital India BHASHINI ($0 Government AI — 22 Indian Languages)"
+        title="11. MeitY Digital India BHASHINI ($0 Government AI - 22 Indian Languages)"
         subtitle="Optional: Register free at bhashini.gov.in/ulca for official NMT translation (Hindi, Gujarati, Marathi, Tamil, Telugu, Kannada, Bengali...). Falls back automatically to Cloudflare Workers AI when unconfigured."
         action={sourcePill(snap.bhashini.source, snap.bhashini.isReady)}
       >

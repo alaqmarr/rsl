@@ -2,7 +2,13 @@ import Link from "next/link";
 import { listWorkspaceTeam } from "@rsl/auth";
 import { listRecentEmails } from "@rsl/notifications";
 import { canRoleAccessWebRoute, canRolePerform, formatRoleLabel, SYSTEM_ROLES } from "@rsl/rbac";
-import { AccessRestrictedState, PageHeader, SectionCard, StatusPill } from "@rsl/ui";
+import {
+  AccessRestrictedState,
+  GuideDrawerButton,
+  PageHeader,
+  SectionCard,
+  StatusPill,
+} from "@rsl/ui";
 import { CopyTextButton } from "@/components/client-utils";
 import { FlashBanner } from "@/components/flash-banner";
 import { SubmitButton } from "@/components/ios-feedback";
@@ -100,7 +106,7 @@ export default async function TeamAndRolesPage({
       )}
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
-        <div className="min-w-0 xl:col-span-6">
+        <div className="min-w-0 xl:col-span-12">
           <SectionCard
             title="Invite a Team Member"
             subtitle="Choose what they can access and send an email invitation (or set a starting password)"
@@ -148,35 +154,29 @@ export default async function TeamAndRolesPage({
                     />
                   </div>
                 </div>
-                <SubmitButton className="rsl-btn-primary" pendingText="Sending Invite...">
-                  Add Team Member
-                </SubmitButton>
+                <div className="flex flex-wrap items-center gap-2">
+                  <SubmitButton className="rsl-btn-primary" pendingText="Sending Invite...">
+                    Add Team Member
+                  </SubmitButton>
+                  <GuideDrawerButton
+                    label="Need help? • Role Permissions"
+                    badgeText={`${SYSTEM_ROLES.length} roles`}
+                    guide={{
+                      eyebrow: "Team Least-Privilege Guide",
+                      title: "Workspace Roles & Permission Levels",
+                      summary:
+                        "Assign each colleague the minimum role needed for their daily work so billing, backups, and credentials stay protected.",
+                      steps: SYSTEM_ROLES.map((role) => ({
+                        title: `${role.name} (${role.slug})`,
+                        detail: role.description,
+                      })),
+                      fullGuideHref: "/help?slug=team-roles-security-and-business-settings",
+                      fullGuideLabel: "Open Full Team Guide",
+                    }}
+                  />
+                </div>
               </form>
             )}
-          </SectionCard>
-        </div>
-
-        <div className="min-w-0 xl:col-span-6">
-          <SectionCard
-            title="Role Access Guide"
-            subtitle="Assign least-privilege roles based on each colleague's daily responsibilities"
-          >
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 text-xs">
-              {SYSTEM_ROLES.map((role) => (
-                <div
-                  key={role.slug}
-                  className="rounded-xl border border-zinc-200/85 bg-zinc-50/60 p-3"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-bold text-slate-900">{role.name}</span>
-                    <span className="rounded bg-white px-1.5 py-0.5 font-mono text-[10px] font-semibold text-zinc-500 uppercase ring-1 ring-zinc-200">
-                      {role.slug}
-                    </span>
-                  </div>
-                  <p className="mt-1 leading-relaxed text-zinc-600">{role.description}</p>
-                </div>
-              ))}
-            </div>
           </SectionCard>
         </div>
       </div>

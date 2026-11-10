@@ -421,14 +421,14 @@ export default async function TallyPartyDetailPage({
                             <ArrowUpRight className="h-3 w-3" />
                           </ActionLink>
                         ) : (
-                          <span className="text-zinc-400">—</span>
+                          <span className="text-zinc-400">-</span>
                         )}
                       </td>
                       <td className="px-4 py-3.5 text-right font-medium text-slate-900 tabular-nums">
-                        {row.debitPaise > 0 ? formatInr(row.debitPaise) : "—"}
+                        {row.debitPaise > 0 ? formatInr(row.debitPaise) : "-"}
                       </td>
                       <td className="px-4 py-3.5 text-right font-semibold text-emerald-700 tabular-nums">
-                        {row.creditPaise > 0 ? formatInr(row.creditPaise) : "—"}
+                        {row.creditPaise > 0 ? formatInr(row.creditPaise) : "-"}
                       </td>
                       <td className="px-6 py-3.5 text-right font-extrabold text-slate-900 tabular-nums">
                         {row.runningBalancePaise > 0 ? (
@@ -518,7 +518,7 @@ export default async function TallyPartyDetailPage({
                           </div>
                         </td>
                         <td className="px-4 py-3.5 text-zinc-600 tabular-nums">
-                          {b.dueDate ? formatShortDate(b.dueDate) : "—"}
+                          {b.dueDate ? formatShortDate(b.dueDate) : "-"}
                         </td>
                         <td className="px-4 py-3.5 text-right font-medium text-zinc-700 tabular-nums">
                           {formatInr(b.amountPaise)}
@@ -647,7 +647,7 @@ export default async function TallyPartyDetailPage({
                         </div>
                       </td>
                       <td className="px-4 py-3.5 font-mono text-zinc-600">
-                        {item.hsnCode || "—"}
+                        {item.hsnCode || "-"}
                       </td>
                       <td className="px-4 py-3.5 text-right font-semibold text-slate-900 tabular-nums">
                         {item.totalQty.toLocaleString("en-IN")} {item.uom}
@@ -741,13 +741,13 @@ export default async function TallyPartyDetailPage({
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div>
                 <label className="mb-1 block font-semibold text-zinc-700">
-                  Settle Against Bill # (Optional — blank uses FIFO)
+                  Settle Against Bill # (Optional - blank uses FIFO)
                 </label>
                 <select name="againstBillNumber" defaultValue="" className="rsl-input">
                   <option value="">Auto-Match Oldest Unpaid Bill (FIFO)</option>
                   {detail.openBills.map((ob) => (
                     <option key={ob.id} value={ob.voucherNumber}>
-                      #{ob.voucherNumber} — Pending {formatInr(ob.pendingPaise)}
+                      #{ob.voucherNumber} - Pending {formatInr(ob.pendingPaise)}
                     </option>
                   ))}
                 </select>
@@ -789,7 +789,7 @@ export default async function TallyPartyDetailPage({
       {/* TAB 5: EDIT PARTY PROFILE */}
       {safeTab === "edit" && canManageTally && (
         <SectionCard
-          title={`Edit Ledger Profile — ${party.name}`}
+          title={`Edit Ledger Profile - ${party.name}`}
           subtitle="Update GSTIN, PAN, WhatsApp mobile, credit days, credit limit, or opening balance"
         >
           <form action={upsertWorkspacePartyLedgerAction} className="space-y-4 text-xs">
