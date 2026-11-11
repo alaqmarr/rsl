@@ -51,6 +51,8 @@ export const metadata: Metadata = {
   },
 };
 
+const THEME_INIT_SCRIPT = `(function(){try{var d=document.documentElement,s=localStorage.getItem("rsl_theme"),t=s==="dark"||s==="light"?s:d.dataset.theme==="dark"||d.dataset.theme==="light"?d.dataset.theme:window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";d.dataset.theme=t;d.classList.toggle("dark",t==="dark");}catch(e){}})();`;
+
 export default async function DocsRootLayout({ children }: { children: React.ReactNode }) {
   const appUrl = getEnv().APP_URL;
   const cookieStore = await cookies();
@@ -62,8 +64,11 @@ export default async function DocsRootLayout({ children }: { children: React.Rea
       lang="en"
       data-theme={dataTheme}
       suppressHydrationWarning
-      className={`${display.variable} ${sans.variable} ${mono.variable}`}
+      className={`${display.variable} ${sans.variable} ${mono.variable}${dataTheme === "dark" ? " dark" : ""}`}
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="rsl-ambient-canvas flex min-h-screen w-full flex-col font-sans text-[var(--ink)] antialiased">
         <header className="rsl-frost-header sticky top-0 z-30">
           <div className="flex w-full items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-3.5 lg:px-8 xl:px-12">

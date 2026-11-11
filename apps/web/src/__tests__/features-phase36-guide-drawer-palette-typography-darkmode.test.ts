@@ -208,4 +208,55 @@ describe("Phase 36 — Bottom Guide Drawers, 5-Variable Palette, Frost/Blur, Typ
       fs.existsSync(path.join(REPO_ROOT, "apps/docs/src/app/guides/[slug]/page.tsx"))
     ).toBe(true);
   });
+
+  it("enforces unlayered dark-mode utility overrides, zero-FOUC theme sync, Turnstile dark theme, and dark-safe button spinners", () => {
+    const themeCss = fs.readFileSync(
+      path.join(REPO_ROOT, "packages/ui/src/theme.css"),
+      "utf8"
+    );
+    expect(themeCss).toContain('.bg-white:not(img)');
+    expect(themeCss).toContain(':is(button, a, span):is(');
+    expect(themeCss).toContain('[data-theme="dark"] .adm-btn-dark');
+    expect(themeCss).toContain(".rsl-tab-pill-active");
+    expect(themeCss).toContain(".rsl-chat-outbound");
+
+    for (const app of ["web", "admin", "docs"]) {
+      const globalsCss = fs.readFileSync(
+        path.join(REPO_ROOT, `apps/${app}/src/app/globals.css`),
+        "utf8"
+      );
+      expect(globalsCss).toContain("@custom-variant dark");
+
+      const rootLayout = fs.readFileSync(
+        path.join(REPO_ROOT, `apps/${app}/src/app/layout.tsx`),
+        "utf8"
+      );
+      expect(rootLayout).toContain("THEME_INIT_SCRIPT");
+    }
+
+    const turnstileSrc = fs.readFileSync(
+      path.join(REPO_ROOT, "packages/ui/src/turnstile-widget.tsx"),
+      "utf8"
+    );
+    expect(turnstileSrc).toContain("rsl-theme-change");
+
+    const uiDirs = [
+      path.join(REPO_ROOT, "packages/ui/src"),
+      path.join(REPO_ROOT, "apps/web/src"),
+      path.join(REPO_ROOT, "apps/admin/src"),
+      path.join(REPO_ROOT, "apps/docs/src"),
+    ];
+    const tsxFiles = uiDirs.flatMap((d) => collectTsxFiles(d));
+    const whiteSpinners: string[] = [];
+    for (const file of tsxFiles) {
+      const rel = path.relative(REPO_ROOT, file);
+      const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
+      lines.forEach((line, idx) => {
+        if (/IosSpinner[^>]*text-white/.test(line)) {
+          whiteSpinners.push(`${rel}:${idx + 1} -> ${line.trim()}`);
+        }
+      });
+    }
+    expect(whiteSpinners).toEqual([]);
+  });
 });

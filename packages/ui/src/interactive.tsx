@@ -334,7 +334,7 @@ export function TabbedApiCodeViewer({
           <div
             role="tablist"
             aria-label="API code language"
-            className="inline-flex rounded-lg border border-zinc-200 bg-zinc-100/80 p-0.5 text-xs"
+            className="rsl-tab-bar !p-0.5 text-xs"
           >
             {(
               [
@@ -351,10 +351,8 @@ export function TabbedApiCodeViewer({
                   role="tab"
                   aria-selected={selected}
                   onClick={() => setActiveTab(tab.key)}
-                  className={`rounded-md px-2.5 py-1 text-[11.5px] font-semibold transition ${
-                    selected
-                      ? "bg-white text-slate-900 shadow-2xs"
-                      : "text-zinc-600 hover:text-slate-900"
+                  className={`rsl-tab-pill !px-2.5 !py-1 !text-[11.5px] ${
+                    selected ? "rsl-tab-pill-active" : ""
                   }`}
                 >
                   {tab.label}

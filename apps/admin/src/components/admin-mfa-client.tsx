@@ -107,7 +107,7 @@ export function AdminTotpEnrollmentPanel({
           >
             {isBeginning ? (
               <span className="inline-flex items-center gap-2">
-                <IosSpinner size="xs" className="text-white" />
+                <IosSpinner size="xs" />
                 <span>Generating Authenticator QR Code...</span>
               </span>
             ) : alreadyEnrolled ? (
@@ -198,7 +198,7 @@ export function AdminTotpEnrollmentPanel({
             >
               {isConfirming ? (
                 <span className="inline-flex items-center gap-2">
-                  <IosSpinner size="xs" className="text-white" />
+                  <IosSpinner size="xs" />
                   <span>Verifying Code...</span>
                 </span>
               ) : (
@@ -252,7 +252,7 @@ export function AdminMfaChallengeForm({ returnTo }: { returnTo: string }) {
       >
         {isPending ? (
           <span className="inline-flex items-center gap-2">
-            <IosSpinner size="xs" className="text-white" />
+            <IosSpinner size="xs" />
             <span>Verifying MFA...</span>
           </span>
         ) : (
@@ -328,7 +328,7 @@ export function AdminStepUpForm({
       >
         {isPending ? (
           <span className="inline-flex items-center gap-2">
-            <IosSpinner size="xs" className="text-white" />
+            <IosSpinner size="xs" />
             <span>Authorizing Step-Up...</span>
           </span>
         ) : (

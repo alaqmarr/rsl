@@ -709,7 +709,7 @@ export function PlanActivationModal({
                         >
                           {isSubmitting ? (
                             <span className="inline-flex items-center gap-2">
-                              <IosSpinner size="xs" className="text-white" />
+                              <IosSpinner size="xs" />
                               <span>Submitting...</span>
                             </span>
                           ) : (

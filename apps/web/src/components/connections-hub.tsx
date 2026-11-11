@@ -1521,7 +1521,7 @@ export function ConnectionsHub({
                   className="rsl-btn-primary inline-flex items-center gap-2 py-2 text-xs"
                 >
                   {pendingKey === "manual-connect" && (
-                    <IosSpinner size="xs" className="text-white" />
+                    <IosSpinner size="xs" />
                   )}
                   <span>
                     {pendingKey === "manual-connect"
@@ -1577,7 +1577,7 @@ export function ConnectionsHub({
                               disabled={isSaving}
                               className="rsl-btn-primary inline-flex items-center gap-1.5 py-1.5 text-xs"
                             >
-                              {isSaving && <IosSpinner size="xs" className="text-white" />}
+                              {isSaving && <IosSpinner size="xs" />}
                               <span>Save Token</span>
                             </button>
                           </form>

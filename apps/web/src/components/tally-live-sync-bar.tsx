@@ -319,20 +319,21 @@ export function TallyLiveSyncBar({
       )}
 
       {/* Subtle Live Auto-Refresh Indicator */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-zinc-500">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-[var(--ink-muted)]">
         <div className="inline-flex items-center gap-1.5">
           <CheckCircle2 width={13} height={13} className="text-emerald-600" />
           <span>
-            Live Sync Listener active - new Tally vouchers saved with{" "}
-            <code className="font-mono text-slate-700">Ctrl + A</code> appear within 4 seconds.
+            Live Sync active - Tally vouchers saved with{" "}
+            <code className="font-mono text-[var(--ink-secondary)]">Ctrl + A</code> appear within 4
+            seconds.
           </span>
         </div>
         <button
           type="button"
           onClick={() => openGuideDrawerById("tally-suite-guide", "troubleshooting")}
-          className="font-semibold text-emerald-700 hover:underline"
+          className="text-[11.5px] font-medium text-[var(--ink-muted)] hover:text-[var(--ink)] hover:underline"
         >
-          Need help troubleshooting? →
+          Troubleshooting
         </button>
       </div>
     </div>

@@ -395,7 +395,7 @@ export function SidebarNavLinks({
                       }}
                       className={`rsl-nav-item group flex w-full items-center justify-between gap-2.5 rounded-xl px-2.5 py-2 text-[13px] transition-all ${
                         isActive
-                          ? "rsl-nav-item-active bg-[var(--forest-green)] font-semibold text-[var(--snow-white)] shadow-xs"
+                          ? "rsl-nav-item-active font-semibold shadow-xs"
                           : isItemLoading
                             ? "rsl-nav-item-sunset font-semibold"
                             : "font-medium text-[var(--ink-secondary)] hover:bg-[var(--surface-inset)] hover:text-[var(--ink)]"
@@ -622,16 +622,11 @@ export function TopWorkspaceBar({
               onClick={() => setPaletteOpen(true)}
               className="rsl-btn-secondary !min-h-8 !px-2.5 !py-1.5 text-xs"
             >
-              <Search className="h-3.5 w-3.5 text-emerald-700" />
-              <span className="hidden xl:inline">
-                {locale === "hi"
-                  ? "स्क्रीन, टैली या टेम्पलेट खोजें..."
-                  : "Jump to screen, Tally, templates, or help..."}
+              <Search className="h-3.5 w-3.5 text-[var(--ink-muted)]" />
+              <span className="hidden md:inline text-[var(--ink-muted)]">
+                {locale === "hi" ? "खोजें या पेज खोलें..." : "Search or jump..."}
               </span>
-              <span className="hidden sm:inline xl:hidden">
-                {locale === "hi" ? "खोजें" : "Search"}
-              </span>
-              <kbd className="hidden items-center gap-0.5 rounded-md border border-slate-200 bg-zinc-50 px-1.5 py-0.5 font-mono text-xs font-semibold text-slate-700 md:inline-flex">
+              <kbd className="hidden items-center gap-0.5 rounded-md border border-[var(--border)] bg-[var(--surface-inset)] px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[var(--ink-secondary)] sm:inline-flex">
                 <Command className="h-2.5 w-2.5" />K
               </kbd>
             </button>

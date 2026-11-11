@@ -613,16 +613,16 @@ export default async function CustomerInboxPage({
                 {activeThread.messages.map((m) => (
                   <div
                     key={m.id}
-                    className={`max-w-[82%] rounded-xl px-3.5 py-2.5 text-[13px] ${
+                    className={`max-w-[82%] rounded-xl px-3.5 py-2.5 text-[13px] shadow-2xs ${
                       m.direction === "outbound"
-                        ? "ml-auto bg-emerald-600 text-white shadow-2xs"
-                        : "border border-zinc-200 bg-white text-slate-900 shadow-2xs"
+                        ? "rsl-chat-outbound ml-auto"
+                        : "rsl-chat-inbound"
                     }`}
                   >
                     <p className="leading-relaxed">{m.body}</p>
                     <div
                       className={`mt-1 text-[11px] ${
-                        m.direction === "outbound" ? "text-emerald-50/85" : "text-zinc-500"
+                        m.direction === "outbound" ? "rsl-chat-outbound-meta" : "text-zinc-500"
                       }`}
                     >
                       {m.senderType} • {m.deliveryStatus}

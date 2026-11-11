@@ -615,7 +615,7 @@ export function BusinessSettingsClient({
                     disabled={isSaving}
                     className="rsl-btn-primary inline-flex items-center gap-2"
                   >
-                    {isSaving && <IosSpinner size="xs" className="text-white" />}
+                    {isSaving && <IosSpinner size="xs" />}
                     <span>{isSaving ? "Saving Business Settings..." : "Save Business Settings"}</span>
                   </button>
                 </div>

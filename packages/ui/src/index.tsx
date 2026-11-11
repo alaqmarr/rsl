@@ -440,31 +440,28 @@ export function PageHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div className="flex flex-col gap-3.5 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
         {(eyebrow || badge) && (
-          <div className="mb-2 flex flex-wrap items-center gap-2">
+          <div className="mb-1.5 flex flex-wrap items-center gap-2">
             {typeof eyebrow === "string" ? (
-              <span className="rsl-eyebrow">
-                <span className="h-1.5 w-1.5 rounded-full bg-[var(--sunset-orange)]" />
-                <span>{eyebrow}</span>
-              </span>
+              <span className="rsl-eyebrow">{eyebrow}</span>
             ) : (
               eyebrow
             )}
             {badge}
           </div>
         )}
-        <h1 className="rsl-display-heading text-[22px] font-semibold tracking-[-0.026em] text-[var(--ink-strong)] sm:text-[26px]">
+        <h1 className="rsl-display-heading text-[21px] font-semibold tracking-[-0.025em] text-[var(--ink)] sm:text-[24px]">
           {title}
         </h1>
         {subtitle && (
-          <p className="mt-1.5 max-w-3xl text-[14px] leading-relaxed text-[var(--ink-secondary)] sm:text-[14.5px]">
+          <p className="mt-1 max-w-3xl text-[13.5px] leading-relaxed text-[var(--ink-muted)] sm:text-[14px]">
             {subtitle}
           </p>
         )}
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2.5">{actions}</div>}
+      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }
@@ -494,81 +491,60 @@ export function MetricCard({
   icon?: React.ReactNode;
 }) {
   const isWarm = accent === "amber" || accent === "ruby" || accent === "copper";
-  const barClass = isWarm
-    ? "rsl-accent-bar-sunset"
-    : accent === "default"
-      ? "rsl-accent-bar-blend"
-      : "rsl-accent-bar-forest";
-  const orbClass = isWarm ? "rsl-ambient-orb-sunset" : "rsl-ambient-orb-forest";
   const chipClass = isWarm
-    ? "bg-amber-50 text-amber-700 ring-amber-200"
-    : "bg-emerald-50 text-emerald-700 ring-emerald-200";
-  const dotClass = isWarm ? "bg-[var(--sunset-orange)]" : "bg-[var(--accent)]";
+    ? "border-[var(--spark-border)] bg-[var(--spark-soft)] text-[var(--spark-ink)]"
+    : "border-[var(--border)] bg-[var(--surface-inset)] text-[var(--ink-secondary)]";
   const isLongText = value.length > 15;
 
   return (
-    <div className="rsl-frost-card group relative z-10 flex flex-col justify-between overflow-hidden rounded-2xl hover:-translate-y-0.5">
-      <div aria-hidden="true" className={`h-[3px] w-full shrink-0 ${barClass}`} />
+    <div className="rsl-frost-card relative flex flex-col justify-between rounded-2xl p-4 sm:p-5">
+      <div>
+        <div className="flex items-center justify-between gap-2.5">
+          <span className="truncate text-[12.5px] font-medium tracking-[-0.006em] text-[var(--ink-muted)]">
+            {label}
+          </span>
 
-      <div
-        aria-hidden="true"
-        className={`pointer-events-none absolute -top-8 -right-8 h-28 w-28 rounded-full blur-2xl ${orbClass}`}
-      />
-
-      <div className="relative flex flex-1 flex-col justify-between p-5">
-        <div>
-          <div className="flex items-center justify-between gap-2.5">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${dotClass}`} />
-              <span className="truncate text-[12.5px] font-semibold tracking-tight text-slate-600">
-                {label}
-              </span>
-            </div>
-
-            {icon ? (
-              <span
-                className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ring-1 [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0 ${chipClass}`}
-              >
-                {icon}
-              </span>
-            ) : changePct !== undefined && changePct !== null ? (
-              <span
-                className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
-                  changePct >= 0 ? "rsl-pill-forest" : "rsl-pill-sunset"
-                }`}
-              >
-                {changePct >= 0 ? `+${changePct}%` : `${changePct}%`}
-              </span>
-            ) : null}
-          </div>
-
-          <div className="mt-3.5 flex items-baseline justify-between gap-2">
-            <div
-              title={value}
-              className={`rsl-display-metric min-w-0 font-semibold tracking-[-0.03em] text-slate-950 tabular-nums ${
-                isLongText
-                  ? "truncate text-[17.5px] leading-snug sm:text-[18.5px]"
-                  : "text-[25px] leading-none xl:text-[28px]"
+          {icon ? (
+            <span
+              className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border [&>svg]:h-3.5 [&>svg]:w-3.5 [&>svg]:shrink-0 ${chipClass}`}
+            >
+              {icon}
+            </span>
+          ) : changePct !== undefined && changePct !== null ? (
+            <span
+              className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
+                changePct >= 0 ? "rsl-pill-forest" : "rsl-pill-sunset"
               }`}
             >
-              {value}
-            </div>
-            {icon && changePct !== undefined && changePct !== null && (
-              <span
-                className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
-                  changePct >= 0 ? "rsl-pill-forest" : "rsl-pill-sunset"
-                }`}
-              >
-                {changePct >= 0 ? `+${changePct}%` : `${changePct}%`}
-              </span>
-            )}
-          </div>
+              {changePct >= 0 ? `+${changePct}%` : `${changePct}%`}
+            </span>
+          ) : null}
         </div>
 
-        <p className="mt-3.5 border-t border-zinc-200 pt-2.5 text-xs leading-4 text-zinc-500">
-          {sublabel}
-        </p>
+        <div className="mt-2.5 flex items-baseline justify-between gap-2">
+          <div
+            title={value}
+            className={`rsl-display-metric min-w-0 font-semibold tracking-[-0.03em] text-[var(--ink)] tabular-nums ${
+              isLongText
+                ? "truncate text-[17px] leading-snug sm:text-[18px]"
+                : "text-[23px] leading-none xl:text-[26px]"
+            }`}
+          >
+            {value}
+          </div>
+          {icon && changePct !== undefined && changePct !== null && (
+            <span
+              className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
+                changePct >= 0 ? "rsl-pill-forest" : "rsl-pill-sunset"
+              }`}
+            >
+              {changePct >= 0 ? `+${changePct}%` : `${changePct}%`}
+            </span>
+          )}
+        </div>
       </div>
+
+      <p className="mt-2.5 text-xs leading-relaxed text-[var(--ink-muted)]">{sublabel}</p>
     </div>
   );
 }
@@ -589,24 +565,19 @@ export function SectionCard({
   accent?: "default" | "emerald" | "indigo" | "amber" | "sky" | "violet" | "ruby" | "teal";
 }) {
   const isWarm = accent === "amber" || accent === "ruby";
-  const topBarClass = isWarm ? "rsl-accent-bar-sunset" : "rsl-accent-bar-forest";
-  const pillClass = isWarm ? "bg-[var(--sunset-orange)]" : "bg-[var(--accent)]";
 
   return (
-    <section className="rsl-frost-card relative z-10 flex flex-col overflow-hidden rounded-2xl">
-      {accent !== "default" && (
-        <div aria-hidden="true" className={`h-[3px] w-full shrink-0 ${topBarClass}`} />
+    <section className="rsl-frost-card relative flex flex-col overflow-hidden rounded-2xl">
+      {isWarm && (
+        <div aria-hidden="true" className="rsl-accent-bar-sunset h-[2px] w-full shrink-0" />
       )}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-50/70 px-5 py-4 sm:px-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-5 py-3.5 sm:px-6">
         <div className="min-w-0">
-          <div className="flex items-center gap-2.5">
-            <span aria-hidden="true" className={`h-4 w-1 shrink-0 rounded-full ${pillClass}`} />
-            <h2 className="text-[15.5px] font-semibold leading-5 tracking-[-0.018em] text-slate-950">
-              {title}
-            </h2>
-          </div>
+          <h2 className="text-[15px] font-semibold leading-5 tracking-[-0.016em] text-[var(--ink)]">
+            {title}
+          </h2>
           {subtitle && (
-            <p className="mt-1 pl-3.5 text-[13px] leading-5 text-zinc-500">{subtitle}</p>
+            <p className="mt-0.5 text-[12.5px] leading-5 text-[var(--ink-muted)]">{subtitle}</p>
           )}
         </div>
         {action && <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div>}

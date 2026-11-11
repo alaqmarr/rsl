@@ -50,7 +50,7 @@ export function ConfirmWhatsAppReminderButton({
         typeof document !== "undefined" &&
         createPortal(
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-[2px]"
+            className="rsl-hard-blur-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
             onClick={(e) => {
               if (e.target === e.currentTarget) setOpen(false);
             }}
@@ -60,9 +60,9 @@ export function ConfirmWhatsAppReminderButton({
               role="dialog"
               aria-modal="true"
               aria-labelledby={titleId}
-              className="w-full max-w-md rounded-2xl border border-zinc-200/90 bg-white p-5 shadow-2xl"
+              className="rsl-drawer-frost w-full max-w-md rounded-2xl border p-5"
             >
-              <div className="flex items-start justify-between gap-3 border-b border-zinc-100 pb-3.5">
+              <div className="flex items-start justify-between gap-3 border-b border-[var(--border-subtle)] pb-3.5">
                 <div className="flex items-center gap-2.5">
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/80">
                     <MessageSquare className="h-4 w-4" />
@@ -80,7 +80,7 @@ export function ConfirmWhatsAppReminderButton({
                   type="button"
                   onClick={() => setOpen(false)}
                   aria-label="Close confirmation dialog"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 hover:bg-zinc-50 hover:text-slate-900"
+                  className="rsl-icon-action-btn"
                 >
                   <X className="h-4 w-4" />
                 </button>

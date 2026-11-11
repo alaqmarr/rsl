@@ -243,8 +243,8 @@ export default async function PersonalizedHelpPage({
                   key={art.slug}
                   className={
                     isSelected
-                      ? "bg-emerald-50/70"
-                      : "transition hover:bg-zinc-50/80"
+                      ? "border-l-2 border-l-[var(--sunset-orange)] bg-emerald-50/70"
+                      : "border-l-2 border-l-transparent transition hover:bg-zinc-50/80"
                   }
                 >
                   <ActionLink

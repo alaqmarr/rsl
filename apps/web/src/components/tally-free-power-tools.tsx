@@ -250,7 +250,7 @@ export function TallyFreePowerToolsBar({
                       className="rsl-btn-primary inline-flex items-center gap-1 py-1 text-[11px]"
                     >
                       {busyDraftId === d.id ? (
-                        <IosSpinner size="xs" className="text-white" />
+                        <IosSpinner size="xs" />
                       ) : (
                         <Check className="h-3 w-3" />
                       )}

@@ -504,9 +504,15 @@ export function openGuideDrawerById(drawerId: string, tabId?: string): void {
   );
 }
 
-function persistThemePreference(next: "light" | "dark"): void {
+function applyDomTheme(next: "light" | "dark"): void {
   if (typeof document === "undefined") return;
   document.documentElement.dataset.theme = next;
+  document.documentElement.classList.toggle("dark", next === "dark");
+}
+
+function persistThemePreference(next: "light" | "dark"): void {
+  if (typeof document === "undefined") return;
+  applyDomTheme(next);
   document.cookie = `rsl_theme=${next}; Path=/; Max-Age=31536000; SameSite=Lax`;
   try {
     window.localStorage.setItem("rsl_theme", next);
@@ -533,20 +539,22 @@ export function ThemeToggleButton({
         const attr = document.documentElement.dataset.theme;
         const stored = window.localStorage.getItem("rsl_theme");
         if (stored === "dark" || stored === "light") {
-          if (attr !== stored) {
-            document.documentElement.dataset.theme = stored;
-          }
+          applyDomTheme(stored);
           document.cookie = `rsl_theme=${stored}; Path=/; Max-Age=31536000; SameSite=Lax`;
           setTheme(stored);
           return;
         }
         if (attr === "dark" || attr === "light") {
+          applyDomTheme(attr);
           setTheme(attr);
           return;
         }
-        if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
-          setTheme("dark");
-        }
+        const prefersDark = Boolean(
+          window.matchMedia?.("(prefers-color-scheme: dark)").matches
+        );
+        const resolved: "light" | "dark" = prefersDark ? "dark" : "light";
+        applyDomTheme(resolved);
+        setTheme(resolved);
       } catch {
         // Ignore storage restrictions
       }
@@ -557,6 +565,7 @@ export function ThemeToggleButton({
     const onThemeEvent = (event: Event) => {
       const next = (event as CustomEvent<"light" | "dark">).detail;
       if (next === "dark" || next === "light") {
+        applyDomTheme(next);
         setTheme(next);
       }
     };

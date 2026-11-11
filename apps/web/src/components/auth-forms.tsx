@@ -245,7 +245,7 @@ export function WebLoginForm({ turnstileSiteKey }: { turnstileSiteKey?: string |
       >
         {isPending ? (
           <span className="inline-flex items-center justify-center gap-2">
-            <IosSpinner size="xs" className="text-white" />
+            <IosSpinner size="xs" />
             <span>Signing in...</span>
           </span>
         ) : (
@@ -544,7 +544,7 @@ export function WebRegisterForm({
       >
         {isPending ? (
           <span className="inline-flex items-center justify-center gap-2">
-            <IosSpinner size="xs" className="text-white" />
+            <IosSpinner size="xs" />
             <span>Creating Account &amp; Starting 7-Day Trial...</span>
           </span>
         ) : (

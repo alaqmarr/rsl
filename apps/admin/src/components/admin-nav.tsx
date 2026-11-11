@@ -172,7 +172,7 @@ export function AdminSidebarNav({
                     aria-busy={isNavigatingHere}
                     className={`rsl-nav-item group flex w-full items-center justify-between gap-2.5 rounded-xl px-2.5 py-2 text-[13px] transition-all ${
                       active
-                        ? "rsl-nav-item-active bg-[var(--forest-green)] font-semibold text-[var(--snow-white)] shadow-xs"
+                        ? "rsl-nav-item-active font-semibold shadow-xs"
                         : isNavigatingHere
                           ? "rsl-nav-item-sunset font-semibold"
                           : "font-medium text-[var(--ink-secondary)] hover:bg-[var(--surface-inset)] hover:text-[var(--ink)]"
@@ -316,7 +316,7 @@ export function AdminTopBar({
               type="button"
               onClick={() => setDrawerOpen(true)}
               aria-label="Open menu"
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-900 shadow-2xs lg:hidden"
+              className="adm-btn-secondary !min-h-9 !w-9 shrink-0 !p-0 lg:hidden"
             >
               <Menu className="h-4 w-4" />
             </button>
@@ -325,25 +325,26 @@ export function AdminTopBar({
             </Link>
 
             <div className="flex min-w-0 items-center gap-2 text-xs">
-              <span className="hidden font-mono text-[11px] font-bold tracking-wide text-indigo-700 uppercase sm:inline">
-                Control Plane
+              <span className="hidden font-medium text-[var(--ink-muted)] sm:inline">
+                Staff Console
               </span>
-              <span className="hidden text-slate-300 sm:inline">/</span>
-              <span className="truncate font-bold text-slate-950">{activeItem.label}</span>
-              {isBarPending && <IosSpinner size="xs" className="text-indigo-600" />}
+              <span className="hidden text-[var(--border-strong)] sm:inline">/</span>
+              <span className="truncate font-bold text-[var(--ink)]">{activeItem.label}</span>
+              {isBarPending && <IosSpinner size="xs" className="text-[var(--sunset-orange)]" />}
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2 text-xs sm:gap-2.5">
+          <div className="flex shrink-0 items-center gap-2 text-xs">
             <button
               type="button"
               onClick={() => setPaletteOpen(true)}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200/95 bg-slate-50/85 px-2.5 py-1.5 text-xs text-slate-500 shadow-2xs transition hover:border-indigo-300 hover:bg-white hover:text-slate-900 sm:gap-2.5 sm:px-3"
+              className="adm-btn-secondary !min-h-8 !px-2.5 !py-1.5 text-xs"
             >
-              <Search className="h-3.5 w-3.5 text-indigo-500" />
-              <span className="hidden sm:inline">Jump to client, invoice, or setting...</span>
-              <span className="sm:hidden">Jump</span>
-              <kbd className="hidden items-center gap-0.5 rounded border border-indigo-200/80 bg-indigo-50/75 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-indigo-700 md:inline-flex">
+              <Search className="h-3.5 w-3.5 text-[var(--ink-muted)]" />
+              <span className="hidden md:inline text-[var(--ink-muted)]">
+                Search client or screen...
+              </span>
+              <kbd className="hidden items-center gap-0.5 rounded-md border border-[var(--border)] bg-[var(--surface-inset)] px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[var(--ink-secondary)] sm:inline-flex">
                 <Command className="h-2.5 w-2.5" />K
               </kbd>
             </button>
@@ -357,9 +358,9 @@ export function AdminTopBar({
                     startBarTransition(() => router.push("/"));
                   }
                 }}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-1.5 font-semibold text-amber-800 tabular-nums transition hover:bg-amber-100/70 sm:px-3"
+                className="rsl-pill rsl-pill-sunset !px-2.5 !py-1.5"
               >
-                <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--sunset-orange)]" />
                 <span>
                   {totalPending} <span className="hidden sm:inline">waiting</span>
                 </span>
@@ -371,10 +372,10 @@ export function AdminTopBar({
             <button
               type="button"
               onClick={() => setHelpOpen(true)}
-              className="rsl-guide-trigger"
+              className="rsl-guide-trigger !min-h-8"
               title="Open step-by-step Staff SOP guide for this screen"
             >
-              <HelpCircle className="h-3.5 w-3.5 text-amber-600" />
+              <HelpCircle className="h-3.5 w-3.5 text-[var(--sunset-orange)]" />
               <span className="hidden md:inline">Need help?</span>
             </button>
 
@@ -382,17 +383,9 @@ export function AdminTopBar({
               href={appUrl}
               target="_blank"
               rel="noreferrer"
-              className="adm-btn-secondary hidden py-1.5 text-xs sm:inline-flex"
+              className="adm-btn-secondary hidden !min-h-8 !px-2.5 !py-1 text-xs xl:inline-flex"
             >
               Client App ↗
-            </a>
-            <a
-              href={docsUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="adm-btn-secondary hidden py-1.5 text-xs xl:inline-flex"
-            >
-              Help Center ↗
             </a>
           </div>
         </div>

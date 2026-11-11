@@ -64,46 +64,43 @@ export function TallySuiteNav({
   ];
 
   return (
-    <div className="rsl-frost-surface w-full rounded-2xl">
+    <div className="rsl-frost-card w-full overflow-hidden rounded-2xl">
       <div className="flex w-full flex-wrap items-center justify-between gap-3 px-3.5 py-2.5">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="rsl-eyebrow hidden sm:inline-flex">
-            <span className="h-1.5 w-1.5 rounded-full bg-[var(--sunset-orange)]" />
+          <span className="rsl-eyebrow mr-1.5 hidden sm:inline-flex">
             <span>Tally Suite</span>
           </span>
-          {items.map((item) => {
-            const Icon = item.icon;
-            const active = activeSection === item.key;
-            return (
-              <ActionLink
-                key={item.key}
-                href={item.href}
-                spinnerSize="xs"
-                className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition ${
-                  active
-                    ? "bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)] shadow-xs"
-                    : "text-zinc-600 hover:bg-zinc-100/80 hover:text-slate-900"
-                }`}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                <span>{item.label}</span>
-                {typeof item.count === "number" && (
-                  <span
-                    className={`rounded-md px-1.5 py-0.5 font-mono text-[10.5px] tabular-nums ${
-                      active
-                        ? "bg-black/15 text-current"
-                        : "bg-zinc-100 text-zinc-600"
-                    }`}
-                  >
-                    {item.count}
-                  </span>
-                )}
-              </ActionLink>
-            );
-          })}
+          <div className="rsl-tab-bar">
+            {items.map((item) => {
+              const Icon = item.icon;
+              const active = activeSection === item.key;
+              return (
+                <ActionLink
+                  key={item.key}
+                  href={item.href}
+                  spinnerSize="xs"
+                  className={`rsl-tab-pill ${active ? "rsl-tab-pill-active" : ""}`}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  <span>{item.label}</span>
+                  {typeof item.count === "number" && (
+                    <span
+                      className={`rounded-md px-1.5 py-0.5 font-mono text-[10.5px] tabular-nums ${
+                        active
+                          ? "bg-[var(--surface-inset)] text-[var(--ink)]"
+                          : "bg-[var(--surface-muted)] text-[var(--ink-muted)]"
+                      }`}
+                    >
+                      {item.count}
+                    </span>
+                  )}
+                </ActionLink>
+              );
+            })}
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--ink-muted)]">
           <GuideDrawerButton
             drawerId="tally-suite-guide"
             label="Need help?"
@@ -114,11 +111,11 @@ export function TallySuiteNav({
       </div>
 
       {companies.length >= 1 && (
-        <div className="flex w-full flex-wrap items-center justify-between gap-2 border-t border-zinc-200 bg-zinc-50/70 px-3.5 py-2">
+        <div className="flex w-full flex-wrap items-center justify-between gap-2 border-t border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3.5 py-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="inline-flex items-center gap-1 text-xs font-semibold text-zinc-600">
+            <span className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--ink-secondary)]">
               <Building2 className="h-3.5 w-3.5 text-emerald-700" />
-              <span>Tally Company:</span>
+              <span>Company:</span>
             </span>
             <ActionLink
               href={baseSectionPath}
@@ -126,10 +123,10 @@ export function TallySuiteNav({
               className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
                 selectedCompanyId === "all"
                   ? "bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)] shadow-2xs"
-                  : "border border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100 hover:text-slate-900"
+                  : "border border-[var(--border)] bg-[var(--surface)] text-[var(--ink-secondary)] hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
               }`}
             >
-              <span>All Synced Companies ({companies.length})</span>
+              <span>All ({companies.length})</span>
             </ActionLink>
             {companies.map((c) => {
               const isSelected = selectedCompanyId === c.id;
@@ -140,8 +137,8 @@ export function TallySuiteNav({
                   spinnerSize="xs"
                   className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
                     isSelected
-                      ? "bg-emerald-700 text-white shadow-2xs"
-                      : "border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100 hover:text-slate-900"
+                      ? "bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)] shadow-2xs"
+                      : "border border-[var(--border)] bg-[var(--surface)] text-[var(--ink-secondary)] hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
                   }`}
                 >
                   <span
@@ -150,7 +147,7 @@ export function TallySuiteNav({
                         ? "bg-[var(--sunset-orange)]"
                         : c.lastSyncedAt
                           ? "bg-emerald-500"
-                          : "bg-zinc-300"
+                          : "bg-zinc-400"
                     }`}
                   />
                   <span>{c.name}</span>
@@ -158,7 +155,7 @@ export function TallySuiteNav({
               );
             })}
           </div>
-          <span className="font-mono text-xs text-zinc-500">
+          <span className="font-mono text-xs text-[var(--ink-muted)]">
             {companies.length} {companies.length === 1 ? "company synced" : "companies synced"}
           </span>
         </div>

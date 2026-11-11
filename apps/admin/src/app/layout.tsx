@@ -50,6 +50,8 @@ export const metadata: Metadata = {
   },
 };
 
+const THEME_INIT_SCRIPT = `(function(){try{var d=document.documentElement,s=localStorage.getItem("rsl_theme"),t=s==="dark"||s==="light"?s:d.dataset.theme==="dark"||d.dataset.theme==="light"?d.dataset.theme:window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";d.dataset.theme=t;d.classList.toggle("dark",t==="dark");}catch(e){}})();`;
+
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const [verifiedToast, cookieStore] = await Promise.all([
     readVerifiedAdminFlashToast(),
@@ -63,8 +65,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       lang="en"
       data-theme={dataTheme}
       suppressHydrationWarning
-      className={`${display.variable} ${sans.variable} ${mono.variable}`}
+      className={`${display.variable} ${sans.variable} ${mono.variable}${dataTheme === "dark" ? " dark" : ""}`}
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="min-h-screen bg-[var(--canvas)] font-sans text-[var(--ink)] antialiased">
         <SileoToastProvider cookieName="rsl_admin_toast" verifiedToast={verifiedToast} />
         {children}

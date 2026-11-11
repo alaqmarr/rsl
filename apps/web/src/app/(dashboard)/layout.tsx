@@ -83,31 +83,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <span className="text-[10px] font-bold tracking-[0.06em] uppercase text-[var(--butter-cream)]/85">
           Active Business
         </span>
-        <div className="inline-flex items-center gap-1.5">
-          {canViewBilling ? (
-            <ActionLink
-              href="/billing"
-              spinnerSize="xs"
-              className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-[var(--butter-cream)] tabular-nums ring-1 ring-white/15 hover:bg-white/20 hover:text-white"
-            >
-              {unlockedToolsCount}/{workspaceServices.length} tools
-            </ActionLink>
-          ) : (
-            <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-[var(--butter-cream)] tabular-nums ring-1 ring-white/15">
-              {unlockedToolsCount}/{workspaceServices.length} tools
-            </span>
-          )}
-          {isSuspended ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-semibold text-white ring-1 ring-amber-400/40">
-              Paused
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-[var(--butter-cream)] ring-1 ring-white/20">
-              <span className="h-1.5 w-1.5 rounded-full bg-[var(--sunset-orange)]" />
-              Active
-            </span>
-          )}
-        </div>
+        {isSuspended ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-semibold text-white ring-1 ring-amber-400/40">
+            Paused
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-[var(--butter-cream)] ring-1 ring-white/20">
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--sunset-orange)]" />
+            {unlockedToolsCount}/{workspaceServices.length} Active
+          </span>
+        )}
       </div>
 
       {session.workspaces.length > 1 ? (
@@ -119,7 +104,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
             className="min-w-0 flex-1 truncate rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-xs font-semibold text-white"
           >
             {session.workspaces.map((w) => (
-              <option key={w.id} value={w.id} className="bg-slate-900 text-white">
+              <option
+                key={w.id}
+                value={w.id}
+                className="bg-[var(--midnight-black)] text-[var(--snow-white)]"
+              >
                 {w.name}
               </option>
             ))}

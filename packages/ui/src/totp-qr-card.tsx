@@ -43,8 +43,8 @@ export function TotpQrCodeCard({
             alt={`Scan QR code in your authenticator app for ${accountEmail || issuer}`}
             className="rsl-totp-qr-image"
           />
-          <span className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-slate-900">
-            <QrCode className="h-3 w-3 text-emerald-700" />
+          <span className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--midnight-black)]">
+            <QrCode className="h-3 w-3 text-[var(--forest-green)]" />
             <span>Scan with Camera</span>
           </span>
         </div>

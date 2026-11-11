@@ -677,7 +677,7 @@ export function ProfileSettingsClient({
                 disabled={isSavingProfile}
                 className="rsl-btn-primary inline-flex items-center gap-2"
               >
-                {isSavingProfile && <IosSpinner size="xs" className="text-white" />}
+                {isSavingProfile && <IosSpinner size="xs" />}
                 <span>{isSavingProfile ? "Saving Profile..." : "Save Personal Profile"}</span>
               </button>
             </form>
@@ -731,7 +731,7 @@ export function ProfileSettingsClient({
                     disabled={isVerifyingCode}
                     className="rsl-btn-primary inline-flex items-center gap-2"
                   >
-                    {isVerifyingCode && <IosSpinner size="xs" className="text-white" />}
+                    {isVerifyingCode && <IosSpinner size="xs" />}
                     <span>{isVerifyingCode ? "Verifying..." : "Confirm Code"}</span>
                   </button>
                 </form>
@@ -784,7 +784,7 @@ export function ProfileSettingsClient({
                 disabled={isChangingPwd}
                 className="rsl-btn-primary inline-flex items-center gap-2"
               >
-                {isChangingPwd && <IosSpinner size="xs" className="text-white" />}
+                {isChangingPwd && <IosSpinner size="xs" />}
                 <span>{isChangingPwd ? "Updating Password..." : "Update Password"}</span>
               </button>
             </form>
@@ -937,7 +937,7 @@ export function ProfileSettingsClient({
                     className="rsl-btn-primary inline-flex items-center gap-2 py-2.5 text-xs"
                   >
                     {isConfirmingTotp ? (
-                      <IosSpinner size="xs" className="text-white" />
+                      <IosSpinner size="xs" />
                     ) : (
                       <ShieldCheck className="h-4 w-4" />
                     )}
@@ -1035,7 +1035,7 @@ export function ProfileSettingsClient({
                 className="rsl-btn-primary inline-flex items-center gap-2 py-2.5 text-xs"
               >
                 {isBeginningTotp ? (
-                  <IosSpinner size="xs" className="text-white" />
+                  <IosSpinner size="xs" />
                 ) : (
                   <QrCode className="h-4 w-4" />
                 )}
@@ -1076,7 +1076,7 @@ export function ProfileSettingsClient({
                 className="rsl-btn-primary inline-flex items-center gap-1.5 py-2 text-xs"
               >
                 {passkeyBusy ? (
-                  <IosSpinner size="xs" className="text-white" />
+                  <IosSpinner size="xs" />
                 ) : (
                   <Fingerprint className="h-3.5 w-3.5" />
                 )}
@@ -1137,7 +1137,7 @@ export function ProfileSettingsClient({
                 className="rsl-btn-primary inline-flex items-center gap-1.5 py-2 text-xs"
               >
                 {pushBusy ? (
-                  <IosSpinner size="xs" className="text-white" />
+                  <IosSpinner size="xs" />
                 ) : (
                   <BellRing className="h-3.5 w-3.5" />
                 )}

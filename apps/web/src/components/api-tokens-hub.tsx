@@ -674,7 +674,7 @@ export function ApiTokensHub({
                         disabled={isSavingRotate}
                         className="rsl-btn-primary inline-flex items-center gap-1.5 py-2 text-xs"
                       >
-                        {isSavingRotate && <IosSpinner size="xs" className="text-white" />}
+                        {isSavingRotate && <IosSpinner size="xs" />}
                         <span>{isSavingRotate ? "Rotating..." : "Save & Test Token"}</span>
                       </button>
                     </form>
@@ -1020,7 +1020,7 @@ export function ApiTokensHub({
                     disabled={isIssuingKey}
                     className="rsl-btn-primary inline-flex items-center gap-2"
                   >
-                    {isIssuingKey && <IosSpinner size="xs" className="text-white" />}
+                    {isIssuingKey && <IosSpinner size="xs" />}
                     <span>{isIssuingKey ? "Minting Key..." : "Create API Key"}</span>
                   </button>
                 </form>
@@ -1205,7 +1205,7 @@ export function ApiTokensHub({
                     disabled={isAddingWebhook}
                     className="rsl-btn-primary inline-flex items-center gap-2"
                   >
-                    {isAddingWebhook && <IosSpinner size="xs" className="text-white" />}
+                    {isAddingWebhook && <IosSpinner size="xs" />}
                     <span>{isAddingWebhook ? "Saving..." : "Add Outbound Webhook"}</span>
                   </button>
                 </form>

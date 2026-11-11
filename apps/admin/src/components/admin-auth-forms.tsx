@@ -82,7 +82,7 @@ export function AdminLoginForm({ turnstileSiteKey }: { turnstileSiteKey?: string
       >
         {isPending ? (
           <span className="inline-flex items-center justify-center gap-2">
-            <IosSpinner size="xs" className="text-white" />
+            <IosSpinner size="xs" />
             <span>Signing in...</span>
           </span>
         ) : (
@@ -264,7 +264,7 @@ export function AdminSetupForm({
       >
         {isPending ? (
           <span className="inline-flex items-center justify-center gap-2">
-            <IosSpinner size="xs" className="text-white" />
+            <IosSpinner size="xs" />
             <span>Initializing Platform &amp; Locking Setup...</span>
           </span>
         ) : (

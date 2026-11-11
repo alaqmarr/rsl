@@ -94,7 +94,7 @@ export function CampaignsFreeAiBar({
             onClick={handleGenerateCopy}
             className="rsl-btn-primary inline-flex items-center gap-1.5 py-1.5 text-xs"
           >
-            {busy ? <IosSpinner size="xs" className="text-white" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {busy ? <IosSpinner size="xs" /> : <Sparkles className="h-3.5 w-3.5" />}
             <span>Generate Copy</span>
           </button>
         </div>

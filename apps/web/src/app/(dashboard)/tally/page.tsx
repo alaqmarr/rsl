@@ -9,7 +9,6 @@ import {
   IndianRupee,
   Package,
   Search,
-  Users,
   Webhook,
 } from "lucide-react";
 import {
@@ -353,29 +352,13 @@ export default async function TallySyncPage({
         subtitle={`Sync Tally Prime sales bills, receipts, supplier payments, client ledgers, and stock to ${endpoints.primaryDomain} - bills marked Paid in Tally update automatically, with "${tallyBrandTitle}" inside Tally Prime.`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <ActionLink
-              href={`/tally/parties${selectedCompanyId !== "all" ? `?company=${encodeURIComponent(selectedCompanyId)}` : ""}`}
-              spinnerSize="xs"
-              className="rsl-btn-secondary"
-            >
-              <Users className="mr-1.5 inline h-3.5 w-3.5" />
-              Client Ledgers ({tally.totals.partiesCount})
-            </ActionLink>
-            <ActionLink
-              href={`/inventory${selectedCompanyId !== "all" ? `?company=${encodeURIComponent(selectedCompanyId)}` : ""}`}
-              spinnerSize="xs"
-              className="rsl-btn-secondary"
-            >
-              <Package className="mr-1.5 inline h-3.5 w-3.5" />
-              Inventory &amp; Stock ({tally.totals.stockItemsCount})
-            </ActionLink>
             {canManageTally && (
               <>
                 <a href={topTdlDownloadHref} className="rsl-btn-primary">
                   Download {tdlFilename} (v{LATEST_TALLY_TDL_VERSION})
                 </a>
                 <a href={topConnectorDownloadHref} className="rsl-btn-secondary">
-                  Download Windows Connector
+                  Windows Connector
                 </a>
               </>
             )}
@@ -384,28 +367,28 @@ export default async function TallySyncPage({
                 <summary className="rsl-btn-secondary cursor-pointer list-none select-none">
                   Export Register ▾
                 </summary>
-                <div className="absolute right-0 z-20 mt-1.5 flex w-56 flex-col gap-1 rounded-xl border border-zinc-200 bg-white p-1.5 text-xs shadow-lg">
+                <div className="rsl-drawer-frost absolute right-0 z-20 mt-1.5 flex w-56 flex-col gap-1 rounded-xl border p-1.5 text-xs">
                   <a
                     href="/api/pdf/tally-receivables"
-                    className="rounded-lg px-3 py-2 font-medium text-slate-800 hover:bg-zinc-50"
+                    className="rounded-lg px-3 py-2 font-medium text-[var(--ink)] hover:bg-[var(--surface-inset)]"
                   >
                     Download Receivables PDF
                   </a>
                   <a
                     href="/api/export/party-ledgers-csv"
-                    className="rounded-lg px-3 py-2 font-medium text-slate-800 hover:bg-zinc-50"
+                    className="rounded-lg px-3 py-2 font-medium text-[var(--ink)] hover:bg-[var(--surface-inset)]"
                   >
                     Export Client Ledgers CSV
                   </a>
                   <a
                     href="/api/export/tally-xml"
-                    className="rounded-lg px-3 py-2 font-medium text-slate-800 hover:bg-zinc-50"
+                    className="rounded-lg px-3 py-2 font-medium text-[var(--ink)] hover:bg-[var(--surface-inset)]"
                   >
                     Export Tally Prime XML
                   </a>
                   <a
                     href="/api/export/tally-csv"
-                    className="rounded-lg px-3 py-2 font-medium text-slate-800 hover:bg-zinc-50"
+                    className="rounded-lg px-3 py-2 font-medium text-[var(--ink)] hover:bg-[var(--surface-inset)]"
                   >
                     Export Bills CSV
                   </a>
