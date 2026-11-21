@@ -2,7 +2,7 @@ import React from "react";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { getEnv } from "@rsl/core";
-import { BrandLogo, PlatformFooter, ThemeToggleButton } from "@rsl/ui";
+import { BrandLogo, PlatformFooter } from "@rsl/ui";
 import { getOptionalWebSession } from "@/lib/session";
 
 export default async function LegalPublicLayout({
@@ -51,7 +51,6 @@ export default async function LegalPublicLayout({
           </nav>
 
           <div className="flex shrink-0 items-center gap-2.5">
-            <ThemeToggleButton compact />
             {session ? (
               <Link
                 href="/"

@@ -1,5 +1,6 @@
 import {
   BILLING_CYCLE_META,
+  getWorkspaceWhatsAppMessagingRates,
   SERVICE_CATALOG,
   type getWorkspaceFreeAccessStatus,
   type listBundlesWithWorkspaceState,
@@ -9,13 +10,16 @@ import {
 import { formatInr } from "@rsl/core";
 import { AccessRestrictedState, SectionCard, StatusPill } from "@rsl/ui";
 import { SubmitButton } from "@/components/ios-feedback";
+import { WhatsAppRatesMarginCard } from "@/components/whatsapp-rates-margin-card";
 import {
   staffBulkUnlockBundleAction,
+  staffClearClientWhatsAppRatesAction,
   staffCreateClientCustomBundleAction,
   staffGrantFreeAllToolsAction,
   staffRecordPlanPaymentAction,
   staffRevokeFreeAllToolsAction,
   staffRevokePlanAction,
+  staffSaveClientWhatsAppRatesAction,
   staffSendBillingReminderNowAction,
   staffSetClientBundleOverrideAction,
   staffSetClientCustomPriceAction,
@@ -97,7 +101,7 @@ export function ClientPlansEntitlementsTab({
     );
   }
 
-  const returnToPlans = `/clients/${workspaceId}?tab=plans`;
+  const returnToPlans = `/clients/${workspaceId}/plans`;
 
   return (
     <div className="space-y-6">
@@ -889,6 +893,15 @@ export function ClientPlansEntitlementsTab({
           </table>
         </div>
       </SectionCard>
+
+      <WhatsAppRatesMarginCard
+        initialRates={getWorkspaceWhatsAppMessagingRates(workspaceId)}
+        saveAction={staffSaveClientWhatsAppRatesAction}
+        clearAction={staffClearClientWhatsAppRatesAction}
+        workspaceId={workspaceId}
+        returnTo={`/clients/${workspaceId}/plans`}
+        mode="client"
+      />
     </div>
   );
 }

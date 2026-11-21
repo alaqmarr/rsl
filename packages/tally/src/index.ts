@@ -1,10 +1,14 @@
 import crypto from "node:crypto";
 import http from "node:http";
 import zlib from "node:zlib";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { dispatchWorkspaceWebhookEvent } from "@rsl/api-keys";
-import { canDebitWalletUsage, getWalletBalancePaise } from "@rsl/billing";
+import {
+  canDebitWalletUsage,
+  getWalletBalancePaise,
+  resolveWhatsAppTemplateUnitCostPaise,
+} from "@rsl/billing";
 import { executeWhatsAppTemplateSend } from "@rsl/whatsapp";
 import {
   decryptEnvelope,
@@ -510,17 +514,33 @@ export function getNativeTallyVoucherPdf(
 }
 
 export function listWorkspaceVoucherPdfStatusMap(
-  workspaceId: string
+  workspaceId: string,
+  voucherIds?: string[]
 ): Map<string, TallyVoucherPdfMeta> {
+  const map = new Map<string, TallyVoucherPdfMeta>();
+  if (voucherIds && voucherIds.length === 0) {
+    return map;
+  }
   ensureTallyVoucherPdfsTable(workspaceId);
   const raw = tenantDataDb({ workspaceId }).$client;
-  const rows = raw
-    .prepare(
-      `SELECT voucher_id, voucher_guid, voucher_number, company_name, filename,
-              byte_size, sha256, alter_id, master_id, captured_from, updated_at
-       FROM tally_voucher_pdfs`
-    )
-    .all() as Array<{
+  const rows = (
+    voucherIds
+      ? raw
+          .prepare(
+            `SELECT voucher_id, voucher_guid, voucher_number, company_name, filename,
+                    byte_size, sha256, alter_id, master_id, captured_from, updated_at
+             FROM tally_voucher_pdfs
+             WHERE voucher_id IN (${voucherIds.map(() => "?").join(",")})`
+          )
+          .all(...voucherIds)
+      : raw
+          .prepare(
+            `SELECT voucher_id, voucher_guid, voucher_number, company_name, filename,
+                    byte_size, sha256, alter_id, master_id, captured_from, updated_at
+             FROM tally_voucher_pdfs`
+          )
+          .all()
+  ) as Array<{
     voucher_id: string;
     voucher_guid: string;
     voucher_number: string;
@@ -534,7 +554,6 @@ export function listWorkspaceVoucherPdfStatusMap(
     updated_at: number;
   }>;
 
-  const map = new Map<string, TallyVoucherPdfMeta>();
   for (const r of rows) {
     map.set(r.voucher_id, {
       voucherId: r.voucher_id,
@@ -1554,12 +1573,17 @@ export function getTallyWorkspaceSummary(
     ],
   };
 
-  const pdfStatusMap = listWorkspaceVoucherPdfStatusMap(workspaceId);
-  const lineItemsMap = listVoucherLineItemsMap(workspaceId);
-  const stockItemsCount = dataDb
-    .select({ id: tenantDataSchema.tallyStockItems.id })
-    .from(tenantDataSchema.tallyStockItems)
-    .all().length;
+  const voucherIds = vouchers.map((v) => v.id);
+  const pdfStatusMap = listWorkspaceVoucherPdfStatusMap(workspaceId, voucherIds);
+  const lineItemsMap = listVoucherLineItemsMap(workspaceId, voucherIds);
+  const stockItemsCount = Number(
+    (
+      dataDb
+        .select({ c: sql<number>`count(*)` })
+        .from(tenantDataSchema.tallyStockItems)
+        .get() ?? { c: 0 }
+    ).c
+  );
   const partyRows = dataDb
     .select({
       id: tenantDataSchema.tallyParties.id,
@@ -1571,10 +1595,14 @@ export function getTallyWorkspaceSummary(
   const partyIdLookup = new Map(
     partyRows.map((p) => [`${p.companyId}::${p.name.trim().toLowerCase()}`, p.id])
   );
-  const settlementRows = dataDb
-    .select()
-    .from(tenantDataSchema.tallyBillSettlements)
-    .all();
+  const settlementRows =
+    voucherIds.length > 0
+      ? dataDb
+          .select()
+          .from(tenantDataSchema.tallyBillSettlements)
+          .where(inArray(tenantDataSchema.tallyBillSettlements.billVoucherId, voucherIds))
+          .all()
+      : [];
   const settlementsByBillMap = new Map<
     string,
     Array<typeof tenantDataSchema.tallyBillSettlements.$inferSelect>
@@ -2762,15 +2790,16 @@ export async function sweepDueTallyPaymentReminders(params: {
   const openVouchers = dataDb
     .select()
     .from(tenantDataSchema.tallyVouchers)
-    .where(eq(tenantDataSchema.tallyVouchers.voucherType, "Sales"))
-    .all()
-    .filter(
-      (v) =>
-        (v.paymentStatus === "unpaid" || v.paymentStatus === "partial") &&
-        v.amountPaise > v.paidAmountPaise &&
-        Boolean(v.partyPhoneE164) &&
-        v.dueDate !== null
-    );
+    .where(
+      and(
+        eq(tenantDataSchema.tallyVouchers.voucherType, "Sales"),
+        inArray(tenantDataSchema.tallyVouchers.paymentStatus, ["unpaid", "partial"]),
+        isNotNull(tenantDataSchema.tallyVouchers.partyPhoneE164),
+        isNotNull(tenantDataSchema.tallyVouchers.dueDate),
+        sql`${tenantDataSchema.tallyVouchers.amountPaise} > ${tenantDataSchema.tallyVouchers.paidAmountPaise}`
+      )
+    )
+    .all();
 
   // Never lock daily guards or dispatch reminders when WhatsApp Business Account is disconnected
   const wabaConn = controlDb()
@@ -2819,6 +2848,7 @@ export async function sweepDueTallyPaymentReminders(params: {
   let enqueuedCount = 0;
   let skippedQuietHours = false;
   let projectedSpendPaise = 0;
+  const initialWalletBalancePaise = getWalletBalancePaise(params.workspaceId);
   const enqueuedTargets: Array<{ voucherId: string; expectedSeq: number }> = [];
 
   for (const rule of activeRules) {
@@ -2826,7 +2856,11 @@ export async function sweepDueTallyPaymentReminders(params: {
     if (!approvedTmpl) {
       continue;
     }
-    const unitCostPaise = approvedTmpl.category === "marketing" ? 95 : 85;
+    const unitCostPaise = resolveWhatsAppTemplateUnitCostPaise(
+      params.workspaceId,
+      approvedTmpl.category,
+      "tally.invoicing"
+    );
 
     const inQuietHours =
       rule.quietHoursStart > rule.quietHoursEnd
@@ -2846,7 +2880,7 @@ export async function sweepDueTallyPaymentReminders(params: {
       const daysPastDue = Math.floor((now - (voucher.dueDate ?? now)) / 86_400_000);
       if (daysPastDue < rule.triggerDaysOffset) continue;
 
-      if (!canDebitWalletUsage(getWalletBalancePaise(params.workspaceId) - projectedSpendPaise, unitCostPaise)) {
+      if (!canDebitWalletUsage(initialWalletBalancePaise - projectedSpendPaise, unitCostPaise)) {
         break;
       }
 
@@ -2894,13 +2928,21 @@ export async function sweepDueTallyPaymentReminders(params: {
   if (enqueuedCount > 0 && !isRedisConfigured()) {
     await processDueSqliteOutboxForTenant(params.workspaceId, { queueName: "reminders" });
     confirmedSentCount = 0;
+    const targetIds = Array.from(new Set(enqueuedTargets.map((t) => t.voucherId)));
+    const updatedRows =
+      targetIds.length > 0
+        ? dataDb
+            .select({
+              id: tenantDataSchema.tallyVouchers.id,
+              remindersSentCount: tenantDataSchema.tallyVouchers.remindersSentCount,
+            })
+            .from(tenantDataSchema.tallyVouchers)
+            .where(inArray(tenantDataSchema.tallyVouchers.id, targetIds))
+            .all()
+        : [];
+    const seqByVoucherId = new Map(updatedRows.map((u) => [u.id, u.remindersSentCount]));
     for (const target of enqueuedTargets) {
-      const updatedVoucher = dataDb
-        .select({ remindersSentCount: tenantDataSchema.tallyVouchers.remindersSentCount })
-        .from(tenantDataSchema.tallyVouchers)
-        .where(eq(tenantDataSchema.tallyVouchers.id, target.voucherId))
-        .get();
-      if (updatedVoucher && updatedVoucher.remindersSentCount >= target.expectedSeq) {
+      if ((seqByVoucherId.get(target.voucherId) ?? 0) >= target.expectedSeq) {
         confirmedSentCount++;
       }
     }
@@ -3032,7 +3074,11 @@ export const sendTallyBillOnWhatsApp = defineAction({
       }
     }
 
-    const unitCostPaise = selectedTemplate.category === "marketing" ? 95 : 85;
+    const unitCostPaise = resolveWhatsAppTemplateUnitCostPaise(
+      ctx.workspaceId,
+      selectedTemplate.category,
+      "tally.invoicing"
+    );
     const currentBal = getWalletBalancePaise(ctx.workspaceId);
     if (!canDebitWalletUsage(currentBal, unitCostPaise)) {
       throw new RslError(
@@ -8923,22 +8969,27 @@ function parseOpenCompaniesFromXml(rawXml: string): string[] {
  * Read-only loopback probe against local Tally Prime XML Server (`127.0.0.1:9000`).
  * Discovers all open Tally companies and counts syncable vouchers across them.
  */
+const localProbeCache = new Map<number, { expiresAt: number; data: LocalTallyPortProbe }>();
+
 export async function probeLocalTallyPort9000(port = 9000): Promise<LocalTallyPortProbe> {
   const safePort = Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : 9000;
+  const now = Date.now();
+  const cached = localProbeCache.get(safePort);
+  if (cached && cached.expiresAt > now) {
+    return cached.data;
+  }
+
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 1400);
     const compRes = await fetch(`http://127.0.0.1:${safePort}`, {
       method: "POST",
       headers: { "Content-Type": "text/xml; charset=utf-8" },
       body: buildLocalTallyOpenCompaniesXml(),
-      signal: controller.signal,
+      signal: AbortSignal.timeout(1200),
       cache: "no-store",
     });
-    clearTimeout(timer);
 
     if (!compRes.ok) {
-      return {
+      const failOut: LocalTallyPortProbe = {
         reachable: false,
         port: safePort,
         activeCompanyName: null,
@@ -8946,6 +8997,8 @@ export async function probeLocalTallyPort9000(port = 9000): Promise<LocalTallyPo
         voucherCount: 0,
         errorMessage: `Local Tally port ${safePort} returned HTTP ${compRes.status}`,
       };
+      localProbeCache.set(safePort, { expiresAt: now + 3_000, data: failOut });
+      return failOut;
     }
 
     const compXml = await compRes.text();
@@ -8959,6 +9012,7 @@ export async function probeLocalTallyPort9000(port = 9000): Promise<LocalTallyPo
         method: "POST",
         headers: { "Content-Type": "text/xml; charset=utf-8" },
         body: buildLocalTallyExportXml(0),
+        signal: AbortSignal.timeout(2500),
         cache: "no-store",
       });
       if (vRes.ok) {
@@ -8968,21 +9022,24 @@ export async function probeLocalTallyPort9000(port = 9000): Promise<LocalTallyPo
         if (firstDetectedCompany) openCompanies.push(firstDetectedCompany);
       }
     } else {
-      for (const cName of openCompanies) {
-        const vRes = await fetch(`http://127.0.0.1:${safePort}`, {
-          method: "POST",
-          headers: { "Content-Type": "text/xml; charset=utf-8" },
-          body: buildLocalTallyExportXml(0, cName),
-          cache: "no-store",
-        });
-        if (vRes.ok) {
+      const counts = await Promise.all(
+        openCompanies.map(async (cName) => {
+          const vRes = await fetch(`http://127.0.0.1:${safePort}`, {
+            method: "POST",
+            headers: { "Content-Type": "text/xml; charset=utf-8" },
+            body: buildLocalTallyExportXml(0, cName),
+            signal: AbortSignal.timeout(2500),
+            cache: "no-store",
+          });
+          if (!vRes.ok) return 0;
           const parsed = parseTallyXmlEnvelope(await vRes.text(), cName);
-          totalVouchers += parsed.vouchers.length;
-        }
-      }
+          return parsed.vouchers.length;
+        })
+      );
+      totalVouchers = counts.reduce((acc, c) => acc + c, 0);
     }
 
-    return {
+    const okOut: LocalTallyPortProbe = {
       reachable: true,
       port: safePort,
       activeCompanyName:
@@ -8993,8 +9050,10 @@ export async function probeLocalTallyPort9000(port = 9000): Promise<LocalTallyPo
       voucherCount: totalVouchers,
       errorMessage: null,
     };
+    localProbeCache.set(safePort, { expiresAt: now + 3_000, data: okOut });
+    return okOut;
   } catch (err) {
-    return {
+    const errOut: LocalTallyPortProbe = {
       reachable: false,
       port: safePort,
       activeCompanyName: null,
@@ -9002,6 +9061,8 @@ export async function probeLocalTallyPort9000(port = 9000): Promise<LocalTallyPo
       voucherCount: 0,
       errorMessage: err instanceof Error ? err.message : "Local Tally port 9000 not reachable",
     };
+    localProbeCache.set(safePort, { expiresAt: now + 3_000, data: errOut });
+    return errOut;
   }
 }
 

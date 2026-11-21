@@ -134,17 +134,17 @@ export default async function ActivityHistoryPage({
           }
         >
           {timeline.length === 0 ? (
-            <p className="text-[13px] text-zinc-500">No steps found for that Reference ID.</p>
+            <p className="text-[13px] text-[var(--ink-muted)]">No steps found for that Reference ID.</p>
           ) : (
             <ol className="space-y-2.5 text-[13px]">
               {timeline.map((step) => (
                 <li
                   key={step.id}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200/85 bg-zinc-50/75 px-4 py-3"
+                  className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-inset)] px-4 py-3"
                 >
                   <div className="min-w-0">
-                    <span className="font-semibold text-slate-900">{step.title}</span>
-                    <div className="mt-0.5 text-zinc-600">
+                    <span className="font-semibold text-[var(--ink)]">{step.title}</span>
+                    <div className="mt-0.5 text-[var(--ink-secondary)]">
                       {formatCustomerAuditSummary(step.detail)}
                     </div>
                   </div>
@@ -207,7 +207,7 @@ export default async function ActivityHistoryPage({
             <caption className="sr-only">
               Immutable hash-chained workspace activity log entries
             </caption>
-            <thead className="border-b border-zinc-200/80 bg-zinc-50/75 text-xs tracking-wider text-zinc-500 uppercase">
+            <thead className="border-b border-[var(--border)] bg-[var(--surface-inset)] text-xs tracking-wider text-[var(--ink-muted)] uppercase">
               <tr>
                 <th scope="col" className="px-5 py-3 font-semibold sm:px-6">
                   Action Summary
@@ -226,10 +226,10 @@ export default async function ActivityHistoryPage({
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-100">
+            <tbody className="divide-y divide-[var(--border-subtle)]">
               {logs.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-[13px] text-zinc-500">
+                  <td colSpan={5} className="px-6 py-8 text-center text-[13px] text-[var(--ink-muted)]">
                     No activity entries match your selected filter.
                   </td>
                 </tr>
@@ -237,12 +237,12 @@ export default async function ActivityHistoryPage({
                 logs.map((row) => (
                   <tr key={row.id}>
                     <td className="px-5 py-3.5 sm:px-6">
-                      <div className="font-medium text-slate-900">
+                      <div className="font-medium text-[var(--ink)]">
                         {formatCustomerAuditSummary(row.summary)}
                       </div>
                     </td>
-                    <td className="px-4 py-3.5 text-zinc-600">{row.category}</td>
-                    <td className="px-4 py-3.5 text-zinc-600 whitespace-nowrap tabular-nums">
+                    <td className="px-4 py-3.5 text-[var(--ink-secondary)]">{row.category}</td>
+                    <td className="px-4 py-3.5 text-[var(--ink-secondary)] whitespace-nowrap tabular-nums">
                       {new Date(row.ts).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
                     </td>
                     <td className="px-4 py-3.5">
@@ -271,7 +271,7 @@ export default async function ActivityHistoryPage({
             </tbody>
           </table>
           {totalLogPages > 1 && (
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200/80 bg-zinc-50/60 px-6 py-3 text-xs text-zinc-600">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] bg-[var(--surface-inset)] px-6 py-3 text-xs text-[var(--ink-secondary)]">
               <span className="tabular-nums">
                 Showing {(currentLogPage - 1) * ACTIVITY_PAGE_SIZE + 1}–
                 {Math.min(currentLogPage * ACTIVITY_PAGE_SIZE, totalFilteredLogs)} of{" "}
@@ -288,7 +288,7 @@ export default async function ActivityHistoryPage({
                     ← Previous
                   </ActionLink>
                 ) : (
-                  <span className="rounded-lg border border-zinc-200 px-3 py-1 text-zinc-400">
+                  <span className="rounded-lg border border-[var(--border)] px-3 py-1 text-[var(--ink-muted)]">
                     ← Previous
                   </span>
                 )}
@@ -301,7 +301,7 @@ export default async function ActivityHistoryPage({
                     Next →
                   </ActionLink>
                 ) : (
-                  <span className="rounded-lg border border-zinc-200 px-3 py-1 text-zinc-400">
+                  <span className="rounded-lg border border-[var(--border)] px-3 py-1 text-[var(--ink-muted)]">
                     Next →
                   </span>
                 )}
@@ -317,7 +317,7 @@ export default async function ActivityHistoryPage({
         noPadding
       >
         {staffAccessLogs.length === 0 ? (
-          <div className="p-6 text-xs text-zinc-500">
+          <div className="p-6 text-xs text-[var(--ink-muted)]">
             Zero platform support or staff access sessions have occurred on your workspace.
           </div>
         ) : (
@@ -326,7 +326,7 @@ export default async function ActivityHistoryPage({
               <caption className="sr-only">
                 Customer-visible trail of platform staff support sessions and actions
               </caption>
-              <thead className="border-b border-zinc-200/80 bg-zinc-50/75 text-xs tracking-wider text-zinc-500 uppercase">
+              <thead className="border-b border-[var(--border)] bg-[var(--surface-inset)] text-xs tracking-wider text-[var(--ink-muted)] uppercase">
                 <tr>
                   <th scope="col" className="px-5 py-3 font-semibold sm:px-6">
                     Support Summary &amp; Ticket
@@ -342,20 +342,20 @@ export default async function ActivityHistoryPage({
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-100 bg-white">
+              <tbody className="divide-y divide-[var(--border-subtle)] bg-[var(--surface)]">
                 {staffAccessLogs.map((entry) => (
                   <tr key={entry.id}>
                     <td className="px-5 py-3 sm:px-6">
-                      <div className="font-medium text-slate-900">{entry.summary}</div>
+                      <div className="font-medium text-[var(--ink)]">{entry.summary}</div>
                       {entry.ticketReference && (
-                        <div className="mt-0.5 font-mono text-xs text-zinc-500">
+                        <div className="mt-0.5 font-mono text-xs text-[var(--ink-muted)]">
                           Ticket: {entry.ticketReference}
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-zinc-700">
+                    <td className="px-4 py-3 text-[var(--ink-secondary)]">
                       {entry.staffName}{" "}
-                      <span className="text-zinc-400">({entry.staffRole})</span>
+                      <span className="text-[var(--ink-muted)]">({entry.staffRole})</span>
                     </td>
                     <td className="px-4 py-3">
                       <StatusPill
@@ -369,7 +369,7 @@ export default async function ActivityHistoryPage({
                         tone={entry.kind === "impersonation" ? "amber" : "sky"}
                       />
                     </td>
-                    <td className="px-5 py-3 text-right text-zinc-600 whitespace-nowrap tabular-nums sm:px-6">
+                    <td className="px-5 py-3 text-right text-[var(--ink-secondary)] whitespace-nowrap tabular-nums sm:px-6">
                       {new Date(entry.ts).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
                     </td>
                   </tr>

@@ -7,7 +7,6 @@ import {
   BrandLogo,
   GuideDrawer,
   IosSpinner,
-  ThemeToggleButton,
   useDialogFocusTrap,
 } from "@rsl/ui";
 import { useWorkspaceAccess } from "@/components/workspace-access-context";
@@ -19,26 +18,47 @@ import {
   BarChart3,
   BookOpen,
   Building2,
+  ChevronRight,
   Command,
-  Database,
   FileSpreadsheet,
   HelpCircle,
   Inbox,
   KeyRound,
   LayoutDashboard,
   Link2,
-  Megaphone,
   Menu,
-  MessageSquareShare,
   Package,
+  Plug,
+  ReceiptText,
   Search,
+  Send,
   ShieldCheck,
+  Sparkles,
   Star,
+  TrendingUp,
+  UploadCloud,
   UserCircle2,
+  UserMinus,
   Users,
   Wallet,
+  Webhook,
   X,
 } from "lucide-react";
+import {
+  CloudflareBrandIcon,
+  FacebookBrandIcon,
+  GoogleAdsBrandIcon,
+  GoogleBrandIcon,
+  GoogleBusinessBrandIcon,
+  GoogleDriveBrandIcon,
+  GoogleSearchConsoleBrandIcon,
+  GoogleSheetsBrandIcon,
+  InstagramBrandIcon,
+  MessengerBrandIcon,
+  MetaBrandIcon,
+  TallyBrandIcon,
+  WhatsAppBrandIcon,
+} from "@/components/service-brand-icons";
 
 export interface NavItemDef {
   href: string;
@@ -52,6 +72,24 @@ export interface NavItemDef {
   guideSlug: string;
 }
 
+export interface NavBranchDef {
+  id: string;
+  label: string;
+  labelHi: string;
+  defaultOpen?: boolean;
+  iconKey?: string;
+  items?: NavItemDef[];
+  branches?: NavBranchDef[];
+}
+
+export interface NavSectionDef {
+  id: string;
+  heading: string;
+  headingHi: string;
+  items?: NavItemDef[];
+  branches?: NavBranchDef[];
+}
+
 interface RawNavSeed {
   href: string;
   label: string;
@@ -61,7 +99,8 @@ interface RawNavSeed {
 }
 
 function hydrateNavItem(seed: RawNavSeed): NavItemDef {
-  const guide = resolveWebPageGuide(seed.href);
+  const basePath = seed.href.split("?")[0] || seed.href;
+  const guide = resolveWebPageGuide(basePath);
   return {
     href: seed.href,
     label: seed.label,
@@ -79,16 +118,11 @@ function hydrateNavItem(seed: RawNavSeed): NavItemDef {
   };
 }
 
-export const WORKSPACE_NAV_SECTIONS: Array<{
-  id: string;
-  heading: string;
-  headingHi: string;
-  items: NavItemDef[];
-}> = [
+export const WORKSPACE_NAV_SECTIONS: NavSectionDef[] = [
   {
-    id: "overview",
-    heading: "Overview & Intelligence",
-    headingHi: "अवलोकन और विश्लेषण",
+    id: "workspace",
+    heading: "Workspace",
+    headingHi: "कार्यक्षेत्र",
     items: [
       hydrateNavItem({
         href: "/",
@@ -107,134 +141,375 @@ export const WORKSPACE_NAV_SECTIONS: Array<{
     ],
   },
   {
-    id: "tally",
-    heading: "Tally Prime & Accounting",
-    headingHi: "टैली और लेखा विभाग",
-    items: [
-      hydrateNavItem({
-        href: "/tally",
-        label: "Tally Prime & Bills",
-        labelHi: "टैली प्राइम और बिल",
-        keywords:
-          "tally xml csv tdl webhook automation invoices vouchers receipts payments paid overdue reminders pdf",
-        fallbackGuideSlug: "tally-sync-and-import",
-      }),
-      hydrateNavItem({
-        href: "/tally/parties",
-        label: "Client & Party Ledgers",
-        labelHi: "पार्टी खाता बही",
-        keywords:
-          "clients parties customers suppliers debtors creditors ledgers statement running balance ageing credit limit paid",
-        fallbackGuideSlug: "tally-sync-and-import",
-      }),
-      hydrateNavItem({
-        href: "/inventory",
-        label: "Inventory & Stock",
-        labelHi: "स्टॉक और गोदाम",
-        keywords:
-          "inventory stock items godowns warehouse batches expiry reorder dead stock valuation price list",
-        fallbackGuideSlug: "tally-sync-and-import",
-      }),
+    id: "meta",
+    heading: "Meta Services",
+    headingHi: "मेटा सेवाएं",
+    branches: [
+      {
+        id: "meta-whatsapp",
+        label: "WhatsApp",
+        labelHi: "व्हाट्सऐप",
+        defaultOpen: true,
+        iconKey: "whatsapp",
+        items: [
+          hydrateNavItem({
+            href: "/whatsapp",
+            label: "WhatsApp & Templates",
+            labelHi: "व्हाट्सऐप और टेम्पलेट",
+            keywords:
+              "whatsapp templates manager header buttons variables bulk broadcast opt-in stop",
+            fallbackGuideSlug: "whatsapp-and-broadcasts",
+          }),
+          hydrateNavItem({
+            href: "/whatsapp/broadcasts",
+            label: "Broadcast Campaigns",
+            labelHi: "ब्रॉडकास्ट अभियान",
+            keywords: "whatsapp bulk broadcast campaigns send",
+            fallbackGuideSlug: "whatsapp-and-broadcasts",
+          }),
+          hydrateNavItem({
+            href: "/whatsapp/contacts",
+            label: "Opt-Outs & Contacts",
+            labelHi: "ऑप्ट-आउट और संपर्क",
+            keywords: "whatsapp stop suppression opt out contacts",
+            fallbackGuideSlug: "whatsapp-and-broadcasts",
+          }),
+          hydrateNavItem({
+            href: "/inbox?channel=whatsapp",
+            label: "Team Inbox",
+            labelHi: "टीम इनबॉक्स",
+            keywords: "whatsapp team inbox chat customer support desk replies sla",
+            fallbackGuideSlug: "shared-inbox-and-customer-messages",
+          }),
+          hydrateNavItem({
+            href: "/connections/whatsapp",
+            label: "WhatsApp Connection",
+            labelHi: "व्हाट्सऐप कनेक्शन",
+            keywords: "connect whatsapp number waba embedded signup oauth",
+            fallbackGuideSlug: "connecting-channels-whatsapp-meta-google",
+          }),
+        ],
+        branches: [
+          {
+            id: "meta-whatsapp-tally",
+            label: "Tally Integration",
+            labelHi: "टैली एकीकरण",
+            defaultOpen: true,
+            iconKey: "tally",
+            items: [
+              hydrateNavItem({
+                href: "/tally",
+                label: "Bills & Live Sync",
+                labelHi: "बिल और लाइव सिंक",
+                keywords:
+                  "tally xml csv tdl webhook automation invoices vouchers receipts payments paid overdue reminders pdf",
+                fallbackGuideSlug: "tally-sync-and-import",
+              }),
+              hydrateNavItem({
+                href: "/tally/automation",
+                label: "Auto-Send & Reminders",
+                labelHi: "ऑटो-सेंड और रिमाइंडर",
+                keywords: "tally automation overdue reminder schedule ca sheet",
+                fallbackGuideSlug: "tally-sync-and-import",
+              }),
+              hydrateNavItem({
+                href: "/tally/import",
+                label: "XML / Manual Import",
+                labelHi: "XML / मैनुअल इम्पोर्ट",
+                keywords: "tally xml csv import manual bill entry",
+                fallbackGuideSlug: "tally-sync-and-import",
+              }),
+              hydrateNavItem({
+                href: "/tally/parties",
+                label: "Party Ledgers",
+                labelHi: "पार्टी खाता बही",
+                keywords:
+                  "clients parties customers suppliers debtors creditors ledgers statement ageing credit limit paid",
+                fallbackGuideSlug: "tally-sync-and-import",
+              }),
+              hydrateNavItem({
+                href: "/inventory",
+                label: "Stock & Inventory",
+                labelHi: "स्टॉक और गोदाम",
+                keywords: "inventory stock items godowns warehouse batches expiry reorder valuation",
+                fallbackGuideSlug: "tally-sync-and-import",
+              }),
+              hydrateNavItem({
+                href: "/connections/tally",
+                label: "Tally Connection",
+                labelHi: "टैली कनेक्शन",
+                keywords: "tally pc connector tdl download pairing code ssl setup",
+                fallbackGuideSlug: "tally-sync-and-import",
+              }),
+            ],
+          },
+        ],
+      },
+      {
+        id: "meta-facebook",
+        label: "Facebook",
+        labelHi: "फेसबुक",
+        iconKey: "facebook",
+        items: [
+          hydrateNavItem({
+            href: "/meta/facebook/ads",
+            label: "Facebook Ads",
+            labelHi: "फेसबुक विज्ञापन",
+            keywords: "facebook meta ads roas spend lead ads",
+            fallbackGuideSlug: "ads-social-posts-and-website-conversions",
+          }),
+          hydrateNavItem({
+            href: "/meta/facebook/posts",
+            label: "Page Posts & Leads",
+            labelHi: "पेज पोस्ट और लीड्स",
+            keywords: "facebook page posts schedule lead forms",
+            fallbackGuideSlug: "ads-social-posts-and-website-conversions",
+          }),
+          hydrateNavItem({
+            href: "/meta/facebook/pixel",
+            label: "Pixel & CAPI",
+            labelHi: "पिक्सेल और CAPI",
+            keywords: "meta pixel capi server conversions purchase events",
+            fallbackGuideSlug: "ads-social-posts-and-website-conversions",
+          }),
+          hydrateNavItem({
+            href: "/inbox?channel=facebook",
+            label: "Messenger Inbox",
+            labelHi: "मैसेंजर इनबॉक्स",
+            keywords: "facebook messenger chat inbox replies",
+            fallbackGuideSlug: "shared-inbox-and-customer-messages",
+          }),
+          hydrateNavItem({
+            href: "/connections/facebook",
+            label: "Facebook Page Connection",
+            labelHi: "फेसबुक पेज कनेक्शन",
+            keywords: "connect facebook page oauth asset switch",
+            fallbackGuideSlug: "connecting-channels-whatsapp-meta-google",
+          }),
+          hydrateNavItem({
+            href: "/connections/meta-ads",
+            label: "Meta Ads & Pixel Connection",
+            labelHi: "मेटा विज्ञापन कनेक्शन",
+            keywords: "connect meta ad account pixel capi oauth",
+            fallbackGuideSlug: "connecting-channels-whatsapp-meta-google",
+          }),
+        ],
+      },
+      {
+        id: "meta-instagram",
+        label: "Instagram",
+        labelHi: "इंस्टाग्राम",
+        iconKey: "instagram",
+        items: [
+          hydrateNavItem({
+            href: "/meta/instagram/posts",
+            label: "Posts & Reels",
+            labelHi: "पोस्ट और रील्स",
+            keywords: "instagram reels posts schedule social",
+            fallbackGuideSlug: "ads-social-posts-and-website-conversions",
+          }),
+          hydrateNavItem({
+            href: "/meta/instagram/ads",
+            label: "Instagram Ads",
+            labelHi: "इंस्टाग्राम विज्ञापन",
+            keywords: "instagram reels feed ads meta campaigns roas",
+            fallbackGuideSlug: "ads-social-posts-and-website-conversions",
+          }),
+          hydrateNavItem({
+            href: "/inbox?channel=instagram",
+            label: "Instagram DMs",
+            labelHi: "इंस्टाग्राम डीएम",
+            keywords: "instagram direct messages dm inbox replies",
+            fallbackGuideSlug: "shared-inbox-and-customer-messages",
+          }),
+          hydrateNavItem({
+            href: "/connections/instagram",
+            label: "Instagram Connection",
+            labelHi: "इंस्टाग्राम कनेक्शन",
+            keywords: "connect instagram business account oauth",
+            fallbackGuideSlug: "connecting-channels-whatsapp-meta-google",
+          }),
+        ],
+      },
     ],
   },
   {
-    id: "marketing",
-    heading: "Marketing & Campaigns",
-    headingHi: "मार्केटिंग और अभियान",
-    items: [
-      hydrateNavItem({
-        href: "/whatsapp",
-        label: "WhatsApp & Templates",
-        labelHi: "व्हाट्सऐप और टेम्पलेट",
-        keywords:
-          "whatsapp templates manager header buttons variables bulk broadcast opt-in stop unsubscribed",
-        fallbackGuideSlug: "whatsapp-and-broadcasts",
-      }),
-      hydrateNavItem({
-        href: "/campaigns",
-        label: "Ads & Social Posts",
-        labelHi: "विज्ञापन और पोस्ट",
-        keywords: "meta facebook instagram ads pixel scheduled posts",
-        fallbackGuideSlug: "ads-social-posts-and-website-conversions",
-      }),
-      hydrateNavItem({
-        href: "/reviews",
-        label: "Google Reviews",
-        labelHi: "गूगल रिव्यू",
-        keywords: "google business profile stars ratings replies",
-        fallbackGuideSlug: "google-reviews-and-smart-replies",
-      }),
+    id: "google",
+    heading: "Google Services",
+    headingHi: "गूगल सेवाएं",
+    branches: [
+      {
+        id: "google-gbp",
+        label: "Google Business Profile",
+        labelHi: "गूगल बिज़नेस प्रोफ़ाइल",
+        iconKey: "reviews",
+        items: [
+          hydrateNavItem({
+            href: "/reviews",
+            label: "Reviews & Replies",
+            labelHi: "रिव्यू और जवाब",
+            keywords: "google business profile stars ratings maps replies",
+            fallbackGuideSlug: "google-reviews-and-smart-replies",
+          }),
+          hydrateNavItem({
+            href: "/reviews/automation",
+            label: "Rating Stats & Auto-Reply",
+            labelHi: "रेटिंग और ऑटो-जवाब",
+            keywords: "google reviews ratings breakdown manual entry auto reply",
+            fallbackGuideSlug: "google-reviews-and-smart-replies",
+          }),
+          hydrateNavItem({
+            href: "/connections/google-business",
+            label: "GBP Connection",
+            labelHi: "जीबीपी कनेक्शन",
+            keywords: "connect google business profile location oauth",
+            fallbackGuideSlug: "connecting-channels-whatsapp-meta-google",
+          }),
+        ],
+      },
+      {
+        id: "google-ads",
+        label: "Google Ads & Search",
+        labelHi: "गूगल विज्ञापन और सर्च",
+        iconKey: "google-ads",
+        items: [
+          hydrateNavItem({
+            href: "/google/ads",
+            label: "Google Ads",
+            labelHi: "गूगल विज्ञापन",
+            keywords: "google ads search pmax performance max call ads roas",
+            fallbackGuideSlug: "ads-social-posts-and-website-conversions",
+          }),
+          hydrateNavItem({
+            href: "/google/search",
+            label: "Search Console & SEO",
+            labelHi: "सर्च कंसोल और एसईओ",
+            keywords: "google search console organic keywords rankings seo",
+            fallbackGuideSlug: "ads-social-posts-and-website-conversions",
+          }),
+          hydrateNavItem({
+            href: "/connections/google-ads",
+            label: "Google Ads Connection",
+            labelHi: "गूगल विज्ञापन कनेक्शन",
+            keywords: "connect google ads customer id oauth",
+            fallbackGuideSlug: "connecting-channels-whatsapp-meta-google",
+          }),
+          hydrateNavItem({
+            href: "/connections/google-search-console",
+            label: "Search Console Connection",
+            labelHi: "सर्च कंसोल कनेक्शन",
+            keywords: "connect google search console site property oauth",
+            fallbackGuideSlug: "connecting-channels-whatsapp-meta-google",
+          }),
+        ],
+      },
+      {
+        id: "google-drive-sheets",
+        label: "Drive & Sheets",
+        labelHi: "ड्राइव और शीट्स",
+        iconKey: "drive",
+        items: [
+          hydrateNavItem({
+            href: "/backups",
+            label: "Backups & Restore",
+            labelHi: "बैकअप और निर्यात",
+            keywords: "cloud storage backup restore export import google drive",
+            fallbackGuideSlug: "storage-r2-and-backups",
+          }),
+          hydrateNavItem({
+            href: "/backups/exports",
+            label: "Exports & CSV Imports",
+            labelHi: "निर्यात और CSV इम्पोर्ट",
+            keywords: "export json csv xml import contacts stored files quota",
+            fallbackGuideSlug: "storage-r2-and-backups",
+          }),
+          hydrateNavItem({
+            href: "/connections/google-drive",
+            label: "Google Drive Connection",
+            labelHi: "गूगल ड्राइव कनेक्शन",
+            keywords: "connect google drive backup folder oauth",
+            fallbackGuideSlug: "storage-r2-and-backups",
+          }),
+          hydrateNavItem({
+            href: "/connections/google-sheets",
+            label: "Google Sheets (CA Sync)",
+            labelHi: "गूगल शीट्स (सीए सिंक)",
+            keywords: "connect google sheets ca live sync oauth",
+            fallbackGuideSlug: "connecting-channels-whatsapp-meta-google",
+          }),
+        ],
+      },
     ],
   },
   {
-    id: "support",
-    heading: "Customer Support Desk",
-    headingHi: "ग्राहक सहायता डेस्क",
-    items: [
-      hydrateNavItem({
-        href: "/inbox",
-        label: "Customer Messages",
-        labelHi: "ग्राहक संदेश",
-        keywords: "inbox chat whatsapp instagram facebook sla replies",
-        fallbackGuideSlug: "shared-inbox-and-customer-messages",
-      }),
-    ],
-  },
-  {
-    id: "channels",
-    heading: "Channels, API & Vault",
-    headingHi: "चैनल, एपीआई और बैकअप",
+    id: "systems",
+    heading: "Connections & Systems",
+    headingHi: "कनेक्शन और सिस्टम",
     items: [
       hydrateNavItem({
         href: "/connections",
-        label: "Connected Channels",
-        labelHi: "जुड़े हुए चैनल",
-        keywords: "whatsapp meta facebook instagram google drive ads reviews connect oauth",
+        label: "All Connections",
+        labelHi: "सभी कनेक्शन",
+        keywords: "connections hub meta google tally cloudflare overview",
         fallbackGuideSlug: "connecting-channels-whatsapp-meta-google",
       }),
       hydrateNavItem({
+        href: "/connections/cloudflare",
+        label: "Cloudflare R2 & AI",
+        labelHi: "क्लाउडफ्लेयर R2 और AI",
+        keywords: "cloudflare r2 workers ai one click storage compute",
+        fallbackGuideSlug: "storage-r2-and-backups",
+      }),
+      hydrateNavItem({
         href: "/settings/tokens",
-        label: "All API Tokens",
-        labelHi: "एपीआई टोकन और कुंजी",
+        label: "Webhooks & Subdomains",
+        labelHi: "एपीआई कुंजी और वेबहुक",
         keywords:
           "api tokens keys bearer tally webhook verify whatsapp meta instagram secret rotate",
         fallbackGuideSlug: "developer-api",
       }),
       hydrateNavItem({
-        href: "/backups",
-        label: "Backups & Storage",
-        labelHi: "बैकअप और स्टोरेज",
-        keywords: "cloud storage backup restore export import",
-        fallbackGuideSlug: "storage-r2-and-backups",
+        href: "/settings/api-keys",
+        label: "REST API Keys",
+        labelHi: "REST API कुंजी",
+        keywords: "rest api keys bearer rsl_live_ sandbox developer tokens",
+        fallbackGuideSlug: "developer-api",
       }),
     ],
   },
   {
-    id: "administration",
-    heading: "Administration & Billing",
-    headingHi: "प्रशासन और बिलिंग",
+    id: "workspace-admin",
+    heading: "Team, Billing & Health",
+    headingHi: "टीम, बिलिंग और स्वास्थ्य",
     items: [
       hydrateNavItem({
+        href: "/settings/team",
+        label: "Team & Roles",
+        labelHi: "टीम और भूमिकाएँ",
+        keywords: "team members invite roles permissions 5 users staff colleague",
+        fallbackGuideSlug: "team-roles-security-and-business-settings",
+      }),
+      hydrateNavItem({
         href: "/billing",
-        label: "Plans & Wallet",
+        label: "Plans & Bundles",
         labelHi: "प्लान और वॉलेट",
         keywords: "wallet recharge utr upi gst invoice plans services rupees overdraft negative",
         fallbackGuideSlug: "plans-wallet-and-gst",
       }),
       hydrateNavItem({
-        href: "/settings/team",
-        label: "Team & Roles",
-        labelHi: "टीम और भूमिकाएँ",
-        keywords: "team members invite roles permissions staff colleague",
-        fallbackGuideSlug: "team-roles-security-and-business-settings",
+        href: "/billing/wallet",
+        label: "Prepaid Wallet & UPI",
+        labelHi: "प्रीपेड वॉलेट और UPI",
+        keywords: "wallet recharge utr upi razorpay ad vault overdraft",
+        fallbackGuideSlug: "plans-wallet-and-gst",
       }),
-    ],
-  },
-  {
-    id: "audit",
-    heading: "Audit, Health & Guides",
-    headingHi: "ऑडिट, स्वास्थ्य और गाइड",
-    items: [
+      hydrateNavItem({
+        href: "/billing/invoices",
+        label: "GST Tax Invoices",
+        labelHi: "जीएसटी टैक्स चालान",
+        keywords: "gst invoices credit notes gstr1 pdf download",
+        fallbackGuideSlug: "plans-wallet-and-gst",
+      }),
       hydrateNavItem({
         href: "/activity",
         label: "Activity History",
@@ -260,6 +535,47 @@ export const WORKSPACE_NAV_SECTIONS: Array<{
   },
 ];
 
+function collectBranchItems(branch: NavBranchDef): NavItemDef[] {
+  const direct = branch.items ?? [];
+  const nested = (branch.branches ?? []).flatMap(collectBranchItems);
+  return [...direct, ...nested];
+}
+
+function collectSectionItems(sec: NavSectionDef): NavItemDef[] {
+  const direct = sec.items ?? [];
+  const branched = (sec.branches ?? []).flatMap(collectBranchItems);
+  return [...direct, ...branched];
+}
+
+function getBranchIconSpec(iconKey?: string): {
+  Icon: React.ComponentType<{ className?: string }>;
+  tintClass: string;
+} {
+  switch (iconKey) {
+    case "whatsapp":
+      return { Icon: WhatsAppBrandIcon, tintClass: "text-emerald-600 dark:text-emerald-400" };
+    case "tally":
+      return { Icon: TallyBrandIcon, tintClass: "text-sky-600 dark:text-sky-400" };
+    case "facebook":
+      return { Icon: FacebookBrandIcon, tintClass: "text-blue-600 dark:text-blue-400" };
+    case "instagram":
+      return { Icon: InstagramBrandIcon, tintClass: "text-rose-600 dark:text-rose-400" };
+    case "reviews":
+      return {
+        Icon: GoogleBusinessBrandIcon,
+        tintClass: "text-emerald-600 dark:text-emerald-400",
+      };
+    case "google-ads":
+      return { Icon: GoogleAdsBrandIcon, tintClass: "text-amber-600 dark:text-amber-400" };
+    case "drive":
+      return { Icon: GoogleDriveBrandIcon, tintClass: "text-sky-600 dark:text-sky-400" };
+    case "connection":
+      return { Icon: Link2, tintClass: "text-indigo-600 dark:text-indigo-400" };
+    default:
+      return { Icon: GoogleBrandIcon, tintClass: "text-emerald-600 dark:text-emerald-400" };
+  }
+}
+
 const DOCK_ONLY_WORKSPACE_ITEMS: NavItemDef[] = [
   hydrateNavItem({
     href: "/settings/business",
@@ -282,36 +598,223 @@ const ICON_BY_HREF: Record<string, React.ComponentType<{ className?: string }>> 
   "/": LayoutDashboard,
   "/analytics": BarChart3,
   "/inbox": Inbox,
-  "/tally": FileSpreadsheet,
+  "/inbox?channel=whatsapp": WhatsAppBrandIcon,
+  "/inbox?channel=facebook": MessengerBrandIcon,
+  "/inbox?channel=instagram": InstagramBrandIcon,
+  "/tally": TallyBrandIcon,
   "/tally/parties": Users,
-  "/whatsapp": MessageSquareShare,
-  "/campaigns": Megaphone,
-  "/reviews": Star,
   "/inventory": Package,
+  "/whatsapp": WhatsAppBrandIcon,
+  "/whatsapp/broadcasts": Send,
+  "/whatsapp/contacts": UserMinus,
+  "/tally/automation": Sparkles,
+  "/tally/import": UploadCloud,
+  "/meta/facebook/ads": MetaBrandIcon,
+  "/meta/facebook/posts": FacebookBrandIcon,
+  "/meta/facebook/pixel": TrendingUp,
+  "/meta/instagram/posts": InstagramBrandIcon,
+  "/meta/instagram/ads": MetaBrandIcon,
+  "/google/ads": GoogleAdsBrandIcon,
+  "/google/search": GoogleSearchConsoleBrandIcon,
+  "/reviews/automation": Star,
+  "/backups/exports": FileSpreadsheet,
+  "/settings/api-keys": KeyRound,
+  "/billing/wallet": Wallet,
+  "/billing/invoices": ReceiptText,
+  "/campaigns": MetaBrandIcon,
+  "/campaigns?platform=facebook": MetaBrandIcon,
+  "/campaigns?platform=facebook&view=social": FacebookBrandIcon,
+  "/campaigns?platform=instagram": InstagramBrandIcon,
+  "/campaigns?platform=google": GoogleAdsBrandIcon,
+  "/reviews": Star,
   "/settings/profile": UserCircle2,
   "/settings/business": Building2,
   "/settings/team": Users,
   "/connections": Link2,
-  "/settings/tokens": KeyRound,
+  "/connections/whatsapp": WhatsAppBrandIcon,
+  "/connections/facebook": FacebookBrandIcon,
+  "/connections/meta-ads": MetaBrandIcon,
+  "/connections/instagram": InstagramBrandIcon,
+  "/connections/google-business": GoogleBusinessBrandIcon,
+  "/connections/google-ads": GoogleAdsBrandIcon,
+  "/connections/google-search-console": GoogleSearchConsoleBrandIcon,
+  "/connections/google-drive": GoogleDriveBrandIcon,
+  "/connections/google-sheets": GoogleSheetsBrandIcon,
+  "/connections/cloudflare": CloudflareBrandIcon,
+  "/connections/tally": TallyBrandIcon,
+  "/settings/tokens": Webhook,
   "/developers": KeyRound,
   "/billing": Wallet,
-  "/backups": Database,
+  "/backups": GoogleDriveBrandIcon,
   "/activity": ShieldCheck,
   "/status": Activity,
   "/help": BookOpen,
 };
 
-function isItemActiveForPathname(href: string, pathname: string): boolean {
-  if (href === "/") return pathname === "/";
-  if (href === "/tally") {
-    return pathname === "/tally" || pathname.startsWith("/tally/vouchers/");
+const ICON_TINT_BY_HREF: Record<string, string> = {
+  "/whatsapp": "text-emerald-600 dark:text-emerald-400",
+  "/whatsapp/broadcasts": "text-emerald-600 dark:text-emerald-400",
+  "/whatsapp/contacts": "text-emerald-600 dark:text-emerald-400",
+  "/tally/automation": "text-sky-600 dark:text-sky-400",
+  "/tally/import": "text-sky-600 dark:text-sky-400",
+  "/meta/facebook/ads": "text-blue-600 dark:text-blue-400",
+  "/meta/facebook/posts": "text-blue-600 dark:text-blue-400",
+  "/meta/facebook/pixel": "text-indigo-600 dark:text-indigo-400",
+  "/meta/instagram/posts": "text-rose-600 dark:text-rose-400",
+  "/meta/instagram/ads": "text-rose-600 dark:text-rose-400",
+  "/google/ads": "text-amber-600 dark:text-amber-400",
+  "/google/search": "text-indigo-600 dark:text-indigo-400",
+  "/reviews/automation": "text-amber-600 dark:text-amber-400",
+  "/backups/exports": "text-sky-600 dark:text-sky-400",
+  "/inbox?channel=whatsapp": "text-emerald-600 dark:text-emerald-400",
+  "/connections/whatsapp": "text-emerald-600 dark:text-emerald-400",
+  "/campaigns?platform=facebook": "text-blue-600 dark:text-blue-400",
+  "/campaigns?platform=facebook&view=social": "text-blue-600 dark:text-blue-400",
+  "/inbox?channel=facebook": "text-sky-600 dark:text-sky-400",
+  "/connections/facebook": "text-blue-600 dark:text-blue-400",
+  "/connections/meta-ads": "text-indigo-600 dark:text-indigo-400",
+  "/campaigns?platform=instagram": "text-rose-600 dark:text-rose-400",
+  "/inbox?channel=instagram": "text-rose-600 dark:text-rose-400",
+  "/connections/instagram": "text-rose-600 dark:text-rose-400",
+  "/reviews": "text-amber-600 dark:text-amber-400",
+  "/connections/google-business": "text-emerald-600 dark:text-emerald-400",
+  "/campaigns?platform=google": "text-amber-600 dark:text-amber-400",
+  "/connections/google-ads": "text-amber-600 dark:text-amber-400",
+  "/connections/google-search-console": "text-indigo-600 dark:text-indigo-400",
+  "/backups": "text-sky-600 dark:text-sky-400",
+  "/connections/google-drive": "text-sky-600 dark:text-sky-400",
+  "/connections/google-sheets": "text-emerald-600 dark:text-emerald-400",
+  "/connections/cloudflare": "text-amber-600 dark:text-amber-400",
+  "/connections/tally": "text-sky-600 dark:text-sky-400",
+  "/tally": "text-sky-600 dark:text-sky-400",
+};
+
+function resolveIconForHref(href: string): React.ComponentType<{ className?: string }> {
+  if (ICON_BY_HREF[href]) return ICON_BY_HREF[href]!;
+  const basePath = href.split("?")[0] || href;
+  if (ICON_BY_HREF[basePath]) return ICON_BY_HREF[basePath]!;
+  if (basePath.startsWith("/connections/")) return Plug;
+  return LayoutDashboard;
+}
+
+function resolveIconTintForHref(href: string): string | undefined {
+  if (ICON_TINT_BY_HREF[href]) return ICON_TINT_BY_HREF[href];
+  const basePath = href.split("?")[0] || href;
+  return ICON_TINT_BY_HREF[basePath];
+}
+
+function isItemActiveForPathname(
+  itemHref: string,
+  pathname: string,
+  currentSearch = ""
+): boolean {
+  const [rawTargetPath, rawTargetQuery] = itemHref.split("?");
+  const targetPath = rawTargetPath || "/";
+
+  if (targetPath === "/") return pathname === "/";
+
+  if (targetPath === "/connections" && !rawTargetQuery) {
+    return pathname === "/connections";
   }
-  return (
-    pathname === href ||
-    pathname.startsWith(`${href}/`) ||
-    (href === "/settings/tokens" &&
-      (pathname === "/developers" || pathname.startsWith("/developers/")))
+
+  if (targetPath === "/tally") {
+    const matchesTallyPath = pathname === "/tally" || pathname.startsWith("/tally/vouchers/");
+    if (!matchesTallyPath) return false;
+  } else {
+    const matchesPath = pathname === targetPath || pathname.startsWith(`${targetPath}/`) ||
+      (targetPath === "/settings/tokens" &&
+        (pathname === "/developers" || pathname.startsWith("/developers/")));
+    if (!matchesPath) return false;
+  }
+
+  if (!rawTargetQuery) return true;
+
+  const targetParams = new URLSearchParams(rawTargetQuery);
+  const currentParams = new URLSearchParams(currentSearch);
+
+  if (targetPath === "/inbox") {
+    const targetChannel = targetParams.get("channel") || "whatsapp";
+    const curChannel = currentParams.get("channel") || "";
+    if (!curChannel || curChannel === "all") {
+      return targetChannel === "whatsapp";
+    }
+    return curChannel === targetChannel;
+  }
+
+  if (targetPath === "/campaigns") {
+    const targetPlatform = targetParams.get("platform");
+    const targetView = targetParams.get("view");
+    const curPlatform = currentParams.get("platform") || "";
+    const curView = currentParams.get("view") || "";
+    if (!curPlatform && targetPlatform === "facebook" && !targetView) {
+      return true;
+    }
+    if (curPlatform !== targetPlatform) return false;
+    if (targetView) return curView === targetView;
+    return !curView || curView === "ads";
+  }
+
+  for (const [k, v] of targetParams.entries()) {
+    if (currentParams.get(k) !== v) return false;
+  }
+  return true;
+}
+
+function filterVisibleBranch(
+  branch: NavBranchDef,
+  canAccessRoute: (href: string) => boolean
+): NavBranchDef | null {
+  const visibleItems = (branch.items ?? []).filter((item) =>
+    canAccessRoute(item.href.split("?")[0] || item.href)
   );
+  const visibleSubBranches = (branch.branches ?? [])
+    .map((b) => filterVisibleBranch(b, canAccessRoute))
+    .filter((b): b is NavBranchDef => Boolean(b));
+
+  if (visibleItems.length === 0 && visibleSubBranches.length === 0) {
+    return null;
+  }
+  return {
+    ...branch,
+    items: visibleItems,
+    branches: visibleSubBranches,
+  };
+}
+
+function branchContainsActiveRoute(
+  branch: NavBranchDef,
+  pathname: string,
+  currentSearch: string
+): boolean {
+  if ((branch.items ?? []).some((i) => isItemActiveForPathname(i.href, pathname, currentSearch))) {
+    return true;
+  }
+  return (branch.branches ?? []).some((sub) =>
+    branchContainsActiveRoute(sub, pathname, currentSearch)
+  );
+}
+
+function collectInitiallyExpandedIds(
+  sections: NavSectionDef[],
+  pathname: string,
+  currentSearch: string
+): Set<string> {
+  const open = new Set<string>();
+  const walk = (b: NavBranchDef) => {
+    const activeInside = branchContainsActiveRoute(b, pathname, currentSearch);
+    if (activeInside || (b.defaultOpen && (pathname === "/" || pathname === "/whatsapp"))) {
+      open.add(b.id);
+    }
+    for (const sub of b.branches ?? []) {
+      walk(sub);
+    }
+  };
+  for (const sec of sections) {
+    for (const b of sec.branches ?? []) {
+      walk(b);
+    }
+  }
+  return open;
 }
 
 export function SidebarNavLinks({
@@ -326,14 +829,50 @@ export function SidebarNavLinks({
   const { canAccessRoute } = useWorkspaceAccess();
   const [isPending, startTransition] = useTransition();
   const [pendingHref, setPendingHref] = useState<string | null>(null);
+  const [currentSearch, setCurrentSearch] = useState("");
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() =>
+    collectInitiallyExpandedIds(WORKSPACE_NAV_SECTIONS, pathname, "")
+  );
+
+  useEffect(() => {
+    const syncSearch = () => {
+      if (typeof window === "undefined") return;
+      const nextSearch = window.location.search.replace(/^\?/, "");
+      setCurrentSearch(nextSearch);
+      const requiredOpen = collectInitiallyExpandedIds(
+        WORKSPACE_NAV_SECTIONS,
+        window.location.pathname || "/",
+        nextSearch
+      );
+      if (requiredOpen.size > 0) {
+        setExpandedIds((prev) => {
+          const next = new Set(prev);
+          requiredOpen.forEach((id) => next.add(id));
+          return next;
+        });
+      }
+    };
+    syncSearch();
+    window.addEventListener("popstate", syncSearch);
+    return () => window.removeEventListener("popstate", syncSearch);
+  }, [pathname]);
 
   const visibleSections = useMemo(
     () =>
-      WORKSPACE_NAV_SECTIONS.map((sec) => ({
-        id: sec.id,
-        heading: locale === "hi" ? sec.headingHi : sec.heading,
-        items: sec.items.filter((item) => canAccessRoute(item.href)),
-      })).filter((sec) => sec.items.length > 0),
+      WORKSPACE_NAV_SECTIONS.map((sec) => {
+        const items = (sec.items ?? []).filter((item) =>
+          canAccessRoute(item.href.split("?")[0] || item.href)
+        );
+        const branches = (sec.branches ?? [])
+          .map((b) => filterVisibleBranch(b, canAccessRoute))
+          .filter((b): b is NavBranchDef => Boolean(b));
+        return {
+          id: sec.id,
+          heading: locale === "hi" ? sec.headingHi : sec.heading,
+          items,
+          branches,
+        };
+      }).filter((sec) => sec.items.length > 0 || sec.branches.length > 0),
     [canAccessRoute, locale]
   );
 
@@ -341,14 +880,139 @@ export function SidebarNavLinks({
     if (!isPending) {
       setPendingHref(null);
     }
-  }, [isPending, pathname]);
+  }, [isPending, pathname, currentSearch]);
+
+  const toggleBranch = (branchId: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(branchId)) {
+        next.delete(branchId);
+      } else {
+        next.add(branchId);
+      }
+      return next;
+    });
+  };
+
+  const renderNavLink = (item: NavItemDef, depth = 0) => {
+    const Icon = resolveIconForHref(item.href);
+    const customTint = resolveIconTintForHref(item.href);
+    const isActive = isItemActiveForPathname(item.href, pathname, currentSearch);
+    const isItemLoading = isPending && pendingHref === item.href;
+    const displayLabel = locale === "hi" ? item.labelHi : item.label;
+
+    return (
+      <li key={item.href}>
+        <Link
+          href={item.href}
+          aria-current={isActive ? "page" : undefined}
+          onClick={(e) => {
+            if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+              onNavigate?.();
+              return;
+            }
+            e.preventDefault();
+            onNavigate?.();
+            const targetSearch = item.href.includes("?") ? item.href.split("?")[1] || "" : "";
+            const targetPath = item.href.split("?")[0] || "/";
+            if (isActive && pathname === targetPath && currentSearch === targetSearch) return;
+            setPendingHref(item.href);
+            setCurrentSearch(targetSearch);
+            startTransition(() => {
+              router.push(item.href);
+            });
+          }}
+          className={`rsl-nav-item group flex w-full items-center justify-between gap-2 rounded-xl px-2.5 ${
+            depth > 0 ? "py-1.5 text-[12.5px]" : "py-2 text-[13px]"
+          } transition-all ${
+            isActive
+              ? "rsl-nav-item-active font-semibold shadow-xs"
+              : isItemLoading
+                ? "rsl-nav-item-sunset font-semibold"
+                : "font-medium text-[var(--ink-secondary)] hover:bg-[var(--surface-inset)] hover:text-[var(--ink)]"
+          }`}
+        >
+          <span className="inline-flex min-w-0 items-center gap-2 truncate">
+            <Icon
+              className={`${depth > 0 ? "h-3.5 w-3.5" : "h-4 w-4"} shrink-0 transition-colors ${
+                isActive || isItemLoading
+                  ? "text-[var(--sunset-orange)]"
+                  : customTint || "text-[var(--ink-muted)] group-hover:text-[var(--ink-strong)]"
+              }`}
+            />
+            <span className="truncate">{displayLabel}</span>
+          </span>
+          {isItemLoading ? (
+            <IosSpinner size="xs" className="text-[var(--sunset-orange)]" />
+          ) : isActive ? (
+            <span className="rsl-nav-dot h-2 w-2 shrink-0 rounded-full bg-[var(--sunset-orange)]" />
+          ) : null}
+        </Link>
+      </li>
+    );
+  };
+
+  const renderBranch = (branch: NavBranchDef, depth = 0) => {
+    const isExpanded = expandedIds.has(branch.id);
+    const hasActiveInside = branchContainsActiveRoute(branch, pathname, currentSearch);
+    const { Icon: BranchIcon, tintClass } = getBranchIconSpec(branch.iconKey);
+    const label = locale === "hi" ? branch.labelHi : branch.label;
+
+    return (
+      <li key={branch.id}>
+        <button
+          type="button"
+          onClick={() => toggleBranch(branch.id)}
+          aria-expanded={isExpanded}
+          className={`rsl-sidebar-subtoggle ${
+            hasActiveInside ? "rsl-sidebar-subtoggle-active" : ""
+          }`}
+        >
+          <span className="inline-flex min-w-0 items-center gap-2 truncate">
+            <BranchIcon
+              className={`h-4 w-4 shrink-0 ${
+                hasActiveInside ? "text-[var(--sunset-orange)]" : tintClass
+              }`}
+            />
+            <span className="truncate">{label}</span>
+          </span>
+          <ChevronRight
+            className={`h-3.5 w-3.5 shrink-0 text-[var(--ink-muted)] transition-transform duration-150 ${
+              isExpanded ? "rotate-90 text-[var(--ink-strong)]" : ""
+            }`}
+          />
+        </button>
+
+        {isExpanded && (
+          <ul
+            className={
+              depth > 0 ? "rsl-sidebar-nested-group space-y-0.5" : "rsl-sidebar-subtree space-y-0.5"
+            }
+          >
+            {(branch.items ?? []).map((item) => renderNavLink(item, depth + 1))}
+            {(branch.branches ?? []).map((sub) => renderBranch(sub, depth + 1))}
+          </ul>
+        )}
+      </li>
+    );
+  };
 
   return (
     <nav className="mt-3 space-y-3.5 pb-2" aria-label="Workspace navigation">
       {visibleSections.map((sec) => {
-        const hasActiveChild = sec.items.some((item) =>
-          isItemActiveForPathname(item.href, pathname)
+        const secItems = [
+          ...sec.items,
+          ...sec.branches.flatMap(collectBranchItems),
+        ];
+        const hasActiveChild = secItems.some((item) =>
+          isItemActiveForPathname(item.href, pathname, currentSearch)
         );
+        const SectionBrandIcon =
+          sec.id === "meta"
+            ? MetaBrandIcon
+            : sec.id === "google"
+              ? GoogleBrandIcon
+              : null;
 
         return (
           <div key={sec.id} className="rsl-nav-section">
@@ -359,69 +1023,17 @@ export function SidebarNavLinks({
                   : "text-[var(--ink-muted)]"
               }`}
             >
-              <span className="truncate">{sec.heading}</span>
+              <span className="inline-flex min-w-0 items-center gap-1.5 truncate">
+                {SectionBrandIcon && (
+                  <SectionBrandIcon className="h-3 w-3 shrink-0 opacity-85" />
+                )}
+                <span className="truncate">{sec.heading}</span>
+              </span>
             </div>
 
             <ul className="rsl-nav-group-rail mt-1 space-y-0.5">
-              {sec.items.map((item) => {
-                const Icon = ICON_BY_HREF[item.href] || LayoutDashboard;
-                const isActive = isItemActiveForPathname(item.href, pathname);
-                const isItemLoading = isPending && pendingHref === item.href;
-                const displayLabel = locale === "hi" ? item.labelHi : item.label;
-
-                return (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      aria-current={isActive ? "page" : undefined}
-                      onClick={(e) => {
-                        if (
-                          e.button !== 0 ||
-                          e.metaKey ||
-                          e.ctrlKey ||
-                          e.shiftKey ||
-                          e.altKey
-                        ) {
-                          onNavigate?.();
-                          return;
-                        }
-                        e.preventDefault();
-                        onNavigate?.();
-                        if (isActive && pathname === item.href) return;
-                        setPendingHref(item.href);
-                        startTransition(() => {
-                          router.push(item.href);
-                        });
-                      }}
-                      className={`rsl-nav-item group flex w-full items-center justify-between gap-2.5 rounded-xl px-2.5 py-2 text-[13px] transition-all ${
-                        isActive
-                          ? "rsl-nav-item-active font-semibold shadow-xs"
-                          : isItemLoading
-                            ? "rsl-nav-item-sunset font-semibold"
-                            : "font-medium text-[var(--ink-secondary)] hover:bg-[var(--surface-inset)] hover:text-[var(--ink)]"
-                      }`}
-                    >
-                      <span className="inline-flex min-w-0 items-center gap-2.5 truncate">
-                        <Icon
-                          className={`h-4 w-4 shrink-0 transition-colors ${
-                            isActive
-                              ? "text-[var(--sunset-orange)]"
-                              : isItemLoading
-                                ? "text-[var(--sunset-orange)]"
-                                : "text-[var(--ink-muted)] group-hover:text-[var(--ink-strong)]"
-                          }`}
-                        />
-                        <span className="truncate">{displayLabel}</span>
-                      </span>
-                      {isItemLoading ? (
-                        <IosSpinner size="xs" className="text-[var(--sunset-orange)]" />
-                      ) : isActive ? (
-                        <span className="rsl-nav-dot h-2 w-2 shrink-0 rounded-full bg-[var(--sunset-orange)]" />
-                      ) : null}
-                    </Link>
-                  </li>
-                );
-              })}
+              {sec.items.map((item) => renderNavLink(item, 0))}
+              {sec.branches.map((branch) => renderBranch(branch, 0))}
             </ul>
           </div>
         );
@@ -467,24 +1079,33 @@ export function TopWorkspaceBar({
   useDialogFocusTrap(mobileDrawerRef, mobileMenuOpen, () => setMobileMenuOpen(false));
   useDialogFocusTrap(paletteDialogRef, paletteOpen, () => setPaletteOpen(false));
 
+  const [topSearch, setTopSearch] = useState("");
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setTopSearch(window.location.search.replace(/^\?/, ""));
+    }
+  }, [pathname]);
+
   const allItems = useMemo(
-    () => [...WORKSPACE_NAV_SECTIONS.flatMap((s) => s.items), ...DOCK_ONLY_WORKSPACE_ITEMS],
+    () => [...WORKSPACE_NAV_SECTIONS.flatMap(collectSectionItems), ...DOCK_ONLY_WORKSPACE_ITEMS],
     []
   );
   const accessibleItems = useMemo(
-    () => allItems.filter((item) => canAccessRoute(item.href)),
+    () => allItems.filter((item) => canAccessRoute(item.href.split("?")[0] || item.href)),
     [allItems, canAccessRoute]
   );
 
   const currentItem = useMemo(() => {
+    const cleanPath = pathname || "/";
+    const sorted = [...allItems].sort(
+      (a, b) => (b.href.split("?")[0] || "").length - (a.href.split("?")[0] || "").length
+    );
     return (
-      allItems.find((i) =>
-        i.href === "/" ? pathname === "/" : pathname === i.href || pathname.startsWith(`${i.href}/`)
-      ) ??
+      sorted.find((i) => isItemActiveForPathname(i.href, cleanPath, topSearch)) ??
       accessibleItems[0] ??
       allItems[0]!
     );
-  }, [accessibleItems, allItems, pathname]);
+  }, [accessibleItems, allItems, pathname, topSearch]);
 
   const currentItemLabel = locale === "hi" ? currentItem.labelHi : currentItem.label;
 
@@ -511,7 +1132,7 @@ export function TopWorkspaceBar({
         label: "Recharge Prepaid Wallet",
         summary: "Add funds via UPI / Bank Transfer or view GST Advance Receipts",
         keywords: "recharge topup wallet upi utr billing balance",
-        href: "/billing?tab=wallet",
+        href: "/billing/wallet",
       });
     }
     if (canAccessRoute("/tally")) {
@@ -633,7 +1254,7 @@ export function TopWorkspaceBar({
 
             {canViewBilling && (
               <Link
-                href="/billing?tab=wallet"
+                href="/billing/wallet"
                 title={
                   isOverdraftExhausted
                     ? "Wallet overdraft limit (-₹200.00) reached - recharge to resume metered usage"
@@ -644,7 +1265,7 @@ export function TopWorkspaceBar({
                 onClick={(e) => {
                   if (e.button === 0 && !e.metaKey && !e.ctrlKey) {
                     e.preventDefault();
-                    startBarTransition(() => router.push("/billing?tab=wallet"));
+                    startBarTransition(() => router.push("/billing/wallet"));
                   }
                 }}
                 className={`inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-semibold tabular-nums transition sm:px-3 ${
@@ -675,8 +1296,6 @@ export function TopWorkspaceBar({
                 {locale === "hi" ? "EN" : "हिं"}
               </button>
             </form>
-
-            <ThemeToggleButton />
 
             <button
               type="button"
@@ -897,7 +1516,7 @@ export function TopWorkspaceBar({
                       {filteredItems.map((item, idx) => {
                         const entryIndex = filteredQuickActions.length + idx;
                         const isSelected = activeIndex === entryIndex;
-                        const Icon = ICON_BY_HREF[item.href] || LayoutDashboard;
+                        const Icon = resolveIconForHref(item.href);
                         return (
                           <button
                             id={`cmdk-opt-${entryIndex}`}

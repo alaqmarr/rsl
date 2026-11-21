@@ -112,6 +112,7 @@ export function consumeAuthRateLimit(params: {
 export function resetAuthRateLimitsForTests(): void {
   authRateWindows.clear();
   userSessionCache.clear();
+  staffSessionCache.clear();
 }
 
 function hashSessionToken(rawToken: string): string {
@@ -161,9 +162,27 @@ const userSessionCache = new Map<
   { expiresAtMs: number; session: Omit<AuthenticatedSession, "ctx">; baseCtx: Omit<TenantContext, "requestId" | "correlationId"> }
 >();
 
+const staffSessionCache = new Map<
+  string,
+  {
+    expiresAtMs: number;
+    staffId: string;
+    mfaKey: string;
+    result: {
+      sessionId: string;
+      staff: typeof controlSchema.platformStaff.$inferSelect;
+      mfaEnrolled: boolean;
+      mfaVerified: boolean;
+      mfaRequired: boolean;
+      stepUpAt: number | null;
+    };
+  }
+>();
+
 export function invalidateSessionCache(workspaceId?: string): void {
   if (!workspaceId) {
     userSessionCache.clear();
+    staffSessionCache.clear();
     return;
   }
   for (const [tokenHash, entry] of userSessionCache.entries()) {
@@ -771,10 +790,7 @@ export function resolveUserSessionFromToken(
       workspaceId: controlSchema.memberships.workspaceId,
       roleSlug: controlSchema.memberships.roleSlug,
       assetScopeJson: controlSchema.memberships.assetScopeJson,
-      name: controlSchema.workspaces.name,
-      slug: controlSchema.workspaces.slug,
-      billingStatus: controlSchema.workspaces.billingStatus,
-      deletedAt: controlSchema.workspaces.deletedAt,
+      workspace: controlSchema.workspaces,
     })
     .from(controlSchema.memberships)
     .innerJoin(
@@ -783,19 +799,14 @@ export function resolveUserSessionFromToken(
     )
     .where(eq(controlSchema.memberships.userId, user.id))
     .all()
-    .filter((m) => !m.deletedAt);
+    .filter((m) => !m.workspace.deletedAt);
 
   if (allMemberships.length === 0) return null;
 
   const currentMembership =
     allMemberships.find((m) => m.workspaceId === session.activeWorkspaceId) ?? allMemberships[0]!;
 
-  const workspace = db
-    .select()
-    .from(controlSchema.workspaces)
-    .where(eq(controlSchema.workspaces.id, currentMembership.workspaceId))
-    .get();
-  if (!workspace || workspace.deletedAt) return null;
+  const workspace = currentMembership.workspace;
 
   const permissions = Array.from(getPermissionsForRole(currentMembership.roleSlug, workspace.id));
   const assetScope = currentMembership.assetScopeJson
@@ -832,10 +843,10 @@ export function resolveUserSessionFromToken(
     stepUpAt: session.stepUpAt ?? null,
     workspaces: allMemberships.map((m) => ({
       id: m.workspaceId,
-      name: m.name,
-      slug: m.slug,
+      name: m.workspace.name,
+      slug: m.workspace.slug,
       roleSlug: m.roleSlug,
-      billingStatus: m.billingStatus,
+      billingStatus: m.workspace.billingStatus,
     })),
   };
 
@@ -2508,22 +2519,57 @@ export function resolveStaffSessionFromToken(
   if (!rawToken) return null;
   const db = controlDb();
   const now = Date.now();
+  const tokenHash = hashSessionToken(rawToken);
+  const mfaKey = options?.allowPendingMfa ? "pending" : "verified";
+  const cacheKey = `${tokenHash}:${mfaKey}`;
+
+  if (SESSION_CACHE_TTL_MS > 0) {
+    const cached = staffSessionCache.get(cacheKey);
+    if (cached && cached.expiresAtMs > now) {
+      const liveRow = db.$client
+        .prepare(
+          `SELECT step_up_at AS stepUpAt, mfa_verified_at AS mfaVerifiedAt, last_active_at AS lastActiveAt
+           FROM platform_staff_sessions
+           WHERE id = ? AND expires_at > ?
+           LIMIT 1`
+        )
+        .get(cached.result.sessionId, now) as
+        | { stepUpAt: number | null; mfaVerifiedAt: number | null; lastActiveAt: number | null }
+        | undefined;
+      if (
+        !liveRow ||
+        (liveRow.lastActiveAt && now - liveRow.lastActiveAt > STAFF_SESSION_IDLE_MS) ||
+        Boolean(liveRow.mfaVerifiedAt) !== cached.result.mfaVerified ||
+        (liveRow.stepUpAt ?? null) !== cached.result.stepUpAt
+      ) {
+        staffSessionCache.delete(cacheKey);
+        if (!liveRow) return null;
+      } else {
+        return cached.result;
+      }
+    }
+  }
+
   const sess = db
     .select()
     .from(controlSchema.platformStaffSessions)
     .where(
       and(
-        eq(controlSchema.platformStaffSessions.tokenHash, hashSessionToken(rawToken)),
+        eq(controlSchema.platformStaffSessions.tokenHash, tokenHash),
         gt(controlSchema.platformStaffSessions.expiresAt, now)
       )
     )
     .get();
-  if (!sess) return null;
+  if (!sess) {
+    staffSessionCache.delete(cacheKey);
+    return null;
+  }
 
   if (sess.lastActiveAt && now - sess.lastActiveAt > STAFF_SESSION_IDLE_MS) {
     db.delete(controlSchema.platformStaffSessions)
       .where(eq(controlSchema.platformStaffSessions.id, sess.id))
       .run();
+    staffSessionCache.delete(cacheKey);
     return null;
   }
 
@@ -2549,7 +2595,7 @@ export function resolveStaffSessionFromToken(
     return null;
   }
 
-  return {
+  const result = {
     sessionId: sess.id,
     staff,
     mfaEnrolled,
@@ -2557,6 +2603,15 @@ export function resolveStaffSessionFromToken(
     mfaRequired,
     stepUpAt: sess.stepUpAt ?? null,
   };
+  if (SESSION_CACHE_TTL_MS > 0) {
+    staffSessionCache.set(cacheKey, {
+      expiresAtMs: now + SESSION_CACHE_TTL_MS,
+      staffId: staff.id,
+      mfaKey,
+      result,
+    });
+  }
+  return result;
 }
 
 export function beginPlatformStaffTotpEnrollment(staffId: string): {

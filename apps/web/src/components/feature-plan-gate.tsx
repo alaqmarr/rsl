@@ -169,14 +169,14 @@ export async function FeaturePlanGate({
                     <p className="text-xs leading-relaxed text-zinc-600">{plan.details.tagline}</p>
                   </div>
 
-                  <div className="rounded-xl border border-zinc-200/90 bg-white px-4 py-3 text-right shadow-2xs">
+                  <div className="shrink-0 text-right">
                     {plan.hasCustomPriceOverride &&
                       plan.standardMonthlyAmountPaise !== plan.monthlyAmountPaise && (
                         <div className="text-[11px] text-zinc-400 line-through tabular-nums">
                           {formatInr(plan.standardMonthlyAmountPaise)} / mo
                         </div>
                       )}
-                    <div className="text-2xl font-extrabold tracking-tight text-slate-900 tabular-nums">
+                    <div className="text-2xl font-extrabold tracking-[0.02em] text-slate-900 tabular-nums">
                       {formatInr(plan.monthlyAmountPaise)}
                       <span className="ml-1 text-xs font-medium text-zinc-500">/ month</span>
                     </div>

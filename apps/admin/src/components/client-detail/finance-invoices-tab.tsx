@@ -47,7 +47,7 @@ export function ClientFinanceInvoicesTab({
     );
   }
 
-  const returnToFinance = `/clients/${workspaceId}?tab=finance`;
+  const returnToFinance = `/clients/${workspaceId}/finance`;
 
   return (
     <div className="space-y-6">

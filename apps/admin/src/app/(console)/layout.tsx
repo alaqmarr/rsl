@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { LogOut, Settings, ShieldCheck } from "lucide-react";
-import { getPlatformAdminAnalytics } from "@rsl/analytics";
+import { getAdminLayoutSummary } from "@rsl/analytics";
 import {
   canStaffAccessAdminRoute,
   canStaffPerform,
@@ -17,21 +17,16 @@ import { requireStaffSession } from "@/lib/session";
 export default async function ConsoleLayout({ children }: { children: React.ReactNode }) {
   const { staff } = await requireStaffSession();
   const env = getEnv();
-  const adminData = getPlatformAdminAnalytics();
-  const pendingPlanRequestsCount = adminData.totals.pendingPlanRequestsCount;
-  const pendingWalletRequestsCount = adminData.totals.pendingWalletRequestsCount;
+  const layoutSummary = getAdminLayoutSummary();
+  const pendingPlanRequestsCount = layoutSummary.pendingPlanRequestsCount;
+  const pendingWalletRequestsCount = layoutSummary.pendingWalletRequestsCount;
   const totalPending = pendingPlanRequestsCount + pendingWalletRequestsCount;
   const canViewBilling = canStaffPerform(staff.staffRole, "staff:billing.view");
   const allowedHrefs = ADMIN_NAV_HREFS.filter((href) =>
     canStaffAccessAdminRoute(staff.staffRole, href)
   );
 
-  const quickClients = adminData.businesses.map((b) => ({
-    id: b.id,
-    name: b.name,
-    gstin: b.gstin,
-    billingStatus: b.billingStatus,
-  }));
+  const quickClients = layoutSummary.quickClients;
 
   const statusSummaryCard = (
     <div className="rsl-hero-surface overflow-hidden rounded-2xl p-3">
@@ -74,7 +69,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
         <div className="mt-2 flex items-center justify-between border-t border-white/15 pt-1.5 text-xs text-[var(--ink-on-dark-muted)]">
           <span>Revenue Collected</span>
           <span className="font-semibold text-amber-300 tabular-nums">
-            {formatInr(adminData.totals.totalInvoicedRevenuePaise)}
+            {formatInr(layoutSummary.totalInvoicedRevenuePaise)}
           </span>
         </div>
       )}

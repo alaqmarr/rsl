@@ -99,7 +99,7 @@ export default async function TeamAndRolesPage({
               copiedLabel="Copied Link"
             />
           </div>
-          <div className="mt-2 select-all break-all rounded-lg border border-emerald-200 bg-white px-3.5 py-2 font-mono text-xs font-semibold text-slate-900">
+          <div className="mt-2 select-all break-all rounded-lg border border-emerald-200 bg-[var(--surface)] px-3.5 py-2 font-mono text-xs font-semibold text-[var(--ink)]">
             {sp.inviteLink}
           </div>
         </div>
@@ -189,7 +189,7 @@ export default async function TeamAndRolesPage({
       >
         <div className="overflow-x-auto">
           <table className="w-full text-left text-[13px]">
-            <thead className="border-b border-zinc-200/80 bg-zinc-50/75 text-[11px] tracking-wider text-zinc-500 uppercase">
+            <thead className="border-b border-[var(--border)] bg-[var(--surface-inset)] text-[11px] tracking-wider text-[var(--ink-muted)] uppercase">
               <tr>
                 <th className="px-5 py-3 font-semibold sm:px-6">Name</th>
                 <th className="px-4 py-3 font-semibold">Email</th>
@@ -197,12 +197,12 @@ export default async function TeamAndRolesPage({
                 <th className="px-5 py-3 text-right font-semibold sm:px-6">Manage Access</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-100">
+            <tbody className="divide-y divide-[var(--border-subtle)]">
               {team.members.map((m) => {
                 const isPrimaryOwner = m.userId === session.workspace.ownerUserId;
                 return (
                   <tr key={m.membershipId}>
-                    <td className="px-5 py-3.5 font-semibold text-slate-900 sm:px-6">
+                    <td className="px-5 py-3.5 font-semibold text-[var(--ink)] sm:px-6">
                       <div className="flex items-center gap-2">
                         <span>{m.name}</span>
                         {isPrimaryOwner && (
@@ -210,7 +210,7 @@ export default async function TeamAndRolesPage({
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-3.5 text-zinc-600">{m.email}</td>
+                    <td className="px-4 py-3.5 text-[var(--ink-secondary)]">{m.email}</td>
                     <td className="px-4 py-3.5">
                       <StatusPill
                         label={roleNameBySlug.get(m.roleSlug) ?? m.roleSlug}
@@ -219,7 +219,7 @@ export default async function TeamAndRolesPage({
                     </td>
                     <td className="px-5 py-3.5 text-right sm:px-6">
                       {isPrimaryOwner ? (
-                        <span className="text-xs text-zinc-400">Protected Account Owner</span>
+                        <span className="text-xs text-[var(--ink-muted)]">Protected Account Owner</span>
                       ) : (
                         <div className="inline-flex flex-wrap items-center justify-end gap-2">
                           {canManageRoles && (
@@ -272,16 +272,16 @@ export default async function TeamAndRolesPage({
         </div>
 
         {team.invites.length > 0 && (
-          <div className="border-t border-zinc-200/80 bg-zinc-50/50 px-5 py-4 sm:px-6">
-            <div className="mb-2.5 text-xs font-semibold text-slate-900">
+          <div className="border-t border-[var(--border)] bg-[var(--surface-inset)] px-5 py-4 sm:px-6">
+            <div className="mb-2.5 text-xs font-semibold text-[var(--ink)]">
               Pending Email Invitations ({team.invites.length})
             </div>
-            <ul className="divide-y divide-zinc-200/60 text-xs">
+            <ul className="divide-y divide-[var(--border)] text-xs">
               {team.invites.map((inv) => (
                 <li key={inv.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
                   <div>
-                    <span className="font-semibold text-slate-900">{inv.email}</span>
-                    <span className="ml-2 text-zinc-500">
+                    <span className="font-semibold text-[var(--ink)]">{inv.email}</span>
+                    <span className="ml-2 text-[var(--ink-muted)]">
                       • Role: {roleNameBySlug.get(inv.roleSlug) ?? inv.roleSlug}
                     </span>
                   </div>
@@ -324,28 +324,28 @@ export default async function TeamAndRolesPage({
         noPadding
       >
         {emails.length === 0 ? (
-          <div className="p-6 text-[13px] text-zinc-500">
+          <div className="p-6 text-[13px] text-[var(--ink-muted)]">
             No emails sent for this business yet.
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-[13px]">
-              <thead className="border-b border-zinc-200/80 bg-zinc-50/75 text-[11px] tracking-wider text-zinc-500 uppercase">
+              <thead className="border-b border-[var(--border)] bg-[var(--surface-inset)] text-[11px] tracking-wider text-[var(--ink-muted)] uppercase">
                 <tr>
                   <th className="px-5 py-3 font-semibold sm:px-6">Subject</th>
                   <th className="px-4 py-3 font-semibold">Sent To</th>
                   <th className="px-5 py-3 font-semibold sm:px-6">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-100">
+              <tbody className="divide-y divide-[var(--border-subtle)]">
                 {emails.map((em) => {
                   const badge = formatEmailStatus(em.transportMode, em.status);
                   return (
                     <tr key={em.id}>
-                      <td className="px-5 py-3.5 font-semibold text-slate-900 sm:px-6">
+                      <td className="px-5 py-3.5 font-semibold text-[var(--ink)] sm:px-6">
                         {em.subject}
                       </td>
-                      <td className="px-4 py-3.5 text-zinc-600">{em.recipientEmail}</td>
+                      <td className="px-4 py-3.5 text-[var(--ink-secondary)]">{em.recipientEmail}</td>
                       <td className="px-5 py-3.5 sm:px-6">
                         <StatusPill label={badge.label} tone={badge.tone} />
                       </td>

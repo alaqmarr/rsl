@@ -173,20 +173,20 @@ export default async function SystemStatusPage() {
         >
           <div className="overflow-x-auto">
             <table className="w-full text-left text-[13px]">
-              <thead className="border-b border-zinc-200/80 bg-zinc-50/75 text-[11px] tracking-wider text-zinc-500 uppercase">
+              <thead className="border-b border-[var(--border)] bg-[var(--surface-inset)] text-[11px] tracking-wider text-[var(--ink-muted)] uppercase">
                 <tr>
                   <th className="px-5 py-3 font-semibold sm:px-6">Service</th>
                   <th className="px-4 py-3 font-semibold">What It Does</th>
                   <th className="px-5 py-3 text-right font-semibold sm:px-6">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-100">
+              <tbody className="divide-y divide-[var(--border-subtle)]">
                 {servicesMatrix.map((svc) => (
                   <tr key={svc.name}>
-                    <td className="px-5 py-3.5 font-semibold text-slate-900 sm:px-6">
+                    <td className="px-5 py-3.5 font-semibold text-[var(--ink)] sm:px-6">
                       {svc.name}
                     </td>
-                    <td className="px-4 py-3.5 text-zinc-600">{svc.role}</td>
+                    <td className="px-4 py-3.5 text-[var(--ink-secondary)]">{svc.role}</td>
                     <td className="px-5 py-3.5 text-right sm:px-6">
                       <StatusPill label={svc.badge} tone={svc.healthy ? "emerald" : "amber"} />
                     </td>
@@ -202,12 +202,12 @@ export default async function SystemStatusPage() {
           subtitle="Your company records are stored in a dedicated vault separated from every other business"
         >
           <div className="space-y-3 text-[13px]">
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200/85 bg-zinc-50/75 px-4 py-3">
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-inset)] px-4 py-3">
               <div>
-                <div className="font-semibold text-slate-900">
+                <div className="font-semibold text-[var(--ink)]">
                   {session.workspace.name} Private Vault
                 </div>
-                <div className="text-xs text-zinc-600">{storage.config.displayLabel}</div>
+                <div className="text-xs text-[var(--ink-secondary)]">{storage.config.displayLabel}</div>
               </div>
               <StatusPill
                 label={dbInfo.integrityStatus === "ok" ? "Healthy" : "Issue"}
@@ -215,10 +215,10 @@ export default async function SystemStatusPage() {
               />
             </div>
 
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200/85 bg-zinc-50/75 px-4 py-3">
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-inset)] px-4 py-3">
               <div>
-                <div className="font-semibold text-slate-900">Tamper-Evident Audit Protection</div>
-                <div className="text-xs text-zinc-600">
+                <div className="font-semibold text-[var(--ink)]">Tamper-Evident Audit Protection</div>
+                <div className="text-xs text-[var(--ink-secondary)]">
                   Every login, payment, and setting change is cryptographically verified
                 </div>
               </div>
@@ -228,10 +228,10 @@ export default async function SystemStatusPage() {
               />
             </div>
 
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200/85 bg-zinc-50/75 px-4 py-3">
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-inset)] px-4 py-3">
               <div>
-                <div className="font-semibold text-slate-900">External Channel Authorization</div>
-                <div className="text-xs text-zinc-600">
+                <div className="font-semibold text-[var(--ink)]">External Channel Authorization</div>
+                <div className="text-xs text-[var(--ink-secondary)]">
                   Encrypted credentials for WhatsApp, Meta, and Google Drive
                 </div>
               </div>

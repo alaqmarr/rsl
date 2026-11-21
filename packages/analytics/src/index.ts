@@ -367,36 +367,62 @@ function computeWorkspaceAnalyticsSnapshot(
           };
         })();
 
-  // Receivables Aging Buckets
-  const unpaidSalesRows = dataDb
+  // Receivables Aging Buckets (computed in SQL)
+  const agingRow = dataDb
     .prepare(
-      `SELECT amount_paise AS amountPaise, paid_amount_paise AS paidAmountPaise, due_date AS dueDate
+      `SELECT
+        COALESCE(SUM(CASE WHEN (due_date IS NULL OR due_date >= ?) THEN 1 ELSE 0 END), 0) AS c0,
+        COALESCE(SUM(CASE WHEN (due_date IS NULL OR due_date >= ?) THEN (amount_paise - paid_amount_paise) ELSE 0 END), 0) AS a0,
+        COALESCE(SUM(CASE WHEN due_date < ? AND due_date >= ? THEN 1 ELSE 0 END), 0) AS c1,
+        COALESCE(SUM(CASE WHEN due_date < ? AND due_date >= ? THEN (amount_paise - paid_amount_paise) ELSE 0 END), 0) AS a1,
+        COALESCE(SUM(CASE WHEN due_date < ? AND due_date >= ? THEN 1 ELSE 0 END), 0) AS c2,
+        COALESCE(SUM(CASE WHEN due_date < ? AND due_date >= ? THEN (amount_paise - paid_amount_paise) ELSE 0 END), 0) AS a2,
+        COALESCE(SUM(CASE WHEN due_date < ? AND due_date >= ? THEN 1 ELSE 0 END), 0) AS c3,
+        COALESCE(SUM(CASE WHEN due_date < ? AND due_date >= ? THEN (amount_paise - paid_amount_paise) ELSE 0 END), 0) AS a3,
+        COALESCE(SUM(CASE WHEN due_date < ? THEN 1 ELSE 0 END), 0) AS c4,
+        COALESCE(SUM(CASE WHEN due_date < ? THEN (amount_paise - paid_amount_paise) ELSE 0 END), 0) AS a4
        FROM tally_vouchers
-       WHERE voucher_type = 'Sales' AND payment_status IN ('unpaid', 'partial')`
+       WHERE voucher_type = 'Sales'
+         AND payment_status IN ('unpaid', 'partial')
+         AND amount_paise > paid_amount_paise`
     )
-    .all() as Array<{ amountPaise: number; paidAmountPaise: number; dueDate: number | null }>;
+    .get(
+      now,
+      now,
+      now,
+      now - 15 * 86_400_000,
+      now,
+      now - 15 * 86_400_000,
+      now - 15 * 86_400_000,
+      now - 30 * 86_400_000,
+      now - 15 * 86_400_000,
+      now - 30 * 86_400_000,
+      now - 30 * 86_400_000,
+      now - 60 * 86_400_000,
+      now - 30 * 86_400_000,
+      now - 60 * 86_400_000,
+      now - 60 * 86_400_000,
+      now - 60 * 86_400_000
+    ) as {
+    c0: number;
+    a0: number;
+    c1: number;
+    a1: number;
+    c2: number;
+    a2: number;
+    c3: number;
+    a3: number;
+    c4: number;
+    a4: number;
+  };
 
   const rawAging = [
-    { bucket: "Not Due Yet", billsCount: 0, amountPaise: 0 },
-    { bucket: "1–15 Days Overdue", billsCount: 0, amountPaise: 0 },
-    { bucket: "16–30 Days Overdue", billsCount: 0, amountPaise: 0 },
-    { bucket: "31–60 Days Overdue", billsCount: 0, amountPaise: 0 },
-    { bucket: "60+ Days Overdue", billsCount: 0, amountPaise: 0 },
+    { bucket: "Not Due Yet", billsCount: Number(agingRow?.c0 ?? 0), amountPaise: Number(agingRow?.a0 ?? 0) },
+    { bucket: "1–15 Days Overdue", billsCount: Number(agingRow?.c1 ?? 0), amountPaise: Number(agingRow?.a1 ?? 0) },
+    { bucket: "16–30 Days Overdue", billsCount: Number(agingRow?.c2 ?? 0), amountPaise: Number(agingRow?.a2 ?? 0) },
+    { bucket: "31–60 Days Overdue", billsCount: Number(agingRow?.c3 ?? 0), amountPaise: Number(agingRow?.a3 ?? 0) },
+    { bucket: "60+ Days Overdue", billsCount: Number(agingRow?.c4 ?? 0), amountPaise: Number(agingRow?.a4 ?? 0) },
   ];
-
-  for (const row of unpaidSalesRows) {
-    const due = Math.max(0, row.amountPaise - row.paidAmountPaise);
-    if (due <= 0) continue;
-    if (!row.dueDate || row.dueDate >= now) {
-      rawAging[0]!.billsCount += 1;
-      rawAging[0]!.amountPaise += due;
-    } else {
-      const daysLate = Math.floor((now - row.dueDate) / 86_400_000);
-      const idx = daysLate <= 15 ? 1 : daysLate <= 30 ? 2 : daysLate <= 60 ? 3 : 4;
-      rawAging[idx]!.billsCount += 1;
-      rawAging[idx]!.amountPaise += due;
-    }
-  }
 
   const totalAgingPaise = rawAging.reduce((acc, b) => acc + b.amountPaise, 0);
   const receivablesAging: AgingBucket[] = rawAging.map((b) => ({
@@ -880,6 +906,52 @@ export function exportWorkspaceAnalyticsCsv(workspaceId: string, range: Analytic
   return lines.join("\n");
 }
 
+export function getAdminLayoutSummary() {
+  const rawCtrl = controlDb().$client;
+  const pendingPlanRequestsCount = Number(
+    (
+      rawCtrl
+        .prepare("SELECT COUNT(*) AS c FROM service_plan_requests WHERE status = 'pending_payment'")
+        .get() as { c: number } | undefined
+    )?.c ?? 0
+  );
+  const pendingWalletRequestsCount = Number(
+    (
+      rawCtrl
+        .prepare("SELECT COUNT(*) AS c FROM payments WHERE status = 'pending_verification'")
+        .get() as { c: number } | undefined
+    )?.c ?? 0
+  );
+  const totalInvoicedRevenuePaise = Number(
+    (
+      rawCtrl
+        .prepare(
+          `SELECT COALESCE(SUM(total_paise), 0) AS s
+           FROM invoices
+           WHERE (doc_type = 'tax_invoice' AND status IN ('paid','credited'))
+              OR (doc_type = 'credit_note' AND status = 'issued')`
+        )
+        .get() as { s: number } | undefined
+    )?.s ?? 0
+  );
+  const quickClients = rawCtrl
+    .prepare(
+      `SELECT id, name, gstin, billing_status AS billingStatus
+       FROM workspaces
+       WHERE deleted_at IS NULL
+       ORDER BY created_at DESC
+       LIMIT 200`
+    )
+    .all() as Array<{ id: string; name: string; gstin: string | null; billingStatus: string }>;
+
+  return {
+    pendingPlanRequestsCount,
+    pendingWalletRequestsCount,
+    totalInvoicedRevenuePaise,
+    quickClients,
+  };
+}
+
 export function getPlatformAdminAnalytics() {
   const ctrl = controlDb();
   const rawCtrl = ctrl.$client;
@@ -961,7 +1033,45 @@ export function getPlatformAdminAnalytics() {
     )
     .get() as { totalCount: number; sentCount: number; localPreviewCount: number; failedCount: number };
 
-  const rawBusinesses = rawCtrl
+  const walletByWs = new Map<string, number>();
+  for (const r of rawCtrl
+    .prepare("SELECT workspace_id AS workspaceId, COALESCE(SUM(amount_paise), 0) AS bal FROM ledger_entries GROUP BY workspace_id")
+    .all() as Array<{ workspaceId: string; bal: number }>) {
+    walletByWs.set(r.workspaceId, Number(r.bal ?? 0));
+  }
+
+  const entByWs = new Map<string, { count: number; csv: string }>();
+  for (const r of rawCtrl
+    .prepare(
+      `SELECT workspace_id AS workspaceId, COUNT(*) AS cnt, COALESCE(GROUP_CONCAT(service_key, ','), '') AS csv
+       FROM entitlements
+       WHERE status IN ('active','trialing') AND (expires_at IS NULL OR expires_at > ?)
+       GROUP BY workspace_id`
+    )
+    .all(now) as Array<{ workspaceId: string; cnt: number; csv: string }>) {
+    entByWs.set(r.workspaceId, { count: Number(r.cnt ?? 0), csv: r.csv ?? "" });
+  }
+
+  const pendingReqByWs = new Map<string, number>();
+  for (const r of rawCtrl
+    .prepare(
+      `SELECT workspace_id AS workspaceId, COUNT(*) AS cnt
+       FROM service_plan_requests
+       WHERE status = 'pending_payment'
+       GROUP BY workspace_id`
+    )
+    .all() as Array<{ workspaceId: string; cnt: number }>) {
+    pendingReqByWs.set(r.workspaceId, Number(r.cnt ?? 0));
+  }
+
+  const storageByWs = new Map<string, string>();
+  for (const r of rawCtrl
+    .prepare("SELECT workspace_id AS workspaceId, mode FROM storage_configurations")
+    .all() as Array<{ workspaceId: string; mode: string }>) {
+    storageByWs.set(r.workspaceId, r.mode);
+  }
+
+  const baseBusinesses = rawCtrl
     .prepare(
       `SELECT
         w.id,
@@ -977,17 +1087,12 @@ export function getPlatformAdminAnalytics() {
         COALESCE(tr.status, 'active') AS dbStatus,
         COALESCE(tr.data_size_bytes, 0) AS dataSizeBytes,
         COALESCE(tr.logs_size_bytes, 0) AS logsSizeBytes,
-        tr.last_backup_at AS lastBackupAt,
-        COALESCE((SELECT SUM(amount_paise) FROM ledger_entries le WHERE le.workspace_id = w.id), 0) AS walletBalancePaise,
-        COALESCE((SELECT COUNT(*) FROM entitlements e WHERE e.workspace_id = w.id AND e.status IN ('active','trialing') AND (e.expires_at IS NULL OR e.expires_at > ?)), 0) AS activeServicesCount,
-        COALESCE((SELECT GROUP_CONCAT(e.service_key, ',') FROM entitlements e WHERE e.workspace_id = w.id AND e.status IN ('active','trialing') AND (e.expires_at IS NULL OR e.expires_at > ?)), '') AS activeServiceKeysCsv,
-        COALESCE((SELECT COUNT(*) FROM service_plan_requests spr WHERE spr.workspace_id = w.id AND spr.status = 'pending_payment'), 0) AS pendingRequestsCount,
-        COALESCE((SELECT sc.mode FROM storage_configurations sc WHERE sc.workspace_id = w.id), 'rsl_managed') AS storageMode
+        tr.last_backup_at AS lastBackupAt
        FROM workspaces w
        LEFT JOIN tenant_registry tr ON tr.tenant_id = w.id
        ORDER BY w.created_at DESC`
     )
-    .all(now, now) as Array<{
+    .all() as Array<{
     id: string;
     name: string;
     slug: string;
@@ -1002,12 +1107,19 @@ export function getPlatformAdminAnalytics() {
     dataSizeBytes: number;
     logsSizeBytes: number;
     lastBackupAt: number | null;
-    walletBalancePaise: number;
-    activeServicesCount: number;
-    activeServiceKeysCsv: string;
-    pendingRequestsCount: number;
-    storageMode: string;
   }>;
+
+  const rawBusinesses = baseBusinesses.map((w) => {
+    const ent = entByWs.get(w.id);
+    return {
+      ...w,
+      walletBalancePaise: walletByWs.get(w.id) ?? 0,
+      activeServicesCount: ent?.count ?? 0,
+      activeServiceKeysCsv: ent?.csv ?? "",
+      pendingRequestsCount: pendingReqByWs.get(w.id) ?? 0,
+      storageMode: storageByWs.get(w.id) ?? "rsl_managed",
+    };
+  });
 
   const businesses = rawBusinesses.map((b) => {
     const hasFreeAllTools = Boolean(b.freeAccessUntil && b.freeAccessUntil > now);

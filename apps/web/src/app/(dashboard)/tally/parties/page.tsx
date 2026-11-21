@@ -255,7 +255,7 @@ export default async function TallyPartiesLedgersPage({
             <input type="hidden" name="returnPath" value="/tally/parties?add=1" />
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div>
-                <label className="mb-1 block font-semibold text-zinc-700">
+                <label className="mb-1 block font-semibold text-[var(--ink-secondary)]">
                   Party / Business Ledger Name *
                 </label>
                 <input
@@ -266,14 +266,14 @@ export default async function TallyPartiesLedgersPage({
                 />
               </div>
               <div>
-                <label className="mb-1 block font-semibold text-zinc-700">Account Group</label>
+                <label className="mb-1 block font-semibold text-[var(--ink-secondary)]">Account Group</label>
                 <select name="parentGroup" defaultValue="Sundry Debtors" className="rsl-input">
                   <option value="Sundry Debtors">Sundry Debtors (Customer / Client)</option>
                   <option value="Sundry Creditors">Sundry Creditors (Supplier / Vendor)</option>
                 </select>
               </div>
               <div>
-                <label className="mb-1 block font-semibold text-zinc-700">Tally Company</label>
+                <label className="mb-1 block font-semibold text-[var(--ink-secondary)]">Tally Company</label>
                 <input
                   name="companyName"
                   defaultValue={defaultCompanyName}
@@ -282,7 +282,7 @@ export default async function TallyPartiesLedgersPage({
                 />
               </div>
               <div>
-                <label className="mb-1 block font-semibold text-zinc-700">
+                <label className="mb-1 block font-semibold text-[var(--ink-secondary)]">
                   WhatsApp Mobile (+91...)
                 </label>
                 <input name="phoneE164" placeholder="+919820012345" className="rsl-input" />
@@ -291,7 +291,7 @@ export default async function TallyPartiesLedgersPage({
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
               <div>
-                <label className="mb-1 block font-semibold text-zinc-700">15-Digit GSTIN</label>
+                <label className="mb-1 block font-semibold text-[var(--ink-secondary)]">15-Digit GSTIN</label>
                 <input
                   name="gstin"
                   maxLength={15}
@@ -300,7 +300,7 @@ export default async function TallyPartiesLedgersPage({
                 />
               </div>
               <div>
-                <label className="mb-1 block font-semibold text-zinc-700">PAN</label>
+                <label className="mb-1 block font-semibold text-[var(--ink-secondary)]">PAN</label>
                 <input
                   name="pan"
                   maxLength={10}
@@ -309,22 +309,22 @@ export default async function TallyPartiesLedgersPage({
                 />
               </div>
               <div>
-                <label className="mb-1 block font-semibold text-zinc-700">Contact Person</label>
+                <label className="mb-1 block font-semibold text-[var(--ink-secondary)]">Contact Person</label>
                 <input name="contactPerson" placeholder="Accounts / Owner" className="rsl-input" />
               </div>
               <div>
-                <label className="mb-1 block font-semibold text-zinc-700">Email</label>
+                <label className="mb-1 block font-semibold text-[var(--ink-secondary)]">Email</label>
                 <input name="email" type="email" placeholder="accounts@client.in" className="rsl-input" />
               </div>
               <div>
-                <label className="mb-1 block font-semibold text-zinc-700">State</label>
+                <label className="mb-1 block font-semibold text-[var(--ink-secondary)]">State</label>
                 <input name="stateName" placeholder="Maharashtra" className="rsl-input" />
               </div>
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
               <div>
-                <label className="mb-1 block font-semibold text-zinc-700">Credit Days</label>
+                <label className="mb-1 block font-semibold text-[var(--ink-secondary)]">Credit Days</label>
                 <input
                   name="creditDays"
                   type="number"
@@ -335,7 +335,7 @@ export default async function TallyPartiesLedgersPage({
                 />
               </div>
               <div>
-                <label className="mb-1 block font-semibold text-zinc-700">Credit Limit (₹)</label>
+                <label className="mb-1 block font-semibold text-[var(--ink-secondary)]">Credit Limit (₹)</label>
                 <input
                   name="creditLimitRupees"
                   type="number"
@@ -346,7 +346,7 @@ export default async function TallyPartiesLedgersPage({
                 />
               </div>
               <div>
-                <label className="mb-1 block font-semibold text-zinc-700">Opening Balance (₹)</label>
+                <label className="mb-1 block font-semibold text-[var(--ink-secondary)]">Opening Balance (₹)</label>
                 <input
                   name="openingBalanceRupees"
                   type="number"
@@ -357,14 +357,14 @@ export default async function TallyPartiesLedgersPage({
                 />
               </div>
               <div>
-                <label className="mb-1 block font-semibold text-zinc-700">Dr / Cr</label>
+                <label className="mb-1 block font-semibold text-[var(--ink-secondary)]">Dr / Cr</label>
                 <select name="openingBalanceType" defaultValue="Dr" className="rsl-input">
                   <option value="Dr">Debit (Dr - Receivable)</option>
                   <option value="Cr">Credit (Cr - Payable / Advance)</option>
                 </select>
               </div>
               <div>
-                <label className="mb-1 block font-semibold text-zinc-700">Billing Address</label>
+                <label className="mb-1 block font-semibold text-[var(--ink-secondary)]">Billing Address</label>
                 <input name="address" placeholder="City, Industrial Estate..." className="rsl-input" />
               </div>
             </div>
@@ -418,20 +418,20 @@ export default async function TallyPartiesLedgersPage({
                     ? "border-slate-900 bg-slate-900 text-white shadow-sm"
                     : isHighRisk && b.amountPaise > 0
                       ? "border-rose-200/90 bg-rose-50/55 hover:border-rose-300"
-                      : "border-zinc-200/85 bg-zinc-50/70 hover:bg-white"
+                      : "border-[var(--border)] bg-[var(--surface-inset)] hover:bg-[var(--surface)]"
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
                   <span
                     className={`text-[11px] font-bold uppercase ${
-                      active ? "text-emerald-300" : isHighRisk && b.amountPaise > 0 ? "text-rose-700" : "text-zinc-500"
+                      active ? "text-emerald-300" : isHighRisk && b.amountPaise > 0 ? "text-rose-700" : "text-[var(--ink-muted)]"
                     }`}
                   >
                     {b.label}
                   </span>
                   <span
                     className={`rounded-md px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums ${
-                      active ? "bg-white/15 text-white" : "bg-white text-zinc-600 ring-1 ring-zinc-200/80"
+                      active ? "bg-[var(--surface)]/15 text-white" : "bg-[var(--surface)] text-[var(--ink-secondary)] ring-1 ring-zinc-200/80"
                     }`}
                   >
                     {b.billsCount} bill(s)
@@ -439,7 +439,7 @@ export default async function TallyPartiesLedgersPage({
                 </div>
                 <div
                   className={`mt-2 text-lg font-extrabold tabular-nums ${
-                    active ? "text-white" : "text-slate-900"
+                    active ? "text-white" : "text-[var(--ink)]"
                   }`}
                 >
                   {formatInr(b.amountPaise)}
@@ -456,7 +456,7 @@ export default async function TallyPartiesLedgersPage({
         subtitle="Click any Client or Supplier name to view their complete T-account Running Balance Statement, Bill-Wise Settlements, and Item Purchase History"
         noPadding
       >
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-100 bg-zinc-50/60 px-6 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-100 bg-[var(--surface-inset)] px-6 py-3">
           <div className="flex flex-wrap items-center gap-1.5">
             {(
               [
@@ -484,7 +484,7 @@ export default async function TallyPartiesLedgersPage({
                   className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
                     active
                       ? "bg-slate-900 text-white shadow-xs"
-                      : "border border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50 hover:text-slate-900"
+                      : "border border-[var(--border)] bg-[var(--surface)] text-[var(--ink-secondary)] hover:bg-[var(--surface-inset)] hover:text-[var(--ink)]"
                   }`}
                 >
                   {pill.label}
@@ -511,7 +511,7 @@ export default async function TallyPartiesLedgersPage({
               </select>
             )}
             <div className="relative min-w-[230px]">
-              <Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+              <Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ink-muted)]" />
               <input
                 name="q"
                 defaultValue={query}
@@ -536,18 +536,18 @@ export default async function TallyPartiesLedgersPage({
               title="No client or supplier ledgers synced yet"
               description="Sync Tally Prime via your personalized .tdl v2.7 add-on or Windows Connector, upload Tally XML/CSV bills, or click 'Add Client / Supplier' above to start tracking party running balances."
               actionLabel={canManageTally ? "Connect Tally Prime" : "Go to Tally Bills"}
-              actionHref={canManageTally ? "/tally?tab=connect" : "/tally"}
+              actionHref={canManageTally ? "/connections/tally" : "/tally"}
               icon={<Users className="h-5 w-5" />}
             />
           </div>
         ) : filteredParties.length === 0 ? (
-          <div className="p-8 text-center text-xs text-zinc-500">
+          <div className="p-8 text-center text-xs text-[var(--ink-muted)]">
             No party ledgers match your active filter.
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="border-b border-zinc-200/80 bg-zinc-50/70 text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
+              <thead className="border-b border-[var(--border)] bg-[var(--surface-inset)] text-[11px] font-semibold tracking-wide text-[var(--ink-muted)] uppercase">
                 <tr>
                   <th className="px-6 py-3">Client / Supplier Party</th>
                   <th className="px-4 py-3">Group &amp; Terms</th>
@@ -558,7 +558,7 @@ export default async function TallyPartiesLedgersPage({
                   <th className="px-6 py-3 text-right">Statement &amp; Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-100 bg-white">
+              <tbody className="divide-y divide-[var(--border-subtle)] bg-[var(--surface)]">
                 {filteredParties.map((p) => {
                   const closing = formatSignedBalance(p.closingBalancePaise);
                   const waText = encodeURIComponent(
@@ -569,22 +569,22 @@ export default async function TallyPartiesLedgersPage({
                     : null;
 
                   return (
-                    <tr key={p.id} className="hover:bg-zinc-50/70">
+                    <tr key={p.id} className="hover:bg-[var(--surface-inset)]">
                       <td className="px-6 py-3.5">
                         <ActionLink
                           href={`/tally/parties/${encodeURIComponent(p.id)}`}
                           spinnerSize="xs"
-                          className="group inline-flex items-center gap-1 font-bold text-slate-900 hover:text-emerald-700"
+                          className="group inline-flex items-center gap-1 font-bold text-[var(--ink)] hover:text-emerald-700"
                         >
                           <span>{p.name}</span>
-                          <ArrowUpRight className="h-3.5 w-3.5 text-zinc-400 transition group-hover:text-emerald-600" />
+                          <ArrowUpRight className="h-3.5 w-3.5 text-[var(--ink-muted)] transition group-hover:text-emerald-600" />
                         </ActionLink>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
+                        <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-[var(--ink-muted)]">
                           {p.gstin && <span className="font-mono">GSTIN: {p.gstin}</span>}
                           <span>{p.phoneE164 || "No mobile"}</span>
                           {p.stateName && <span>• {p.stateName}</span>}
                           {ledgerSummary.companies.length > 1 && (
-                            <span className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px]">
+                            <span className="rounded border border-[var(--border)] bg-[var(--surface-inset)] px-1.5 py-0.5 text-[10px]">
                               {p.companyName}
                             </span>
                           )}
@@ -597,7 +597,7 @@ export default async function TallyPartiesLedgersPage({
                           tone={p.isCreditor ? "sky" : "emerald"}
                           showDot={false}
                         />
-                        <div className="mt-1 text-[11px] text-zinc-500">
+                        <div className="mt-1 text-[11px] text-[var(--ink-muted)]">
                           {p.creditDays}d credit
                           {p.creditLimitPaise > 0
                             ? ` • Limit ${formatInr(p.creditLimitPaise)}`
@@ -605,7 +605,7 @@ export default async function TallyPartiesLedgersPage({
                         </div>
                       </td>
 
-                      <td className="px-4 py-3.5 text-right font-medium text-zinc-700 tabular-nums">
+                      <td className="px-4 py-3.5 text-right font-medium text-[var(--ink-secondary)] tabular-nums">
                         {formatInr(p.totalInvoicedPaise)}
                       </td>
 
@@ -614,7 +614,7 @@ export default async function TallyPartiesLedgersPage({
                       </td>
 
                       <td className="px-4 py-3.5 text-right tabular-nums">
-                        <div className="font-extrabold text-slate-900">
+                        <div className="font-extrabold text-[var(--ink)]">
                           {closing.text}{" "}
                           {closing.suffix !== "Nil" && (
                             <span
@@ -642,7 +642,7 @@ export default async function TallyPartiesLedgersPage({
                           </span>
                         ) : (
                           <div className="space-y-0.5">
-                            <div className="font-semibold text-slate-800">
+                            <div className="font-semibold text-[var(--ink)]">
                               {p.unpaidBillsCount} open bill(s)
                               {p.overdueBillsCount > 0 && (
                                 <span className="ml-1.5 rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-800">
@@ -651,7 +651,7 @@ export default async function TallyPartiesLedgersPage({
                               )}
                             </div>
                             {p.maxOpenBillAgeDays > 0 && (
-                              <div className="text-[11px] text-zinc-500">
+                              <div className="text-[11px] text-[var(--ink-muted)]">
                                 Oldest open bill: {p.maxOpenBillAgeDays} day(s)
                               </div>
                             )}

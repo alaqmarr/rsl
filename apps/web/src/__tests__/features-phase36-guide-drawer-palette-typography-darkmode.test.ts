@@ -45,7 +45,9 @@ describe("Phase 36 — Bottom Guide Drawers, 5-Variable Palette, Frost/Blur, Typ
     expect(themeCss).toContain(".rsl-frost-header");
     expect(themeCss).toContain(".rsl-hard-blur-scrim");
     expect(themeCss).toContain(".rsl-drawer-frost");
-    expect(themeCss).toContain('[data-theme="dark"]');
+    expect(themeCss).toContain('[data-theme="light"]');
+    expect(themeCss).toContain(".rsl-lp-shell");
+    expect(themeCss).not.toContain('[data-theme="dark"]');
 
     for (const app of ["web", "admin", "docs"]) {
       const globalsCss = fs.readFileSync(
@@ -66,11 +68,11 @@ describe("Phase 36 — Bottom Guide Drawers, 5-Variable Palette, Frost/Blur, Typ
         path.join(REPO_ROOT, `apps/${app}/src/app/layout.tsx`),
         "utf8"
       );
-      expect(rootLayout).toContain("Fraunces");
-      expect(rootLayout).toContain("Plus_Jakarta_Sans");
-      expect(rootLayout).toContain("JetBrains_Mono");
-      expect(rootLayout).toContain("rsl_theme");
-      expect(rootLayout).toContain("data-theme");
+      expect(rootLayout).toContain("Bebas_Neue");
+      expect(rootLayout).toContain("Cinzel");
+      expect(rootLayout).toContain("Geist_Mono");
+      expect(rootLayout).toContain("Xmind");
+      expect(rootLayout).toContain('data-theme="light"');
     }
   });
 
@@ -171,8 +173,7 @@ describe("Phase 36 — Bottom Guide Drawers, 5-Variable Palette, Frost/Blur, Typ
     const toggleHtml = renderToStaticMarkup(
       React.createElement(ThemeToggleButton, { showLabel: true })
     );
-    expect(toggleHtml).toContain("aria-pressed");
-    expect(toggleHtml).toContain("Dark");
+    expect(toggleHtml).toBe("");
   });
 
   it("removes inline tutorial walls from action pages while preserving dedicated guide routes", () => {
@@ -209,14 +210,14 @@ describe("Phase 36 — Bottom Guide Drawers, 5-Variable Palette, Frost/Blur, Typ
     ).toBe(true);
   });
 
-  it("enforces unlayered dark-mode utility overrides, zero-FOUC theme sync, Turnstile dark theme, and dark-safe button spinners", () => {
+  it("enforces light-only styling, zero-FOUC light theme lock, Turnstile light theme, and clean styling classes", () => {
     const themeCss = fs.readFileSync(
       path.join(REPO_ROOT, "packages/ui/src/theme.css"),
       "utf8"
     );
-    expect(themeCss).toContain('.bg-white:not(img)');
-    expect(themeCss).toContain(':is(button, a, span):is(');
-    expect(themeCss).toContain('[data-theme="dark"] .adm-btn-dark');
+    expect(themeCss).toContain('[data-theme="light"]');
+    expect(themeCss).not.toContain('[data-theme="dark"]');
+    expect(themeCss).not.toContain("@media (prefers-color-scheme: dark)");
     expect(themeCss).toContain(".rsl-tab-pill-active");
     expect(themeCss).toContain(".rsl-chat-outbound");
 
@@ -225,20 +226,21 @@ describe("Phase 36 — Bottom Guide Drawers, 5-Variable Palette, Frost/Blur, Typ
         path.join(REPO_ROOT, `apps/${app}/src/app/globals.css`),
         "utf8"
       );
-      expect(globalsCss).toContain("@custom-variant dark");
+      expect(globalsCss).not.toContain("@custom-variant dark");
 
       const rootLayout = fs.readFileSync(
         path.join(REPO_ROOT, `apps/${app}/src/app/layout.tsx`),
         "utf8"
       );
-      expect(rootLayout).toContain("THEME_INIT_SCRIPT");
+      expect(rootLayout).toContain("LIGHT_MODE_SCRIPT");
+      expect(rootLayout).toContain('data-theme="light"');
     }
 
     const turnstileSrc = fs.readFileSync(
       path.join(REPO_ROOT, "packages/ui/src/turnstile-widget.tsx"),
       "utf8"
     );
-    expect(turnstileSrc).toContain("rsl-theme-change");
+    expect(turnstileSrc).toContain('theme: "light"');
 
     const uiDirs = [
       path.join(REPO_ROOT, "packages/ui/src"),

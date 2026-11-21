@@ -40,6 +40,7 @@ import {
   rejectWalletRechargeRequest,
   savePlatformBillingSettings,
   sendManualBillingReminder,
+  setWorkspaceWhatsAppMessagingRates,
   staffBulkUnlockBundle,
   staffCreateClientCustomBundle,
   staffCreateCustomInvoice,
@@ -53,6 +54,7 @@ import {
   staffToggleAutoBillingReminders,
   staffUpdateGlobalBundleCatalog,
   staffUpdateInvoiceStatus,
+  updateGlobalWhatsAppMessagingRates,
   staffUpdateServiceCatalogPrices,
   sweepAutomaticBillingReminders,
 } from "@rsl/billing";
@@ -1340,7 +1342,7 @@ export async function staffToggleManualCredentialsAction(formData: FormData) {
   const workspaceId = String(formData.get("workspaceId") || "").trim();
   const returnTo = safeReturnTo(
     formData.get("returnTo"),
-    `/clients/${workspaceId}?tab=profile`
+    `/clients/${workspaceId}/profile`
   );
   const staff = await requireStaffWithPermission(
     ["staff:clients.manage", "staff:ops.manage"],
@@ -1588,6 +1590,128 @@ export async function staffUpdatePriceAction(formData: FormData) {
     returnTo,
     "notice",
     `Updated Monthly / Quarterly / Yearly catalog pricing for '${serviceKey}'.`
+  );
+}
+
+export async function staffSaveWhatsAppRatesAction(formData: FormData) {
+  const returnTo = safeReturnTo(formData.get("returnTo"), "/pricing");
+  const staff = await requireStaffWithPermission("staff:pricing.manage", returnTo);
+
+  const utilityRupees = Math.max(0, Number(formData.get("utilityRupees") || 0));
+  const marketingRupees = Math.max(0, Number(formData.get("marketingRupees") || 0));
+  const authenticationRupees = Math.max(0, Number(formData.get("authenticationRupees") || 0));
+  const tallyPdfBillRupees = Math.max(0, Number(formData.get("tallyPdfBillRupees") || 0));
+  const serviceReplyRupees = Math.max(0, Number(formData.get("serviceReplyRupees") || 0));
+  const metaUtilityCostRupees = Math.max(0, Number(formData.get("metaUtilityCostRupees") || 0));
+  const metaMarketingCostRupees = Math.max(
+    0,
+    Number(formData.get("metaMarketingCostRupees") || 0)
+  );
+  const metaAuthCostRupees = Math.max(0, Number(formData.get("metaAuthCostRupees") || 0));
+
+  const saved = updateGlobalWhatsAppMessagingRates({
+    utilityPaise: rupeesToPaise(utilityRupees),
+    marketingPaise: rupeesToPaise(marketingRupees),
+    authenticationPaise: rupeesToPaise(authenticationRupees),
+    tallyPdfBillPaise: rupeesToPaise(tallyPdfBillRupees),
+    serviceReplyPaise: rupeesToPaise(serviceReplyRupees),
+    metaUtilityCostPaise: rupeesToPaise(metaUtilityCostRupees),
+    metaMarketingCostPaise: rupeesToPaise(metaMarketingCostRupees),
+    metaAuthCostPaise: rupeesToPaise(metaAuthCostRupees),
+  });
+
+  platformLogsDb()
+    .insert(platformLogsSchema.staffActionLogs)
+    .values({
+      id: newEntityId("act", "rsl"),
+      ts: Date.now(),
+      staffId: staff.id,
+      action: "pricing.whatsapp_rates_updated",
+      summary: `Updated global WhatsApp rates (Utility ₹${(saved.utilityPaise / 100).toFixed(2)}, Marketing ₹${(saved.marketingPaise / 100).toFixed(2)}, Tally PDF ₹${(saved.tallyPdfBillPaise / 100).toFixed(2)})`,
+      correlationId: newEntityId("req", "rsl"),
+    })
+    .run();
+
+  return flashAdminRedirect(
+    returnTo,
+    "notice",
+    `Saved WhatsApp per-message rates (Utility ₹${(saved.utilityPaise / 100).toFixed(2)}, Marketing ₹${(saved.marketingPaise / 100).toFixed(2)}, Tally PDF ₹${(saved.tallyPdfBillPaise / 100).toFixed(2)}).`
+  );
+}
+
+export async function staffSaveClientWhatsAppRatesAction(formData: FormData) {
+  const workspaceId = String(formData.get("workspaceId") || "").trim();
+  const returnTo = safeReturnTo(
+    formData.get("returnTo"),
+    workspaceId ? `/clients/${workspaceId}/plans` : "/clients"
+  );
+  const staff = await requireStaffWithPermission("staff:billing.manage", returnTo);
+  if (!workspaceId) {
+    return flashAdminRedirect(returnTo, "error", "Missing client workspace ID.");
+  }
+
+  const saved = setWorkspaceWhatsAppMessagingRates(workspaceId, {
+    utilityPaise: rupeesToPaise(Math.max(0, Number(formData.get("utilityRupees") || 0))),
+    marketingPaise: rupeesToPaise(Math.max(0, Number(formData.get("marketingRupees") || 0))),
+    authenticationPaise: rupeesToPaise(
+      Math.max(0, Number(formData.get("authenticationRupees") || 0))
+    ),
+    tallyPdfBillPaise: rupeesToPaise(
+      Math.max(0, Number(formData.get("tallyPdfBillRupees") || 0))
+    ),
+    serviceReplyPaise: rupeesToPaise(
+      Math.max(0, Number(formData.get("serviceReplyRupees") || 0))
+    ),
+  });
+
+  platformLogsDb()
+    .insert(platformLogsSchema.staffActionLogs)
+    .values({
+      id: newEntityId("act", workspaceId),
+      ts: Date.now(),
+      staffId: staff.id,
+      action: "pricing.client_whatsapp_rates_updated",
+      summary: `[${workspaceId}] Set custom WhatsApp messaging rates (Utility ₹${(saved.utilityPaise / 100).toFixed(2)}, Marketing ₹${(saved.marketingPaise / 100).toFixed(2)})`,
+      correlationId: newEntityId("req", workspaceId),
+    })
+    .run();
+
+  return flashAdminRedirect(
+    returnTo,
+    "notice",
+    `Updated custom WhatsApp per-message rates for this client (Utility ₹${(saved.utilityPaise / 100).toFixed(2)}, Marketing ₹${(saved.marketingPaise / 100).toFixed(2)}).`
+  );
+}
+
+export async function staffClearClientWhatsAppRatesAction(formData: FormData) {
+  const workspaceId = String(formData.get("workspaceId") || "").trim();
+  const returnTo = safeReturnTo(
+    formData.get("returnTo"),
+    workspaceId ? `/clients/${workspaceId}/plans` : "/clients"
+  );
+  const staff = await requireStaffWithPermission("staff:billing.manage", returnTo);
+  if (!workspaceId) {
+    return flashAdminRedirect(returnTo, "error", "Missing client workspace ID.");
+  }
+
+  setWorkspaceWhatsAppMessagingRates(workspaceId, null);
+
+  platformLogsDb()
+    .insert(platformLogsSchema.staffActionLogs)
+    .values({
+      id: newEntityId("act", workspaceId),
+      ts: Date.now(),
+      staffId: staff.id,
+      action: "pricing.client_whatsapp_rates_cleared",
+      summary: `[${workspaceId}] Reset client WhatsApp messaging rates to global catalog pricing`,
+      correlationId: newEntityId("req", workspaceId),
+    })
+    .run();
+
+  return flashAdminRedirect(
+    returnTo,
+    "notice",
+    "Reset client WhatsApp messaging rates back to global catalog defaults."
   );
 }
 
@@ -2271,7 +2395,7 @@ export async function staffToggleFeatureFlagAction(formData: FormData) {
 
 export async function staffProvisionClientSslAction(formData: FormData) {
   const workspaceId = String(formData.get("workspaceId") || "").trim();
-  const returnTo = safeReturnTo(formData.get("returnTo"), `/clients/${workspaceId}?tab=profile`);
+  const returnTo = safeReturnTo(formData.get("returnTo"), `/clients/${workspaceId}/profile`);
   const staff = await requireStaffWithPermission(
     ["staff:clients.manage", "staff:ops.manage"],
     returnTo
@@ -2954,7 +3078,7 @@ export async function staffTestClientConnectionAction(formData: FormData) {
   const connectionId = String(formData.get("connectionId") || "").trim();
   const returnTo = safeReturnTo(
     formData.get("returnTo"),
-    workspaceId ? `/clients/${workspaceId}?tab=connections` : "/clients"
+    workspaceId ? `/clients/${workspaceId}/connections` : "/clients"
   );
 
   try {
@@ -2990,7 +3114,7 @@ export async function staffTestAllClientConnectionsAction(formData: FormData) {
   const workspaceId = String(formData.get("workspaceId") || "").trim();
   const returnTo = safeReturnTo(
     formData.get("returnTo"),
-    workspaceId ? `/clients/${workspaceId}?tab=connections` : "/clients"
+    workspaceId ? `/clients/${workspaceId}/connections` : "/clients"
   );
 
   try {
@@ -3032,7 +3156,7 @@ export async function staffTestClientStorageVaultAction(formData: FormData) {
   const workspaceId = String(formData.get("workspaceId") || "").trim();
   const returnTo = safeReturnTo(
     formData.get("returnTo"),
-    workspaceId ? `/clients/${workspaceId}?tab=connections` : "/clients"
+    workspaceId ? `/clients/${workspaceId}/connections` : "/clients"
   );
 
   try {

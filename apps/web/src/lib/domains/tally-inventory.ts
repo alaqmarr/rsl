@@ -207,7 +207,7 @@ export async function recordTallyVoucherActionImpl(formData: FormData) {
   const returnPath =
     rawReturn.startsWith("/") && !rawReturn.startsWith("//") ? rawReturn : "/tally";
   const errorReturnPath =
-    rawReturn.startsWith("/") && !rawReturn.startsWith("//") ? rawReturn : "/tally?tab=import";
+    rawReturn.startsWith("/") && !rawReturn.startsWith("//") ? rawReturn : "/tally/import";
 
   await enforceFeaturePaidEntitlement(session.workspace.id, "tally.sync", returnPath);
 
@@ -360,7 +360,7 @@ export async function importTallyFileActionImpl(formData: FormData) {
   const uploaded = formData.get("uploadFile");
   if (uploaded instanceof File && uploaded.size > 0) {
     if (uploaded.size > 20 * 1024 * 1024) {
-      return goWithError("/tally?tab=import", "Uploaded Tally file must be 20 MB or smaller.");
+      return goWithError("/tally/import", "Uploaded Tally file must be 20 MB or smaller.");
     }
     rawContent = await uploaded.text();
   }
@@ -370,7 +370,7 @@ export async function importTallyFileActionImpl(formData: FormData) {
     format,
     rawContent,
   });
-  if (!res.ok) return goWithError("/tally?tab=import", res.error.message);
+  if (!res.ok) return goWithError("/tally/import", res.error.message);
   const stockNote =
     res.data.stockItemsUpserted && res.data.stockItemsUpserted > 0
       ? ` & ${res.data.stockItemsUpserted} stock item(s)`
@@ -401,7 +401,7 @@ export async function upsertStockItemActionImpl(formData: FormData) {
     batchName: String(formData.get("batchName") || "Primary Batch").trim() || "Primary Batch",
     expiryDateIso: String(formData.get("expiryDateIso") || "").trim() || undefined,
   });
-  if (!res.ok) return goWithError("/inventory?tab=manage", res.error.message);
+  if (!res.ok) return goWithError("/inventory/manage", res.error.message);
   return goWithNotice(
     "/inventory",
     `Saved stock item '${String(formData.get("name") || "").trim()}'.`
@@ -428,7 +428,7 @@ export async function importTallyInventoryFileActionImpl(formData: FormData) {
   const uploaded = formData.get("uploadFile");
   if (uploaded instanceof File && uploaded.size > 0) {
     if (uploaded.size > 20 * 1024 * 1024) {
-      return goWithError("/inventory?tab=manage", "Uploaded inventory file must be 20 MB or smaller.");
+      return goWithError("/inventory/manage", "Uploaded inventory file must be 20 MB or smaller.");
     }
     rawContent = await uploaded.text();
   }
@@ -438,7 +438,7 @@ export async function importTallyInventoryFileActionImpl(formData: FormData) {
     format,
     rawContent,
   });
-  if (!res.ok) return goWithError("/inventory?tab=manage", res.error.message);
+  if (!res.ok) return goWithError("/inventory/manage", res.error.message);
   return goWithNotice(
     "/inventory",
     `Imported ${res.data.stockItemsUpserted} stock item(s)${res.data.godownsUpserted ? ` & ${res.data.godownsUpserted} godown(s)` : ""} into your live inventory register.`
@@ -450,7 +450,7 @@ export async function syncLocalTallyInventoryActionImpl(formData: FormData) {
   await enforceFeaturePaidEntitlement(session.workspace.id, "tally.sync", "/inventory");
   const port = Number(formData.get("port") || 9000);
   const res = await fetchAndSyncLocalTallyPort9000(session.ctx, { port });
-  if (!res.ok) return goWithError("/inventory?tab=manage", res.error.message);
+  if (!res.ok) return goWithError("/inventory/manage", res.error.message);
   await flushInlineTallyOutboxIfNoRedis(session.workspace.id);
   return goWithNotice(
     "/inventory",
@@ -492,45 +492,45 @@ export async function sendBillWhatsAppActionImpl(formData: FormData) {
 
 export async function saveReminderRuleActionImpl(formData: FormData) {
   const session = await requireWebSession();
-  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.sync", "/tally?tab=rules");
-  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.invoicing", "/tally?tab=rules");
+  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.sync", "/tally/automation");
+  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.invoicing", "/tally/automation");
   const res = await saveTallyReminderRule(session.ctx, {
     name: String(formData.get("name") || ""),
     triggerDaysOffset: Number(formData.get("triggerDaysOffset") || 3),
     templateName: String(formData.get("templateName") || "tally_overdue_bill_reminder"),
     maxRemindersPerBill: Number(formData.get("maxRemindersPerBill") || 3),
   });
-  if (!res.ok) return goWithError("/tally?tab=rules", res.error.message);
-  return goWithNotice("/tally?tab=rules", "Saved overdue payment reminder schedule.");
+  if (!res.ok) return goWithError("/tally/automation", res.error.message);
+  return goWithNotice("/tally/automation", "Saved overdue payment reminder schedule.");
 }
 
 export async function deleteReminderRuleActionImpl(formData: FormData) {
   const session = await requireWebSession();
-  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.sync", "/tally?tab=rules");
-  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.invoicing", "/tally?tab=rules");
+  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.sync", "/tally/automation");
+  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.invoicing", "/tally/automation");
   const res = await deleteTallyReminderRule(session.ctx, {
     ruleId: String(formData.get("ruleId") || ""),
   });
-  if (!res.ok) return goWithError("/tally?tab=rules", res.error.message);
-  return goWithNotice("/tally?tab=rules", "Removed overdue payment reminder schedule.");
+  if (!res.ok) return goWithError("/tally/automation", res.error.message);
+  return goWithNotice("/tally/automation", "Removed overdue payment reminder schedule.");
 }
 
 export async function runDueTallyRemindersActionImpl(formData: FormData) {
   const session = await requireWebSession();
-  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.sync", "/tally?tab=rules");
-  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.invoicing", "/tally?tab=rules");
+  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.sync", "/tally/automation");
+  await enforceFeaturePaidEntitlement(session.workspace.id, "tally.invoicing", "/tally/automation");
   const ignoreQuietHours = formData.get("ignoreQuietHours") === "true";
   const res = await runDueTallyReminders(session.ctx, { ignoreQuietHours });
-  if (!res.ok) return goWithError("/tally?tab=rules", res.error.message);
+  if (!res.ok) return goWithError("/tally/automation", res.error.message);
 
   if (res.data.skippedQuietHours && res.data.sentCount === 0) {
     return goWithNotice(
-      "/tally?tab=rules",
+      "/tally/automation",
       "Outside daytime hours (9 AM – 8 PM IST) - reminders are paused overnight unless sent manually."
     );
   }
   return goWithNotice(
-    "/tally?tab=rules",
+    "/tally/automation",
     res.data.sentCount > 0
       ? `Sent ${res.data.sentCount} due-date payment reminder(s) across ${res.data.evaluatedCount} open bill(s).`
       : `Checked ${res.data.evaluatedCount} open bill(s) - no new reminders are due right now.`

@@ -31,18 +31,6 @@ export function TurnstileWidget({ siteKey }: { siteKey?: string | null }) {
     let widgetId: string | null = null;
     let cancelled = false;
 
-    const resolveActiveTheme = (): "dark" | "light" => {
-      if (typeof document === "undefined") return "light";
-      const attr = document.documentElement.dataset.theme;
-      if (attr === "dark" || document.documentElement.classList.contains("dark")) {
-        return "dark";
-      }
-      if (attr === "light") {
-        return "light";
-      }
-      return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-    };
-
     const mountWidget = () => {
       if (cancelled || !containerRef.current || !window.turnstile) return;
       if (widgetId && window.turnstile.remove) {
@@ -56,7 +44,7 @@ export function TurnstileWidget({ siteKey }: { siteKey?: string | null }) {
       containerRef.current.innerHTML = "";
       widgetId = window.turnstile.render(containerRef.current, {
         sitekey: cleanKey,
-        theme: resolveActiveTheme(),
+        theme: "light",
         size: "flexible",
         callback: (tok) => setToken(tok),
         "expired-callback": () => setToken(""),
@@ -82,16 +70,8 @@ export function TurnstileWidget({ siteKey }: { siteKey?: string | null }) {
       }
     }
 
-    const onThemeChange = () => {
-      if (window.turnstile) {
-        mountWidget();
-      }
-    };
-    window.addEventListener("rsl-theme-change", onThemeChange);
-
     return () => {
       cancelled = true;
-      window.removeEventListener("rsl-theme-change", onThemeChange);
       if (widgetId && window.turnstile?.remove) {
         try {
           window.turnstile.remove(widgetId);

@@ -67,7 +67,7 @@ describe("Sprint 6 & Sprint 7 — Design Tokens, True Vector Assets, Interactive
     expect(emailTemplates).not.toContain("/long-logo.jpeg");
   });
 
-  it("maps CSS variables into Tailwind v4 @theme with dark mode, solid red .adm-btn-danger, interactive charts & deterministic avatars", () => {
+  it("maps CSS variables into Tailwind v4 @theme with light-only porcelain theme, solid red .adm-btn-danger, interactive charts & deterministic avatars", () => {
     expect(getAvatarInitials("Aarav Hardware Mart")).toBe("AM");
     expect(getAvatarInitials("Mehta")).toBe("ME");
     const toneA = getAvatarToneClasses("owner@rapidshiftlabs.in");
@@ -81,7 +81,8 @@ describe("Sprint 6 & Sprint 7 — Design Tokens, True Vector Assets, Interactive
         "utf8"
       );
       expect(css).toContain("--color-canvas: var(--canvas)");
-      expect(css).toContain('[data-theme="dark"]');
+      expect(css).toContain("color-scheme: light");
+      expect(css).not.toContain('[data-theme="dark"]');
     }
 
     const adminCss = fs.readFileSync(

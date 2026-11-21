@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import {
   computeIndianFinancialYearIst,
   escapeCsvCellSafe,
@@ -569,8 +569,18 @@ const LEGACY_BUNDLE_MONTHLY_PAISE: Record<string, number> = {
   all_features: 799900,
 };
 
+let catalogSeededControlClient: unknown = null;
+
+export function resetServiceCatalogSeedCacheForTests(): void {
+  catalogSeededControlClient = null;
+}
+
 export function ensureServiceCatalogSeeded(): void {
   const db = controlDb();
+  if (catalogSeededControlClient === db.$client) {
+    return;
+  }
+
   const svcCount = db
     .select({ c: sql<number>`count(*)` })
     .from(controlSchema.services)
@@ -597,176 +607,180 @@ export function ensureServiceCatalogSeeded(): void {
     Boolean(tallySuiteRow) &&
     Boolean(googleAdsRow)
   ) {
+    catalogSeededControlClient = db.$client;
     return;
   }
 
   const now = Date.now();
-
-  for (const svc of SERVICE_CATALOG) {
-    db.insert(controlSchema.services)
-      .values({
-        key: svc.key,
-        name: svc.name,
-        plainSummary: svc.plainSummary,
-        category: svc.category,
-        dependsOnJson: JSON.stringify(svc.dependsOn),
-        pricingModel: svc.pricingModel,
-        meteredUnit: svc.meteredUnit,
-        active: true,
-        sortOrder: svc.sortOrder,
-      })
-      .onConflictDoUpdate({
-        target: controlSchema.services.key,
-        set: {
+  const seedTx = db.$client.transaction(() => {
+    for (const svc of SERVICE_CATALOG) {
+      db.insert(controlSchema.services)
+        .values({
+          key: svc.key,
           name: svc.name,
           plainSummary: svc.plainSummary,
           category: svc.category,
           dependsOnJson: JSON.stringify(svc.dependsOn),
           pricingModel: svc.pricingModel,
           meteredUnit: svc.meteredUnit,
+          active: true,
           sortOrder: svc.sortOrder,
-        },
-      })
-      .run();
-
-    const existingPrice = db
-      .select()
-      .from(controlSchema.servicePrices)
-      .where(and(eq(controlSchema.servicePrices.serviceKey, svc.key), eq(controlSchema.servicePrices.active, true)))
-      .get();
-
-    const defaults = computeDefaultCycleAmountsPaise(svc.defaultMonthlyPaise);
-    if (!existingPrice) {
-      db.insert(controlSchema.servicePrices)
-        .values({
-          id: newId(),
-          serviceKey: svc.key,
-          currency: "INR",
-          monthlyAmountPaise: svc.defaultMonthlyPaise,
-          quarterlyAmountPaise: defaults.quarterlyPaise,
-          yearlyAmountPaise: defaults.yearlyPaise,
-          unitAmountPaise: svc.defaultUnitPaise,
-          includedUnits: 0,
-          effectiveFrom: now,
-          active: true,
+        })
+        .onConflictDoUpdate({
+          target: controlSchema.services.key,
+          set: {
+            name: svc.name,
+            plainSummary: svc.plainSummary,
+            category: svc.category,
+            dependsOnJson: JSON.stringify(svc.dependsOn),
+            pricingModel: svc.pricingModel,
+            meteredUnit: svc.meteredUnit,
+            sortOrder: svc.sortOrder,
+          },
         })
         .run();
-    } else if (!tallySuiteRow && existingPrice.monthlyAmountPaise === LEGACY_SERVICE_MONTHLY_PAISE[svc.key]) {
-      db.update(controlSchema.servicePrices)
-        .set({
-          monthlyAmountPaise: svc.defaultMonthlyPaise,
-          quarterlyAmountPaise: defaults.quarterlyPaise,
-          yearlyAmountPaise: defaults.yearlyPaise,
-          unitAmountPaise: svc.defaultUnitPaise,
-        })
-        .where(eq(controlSchema.servicePrices.id, existingPrice.id))
-        .run();
-    }
-  }
 
-  for (const b of DEFAULT_BUNDLE_CATALOG) {
-    const existingBundle = db
-      .select()
-      .from(controlSchema.planBundles)
-      .where(eq(controlSchema.planBundles.key, b.key))
-      .get();
+      const existingPrice = db
+        .select()
+        .from(controlSchema.servicePrices)
+        .where(and(eq(controlSchema.servicePrices.serviceKey, svc.key), eq(controlSchema.servicePrices.active, true)))
+        .get();
 
-    if (!existingBundle) {
-      db.insert(controlSchema.planBundles)
-        .values({
-          key: b.key,
-          workspaceId: null,
-          name: b.name,
-          tagline: b.tagline,
-          description: b.description,
-          includedKeysJson: JSON.stringify(b.includedKeys),
-          monthlyAmountPaise: b.monthlyAmountPaise,
-          quarterlyAmountPaise: b.quarterlyAmountPaise,
-          yearlyAmountPaise: b.yearlyAmountPaise,
-          badgeLabel: b.badgeLabel,
-          active: true,
-          sortOrder: b.sortOrder,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run();
-    } else if (
-      !tallySuiteRow &&
-      existingBundle.workspaceId === null &&
-      existingBundle.monthlyAmountPaise === LEGACY_BUNDLE_MONTHLY_PAISE[b.key]
-    ) {
-      db.update(controlSchema.planBundles)
-        .set({
-          name: b.name,
-          tagline: b.tagline,
-          description: b.description,
-          includedKeysJson: JSON.stringify(b.includedKeys),
-          monthlyAmountPaise: b.monthlyAmountPaise,
-          quarterlyAmountPaise: b.quarterlyAmountPaise,
-          yearlyAmountPaise: b.yearlyAmountPaise,
-          badgeLabel: b.badgeLabel,
-          sortOrder: b.sortOrder,
-          updatedAt: now,
-        })
-        .where(eq(controlSchema.planBundles.key, b.key))
-        .run();
-    } else if (
-      !googleAdsRow &&
-      existingBundle.workspaceId === null &&
-      (b.key === "all_features" || b.key === "social_growth_pack")
-    ) {
-      let existingKeys: string[] = [];
-      try {
-        existingKeys = JSON.parse(existingBundle.includedKeysJson) as string[];
-      } catch {
-        existingKeys = [];
+      const defaults = computeDefaultCycleAmountsPaise(svc.defaultMonthlyPaise);
+      if (!existingPrice) {
+        db.insert(controlSchema.servicePrices)
+          .values({
+            id: newId(),
+            serviceKey: svc.key,
+            currency: "INR",
+            monthlyAmountPaise: svc.defaultMonthlyPaise,
+            quarterlyAmountPaise: defaults.quarterlyPaise,
+            yearlyAmountPaise: defaults.yearlyPaise,
+            unitAmountPaise: svc.defaultUnitPaise,
+            includedUnits: 0,
+            effectiveFrom: now,
+            active: true,
+          })
+          .run();
+      } else if (!tallySuiteRow && existingPrice.monthlyAmountPaise === LEGACY_SERVICE_MONTHLY_PAISE[svc.key]) {
+        db.update(controlSchema.servicePrices)
+          .set({
+            monthlyAmountPaise: svc.defaultMonthlyPaise,
+            quarterlyAmountPaise: defaults.quarterlyPaise,
+            yearlyAmountPaise: defaults.yearlyPaise,
+            unitAmountPaise: svc.defaultUnitPaise,
+          })
+          .where(eq(controlSchema.servicePrices.id, existingPrice.id))
+          .run();
       }
-      if (!existingKeys.includes("google.ads")) {
-        const mergedKeys = [...existingKeys, "google.ads"];
+    }
+
+    for (const b of DEFAULT_BUNDLE_CATALOG) {
+      const existingBundle = db
+        .select()
+        .from(controlSchema.planBundles)
+        .where(eq(controlSchema.planBundles.key, b.key))
+        .get();
+
+      if (!existingBundle) {
+        db.insert(controlSchema.planBundles)
+          .values({
+            key: b.key,
+            workspaceId: null,
+            name: b.name,
+            tagline: b.tagline,
+            description: b.description,
+            includedKeysJson: JSON.stringify(b.includedKeys),
+            monthlyAmountPaise: b.monthlyAmountPaise,
+            quarterlyAmountPaise: b.quarterlyAmountPaise,
+            yearlyAmountPaise: b.yearlyAmountPaise,
+            badgeLabel: b.badgeLabel,
+            active: true,
+            sortOrder: b.sortOrder,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .run();
+      } else if (
+        !tallySuiteRow &&
+        existingBundle.workspaceId === null &&
+        existingBundle.monthlyAmountPaise === LEGACY_BUNDLE_MONTHLY_PAISE[b.key]
+      ) {
         db.update(controlSchema.planBundles)
           .set({
-            name: b.key === "all_features" ? b.name : existingBundle.name,
-            badgeLabel: b.key === "all_features" ? b.badgeLabel : existingBundle.badgeLabel,
-            includedKeysJson: JSON.stringify(mergedKeys),
+            name: b.name,
+            tagline: b.tagline,
+            description: b.description,
+            includedKeysJson: JSON.stringify(b.includedKeys),
+            monthlyAmountPaise: b.monthlyAmountPaise,
+            quarterlyAmountPaise: b.quarterlyAmountPaise,
+            yearlyAmountPaise: b.yearlyAmountPaise,
+            badgeLabel: b.badgeLabel,
+            sortOrder: b.sortOrder,
             updatedAt: now,
           })
           .where(eq(controlSchema.planBundles.key, b.key))
           .run();
+      } else if (
+        !googleAdsRow &&
+        existingBundle.workspaceId === null &&
+        (b.key === "all_features" || b.key === "social_growth_pack")
+      ) {
+        let existingKeys: string[] = [];
+        try {
+          existingKeys = JSON.parse(existingBundle.includedKeysJson) as string[];
+        } catch {
+          existingKeys = [];
+        }
+        if (!existingKeys.includes("google.ads")) {
+          const mergedKeys = [...existingKeys, "google.ads"];
+          db.update(controlSchema.planBundles)
+            .set({
+              name: b.key === "all_features" ? b.name : existingBundle.name,
+              badgeLabel: b.key === "all_features" ? b.badgeLabel : existingBundle.badgeLabel,
+              includedKeysJson: JSON.stringify(mergedKeys),
+              updatedAt: now,
+            })
+            .where(eq(controlSchema.planBundles.key, b.key))
+            .run();
+        }
       }
     }
-  }
 
-  if (!googleAdsRow) {
-    const activeAllFeaturesRows = db
-      .select()
-      .from(controlSchema.entitlements)
-      .where(
-        and(
-          eq(controlSchema.entitlements.bundleKey, "all_features"),
-          eq(controlSchema.entitlements.status, "active")
+    if (!googleAdsRow) {
+      const activeAllFeaturesRows = db
+        .select()
+        .from(controlSchema.entitlements)
+        .where(
+          and(
+            eq(controlSchema.entitlements.bundleKey, "all_features"),
+            eq(controlSchema.entitlements.status, "active")
+          )
         )
-      )
-      .all();
-    const seenWorkspaces = new Set<string>();
-    for (const ent of activeAllFeaturesRows) {
-      if (seenWorkspaces.has(ent.workspaceId)) continue;
-      seenWorkspaces.add(ent.workspaceId);
-      db.insert(controlSchema.entitlements)
-        .values({
-          id: newId(),
-          workspaceId: ent.workspaceId,
-          serviceKey: "google.ads",
-          status: "active",
-          billingCycle: ent.billingCycle,
-          bundleKey: "all_features",
-          activatedAt: now,
-          expiresAt: ent.expiresAt,
-          updatedAt: now,
-        })
-        .onConflictDoNothing()
-        .run();
+        .all();
+      const seenWorkspaces = new Set<string>();
+      for (const ent of activeAllFeaturesRows) {
+        if (seenWorkspaces.has(ent.workspaceId)) continue;
+        seenWorkspaces.add(ent.workspaceId);
+        db.insert(controlSchema.entitlements)
+          .values({
+            id: newId(),
+            workspaceId: ent.workspaceId,
+            serviceKey: "google.ads",
+            status: "active",
+            billingCycle: ent.billingCycle,
+            bundleKey: "all_features",
+            activatedAt: now,
+            expiresAt: ent.expiresAt,
+            updatedAt: now,
+          })
+          .onConflictDoNothing()
+          .run();
+      }
     }
-  }
+  });
+  seedTx.immediate();
+  catalogSeededControlClient = db.$client;
 }
 
 export interface WorkspaceFreeAccessStatus {
@@ -1019,10 +1033,40 @@ export function listServicesWithWorkspaceState(workspaceId: string) {
 
 export type WorkspaceServicePlanState = ReturnType<typeof listServicesWithWorkspaceState>[number];
 
-export function listBundlesWithWorkspaceState(workspaceId: string) {
+export function countUnlockedWorkspaceServices(workspaceId: string): {
+  unlockedCount: number;
+  totalCount: number;
+} {
   ensureServiceCatalogSeeded();
   const db = controlDb();
-  const serviceStates = listServicesWithWorkspaceState(workspaceId);
+  const now = Date.now();
+  const freeAccess = getWorkspaceFreeAccessStatus(workspaceId);
+  const totalCount = SERVICE_CATALOG.length;
+  if (freeAccess.isActive) {
+    return { unlockedCount: totalCount, totalCount };
+  }
+  const row = db.$client
+    .prepare(
+      `SELECT COUNT(DISTINCT service_key) AS c
+       FROM entitlements
+       WHERE workspace_id = ?
+         AND status IN ('active', 'trialing')
+         AND (expires_at IS NULL OR expires_at > ?)`
+    )
+    .get(workspaceId, now) as { c: number } | undefined;
+  return {
+    unlockedCount: Math.min(totalCount, Number(row?.c ?? 0)),
+    totalCount,
+  };
+}
+
+export function listBundlesWithWorkspaceState(
+  workspaceId: string,
+  precomputedServiceStates?: ReturnType<typeof listServicesWithWorkspaceState>
+) {
+  ensureServiceCatalogSeeded();
+  const db = controlDb();
+  const serviceStates = precomputedServiceStates ?? listServicesWithWorkspaceState(workspaceId);
   const svcStateByKey = new Map(serviceStates.map((s) => [s.key, s]));
 
   const bundleRows = db
@@ -1047,17 +1091,12 @@ export function listBundlesWithWorkspaceState(workspaceId: string) {
     .all();
   const overrideByKey = new Map(overrides.map((o) => [o.bundleKey, o]));
 
-  const pendingRequests = db
-    .select()
-    .from(controlSchema.servicePlanRequests)
-    .where(
-      and(
-        eq(controlSchema.servicePlanRequests.workspaceId, workspaceId),
-        eq(controlSchema.servicePlanRequests.status, "pending_payment")
-      )
-    )
-    .orderBy(desc(controlSchema.servicePlanRequests.createdAt))
-    .all();
+  const pendingByBundleKey = new Map<string, NonNullable<WorkspaceServicePlanState["pendingRequest"]>>();
+  for (const st of serviceStates) {
+    if (st.pendingRequest?.bundleKey && !pendingByBundleKey.has(st.pendingRequest.bundleKey)) {
+      pendingByBundleKey.set(st.pendingRequest.bundleKey, st.pendingRequest);
+    }
+  }
 
   return bundleRows
     .map((b) => {
@@ -1092,7 +1131,7 @@ export function listBundlesWithWorkspaceState(workspaceId: string) {
         ov?.yearlyOverridePaise ?? (ovScaled ? ovScaled.yearlyPaise : b.yearlyAmountPaise);
 
       const pendingBundleReq =
-        pendingRequests.find((r) => r.bundleKey === b.key) ??
+        pendingByBundleKey.get(b.key) ??
         (includedKeys.length > 0 &&
         includedServices.every((s) => s.isUnlocked || Boolean(s.pendingRequest)) &&
         includedServices.some((s) => Boolean(s.pendingRequest))
@@ -1212,7 +1251,36 @@ export function hasActiveEntitlement(workspaceId: string, serviceKey: string): b
 }
 
 export function hasAnyActiveEntitlement(workspaceId: string, serviceKeys: string[]): boolean {
-  return serviceKeys.some((k) => hasActiveEntitlement(workspaceId, k));
+  if (serviceKeys.length === 0) return false;
+  ensureServiceCatalogSeeded();
+  const db = controlDb();
+  const now = Date.now();
+  const ws = db
+    .select({ freeAccessUntil: controlSchema.workspaces.freeAccessUntil })
+    .from(controlSchema.workspaces)
+    .where(eq(controlSchema.workspaces.id, workspaceId))
+    .get();
+  if (ws?.freeAccessUntil && ws.freeAccessUntil > now) {
+    return true;
+  }
+  const ents = db
+    .select({
+      status: controlSchema.entitlements.status,
+      expiresAt: controlSchema.entitlements.expiresAt,
+    })
+    .from(controlSchema.entitlements)
+    .where(
+      and(
+        eq(controlSchema.entitlements.workspaceId, workspaceId),
+        inArray(controlSchema.entitlements.serviceKey, serviceKeys)
+      )
+    )
+    .all();
+  return ents.some(
+    (ent) =>
+      (ent.status === "active" || ent.status === "trialing") &&
+      (ent.expiresAt === null || ent.expiresAt === undefined || ent.expiresAt > now)
+  );
 }
 
 export function requireEntitlement(workspaceId: string, serviceKey: string): void {
@@ -1897,7 +1965,13 @@ export function listPendingPlatformRechargeRequests() {
     .orderBy(desc(controlSchema.payments.createdAt))
     .all();
 
-  const businesses = db.select().from(controlSchema.workspaces).all();
+  if (rows.length === 0) return [];
+  const wsIds = Array.from(new Set(rows.map((r) => r.workspaceId)));
+  const businesses = db
+    .select({ id: controlSchema.workspaces.id, name: controlSchema.workspaces.name })
+    .from(controlSchema.workspaces)
+    .where(inArray(controlSchema.workspaces.id, wsIds))
+    .all();
   const bizMap = new Map(businesses.map((b) => [b.id, b.name]));
 
   return rows.map((r) => ({
@@ -2387,34 +2461,36 @@ export function listAdSpendVaultLedger(workspaceId: string, limit = 30) {
 
 export function getAdSpendVaultSummary(workspaceId: string): AdSpendVaultSummary {
   const db = controlDb();
-  const rows = db
+  const agg = db.$client
+    .prepare(
+      `SELECT
+        COALESCE(SUM(amount_paise), 0) AS rawSum,
+        COALESCE(SUM(CASE WHEN entry_type = 'deposit' OR (entry_type = 'staff_adjustment' AND amount_paise > 0) THEN amount_paise ELSE 0 END), 0) AS totalDepositedPaise,
+        COALESCE(SUM(CASE WHEN entry_type = 'allocate' THEN ABS(amount_paise) ELSE 0 END), 0) AS allocatedGross,
+        COALESCE(SUM(CASE WHEN entry_type IN ('release','refund') THEN MAX(0, amount_paise) ELSE 0 END), 0) AS releasedGross
+       FROM ad_spend_ledger
+       WHERE workspace_id = ?`
+    )
+    .get(workspaceId) as {
+    rawSum: number;
+    totalDepositedPaise: number;
+    allocatedGross: number;
+    releasedGross: number;
+  };
+
+  const recentEntries = db
     .select()
     .from(controlSchema.adSpendLedger)
     .where(eq(controlSchema.adSpendLedger.workspaceId, workspaceId))
     .orderBy(desc(controlSchema.adSpendLedger.createdAt))
+    .limit(30)
     .all();
 
-  let rawSum = 0;
-  let totalDepositedPaise = 0;
-  let allocatedGross = 0;
-  let releasedGross = 0;
-
-  for (const r of rows) {
-    rawSum += r.amountPaise;
-    if (r.entryType === "deposit" || (r.entryType === "staff_adjustment" && r.amountPaise > 0)) {
-      totalDepositedPaise += r.amountPaise;
-    } else if (r.entryType === "allocate") {
-      allocatedGross += Math.abs(r.amountPaise);
-    } else if (r.entryType === "release" || r.entryType === "refund") {
-      releasedGross += Math.max(0, r.amountPaise);
-    }
-  }
-
   return {
-    availablePaise: Math.max(0, rawSum),
-    totalDepositedPaise,
-    netAllocatedToCampaignsPaise: Math.max(0, allocatedGross - releasedGross),
-    recentEntries: rows.slice(0, 30),
+    availablePaise: Math.max(0, Number(agg?.rawSum ?? 0)),
+    totalDepositedPaise: Number(agg?.totalDepositedPaise ?? 0),
+    netAllocatedToCampaignsPaise: Math.max(0, Number(agg?.allocatedGross ?? 0) - Number(agg?.releasedGross ?? 0)),
+    recentEntries,
   };
 }
 
@@ -2891,8 +2967,19 @@ export function listPlatformPlanRequests(statusFilter?: "pending_payment" | "act
         .limit(100)
         .all();
 
-  const businesses = db.select().from(controlSchema.workspaces).all();
-  const users = db.select().from(controlSchema.users).all();
+  if (rows.length === 0) return [];
+  const wsIds = Array.from(new Set(rows.map((r) => r.workspaceId)));
+  const userIds = Array.from(new Set(rows.map((r) => r.requestedByUserId)));
+  const businesses = db
+    .select({ id: controlSchema.workspaces.id, name: controlSchema.workspaces.name, gstin: controlSchema.workspaces.gstin })
+    .from(controlSchema.workspaces)
+    .where(inArray(controlSchema.workspaces.id, wsIds))
+    .all();
+  const users = db
+    .select({ id: controlSchema.users.id, name: controlSchema.users.name, email: controlSchema.users.email })
+    .from(controlSchema.users)
+    .where(inArray(controlSchema.users.id, userIds))
+    .all();
   const services = db.select().from(controlSchema.services).all();
 
   const bizMap = new Map(businesses.map((b) => [b.id, b]));
@@ -3337,6 +3424,283 @@ export function savePlatformBillingSettings(next: Partial<PlatformBillingSetting
   return merged;
 }
 
+export interface WhatsAppMessagingRates {
+  utilityPaise: number;
+  marketingPaise: number;
+  authenticationPaise: number;
+  tallyPdfBillPaise: number;
+  serviceReplyPaise: number;
+  metaUtilityCostPaise: number;
+  metaMarketingCostPaise: number;
+  metaAuthCostPaise: number;
+  hasWorkspaceOverride?: boolean;
+  updatedAt?: number | null;
+}
+
+const WHATSAPP_RATES_KEY = "platform.whatsapp_messaging_rates";
+
+function workspaceWhatsAppRatesKey(workspaceId: string): string {
+  return `workspace.whatsapp_messaging_rates:${workspaceId}`;
+}
+
+export const DEFAULT_WHATSAPP_RATES: WhatsAppMessagingRates = {
+  utilityPaise: 85,
+  marketingPaise: 95,
+  authenticationPaise: 85,
+  tallyPdfBillPaise: 85,
+  serviceReplyPaise: 0,
+  metaUtilityCostPaise: 12,
+  metaMarketingCostPaise: 78,
+  metaAuthCostPaise: 12,
+};
+
+function sanitizeRatePaise(v: unknown, fallback: number): number {
+  if (typeof v !== "number" || !Number.isFinite(v)) return fallback;
+  return Math.max(0, Math.round(v));
+}
+
+export function getGlobalWhatsAppMessagingRates(): WhatsAppMessagingRates {
+  const db = controlDb();
+  const row = db
+    .select()
+    .from(controlSchema.featureFlags)
+    .where(eq(controlSchema.featureFlags.key, WHATSAPP_RATES_KEY))
+    .get();
+
+  if (row) {
+    try {
+      const parsed = JSON.parse(row.description) as Partial<WhatsAppMessagingRates>;
+      return {
+        utilityPaise: sanitizeRatePaise(parsed.utilityPaise, DEFAULT_WHATSAPP_RATES.utilityPaise),
+        marketingPaise: sanitizeRatePaise(
+          parsed.marketingPaise,
+          DEFAULT_WHATSAPP_RATES.marketingPaise
+        ),
+        authenticationPaise: sanitizeRatePaise(
+          parsed.authenticationPaise,
+          DEFAULT_WHATSAPP_RATES.authenticationPaise
+        ),
+        tallyPdfBillPaise: sanitizeRatePaise(
+          parsed.tallyPdfBillPaise,
+          sanitizeRatePaise(parsed.utilityPaise, DEFAULT_WHATSAPP_RATES.tallyPdfBillPaise)
+        ),
+        serviceReplyPaise: sanitizeRatePaise(
+          parsed.serviceReplyPaise,
+          DEFAULT_WHATSAPP_RATES.serviceReplyPaise
+        ),
+        metaUtilityCostPaise: sanitizeRatePaise(
+          parsed.metaUtilityCostPaise,
+          DEFAULT_WHATSAPP_RATES.metaUtilityCostPaise
+        ),
+        metaMarketingCostPaise: sanitizeRatePaise(
+          parsed.metaMarketingCostPaise,
+          DEFAULT_WHATSAPP_RATES.metaMarketingCostPaise
+        ),
+        metaAuthCostPaise: sanitizeRatePaise(
+          parsed.metaAuthCostPaise,
+          DEFAULT_WHATSAPP_RATES.metaAuthCostPaise
+        ),
+        hasWorkspaceOverride: false,
+        updatedAt: row.updatedAt ?? null,
+      };
+    } catch {
+      // Fallback to servicePrices below
+    }
+  }
+
+  ensureServiceCatalogSeeded();
+  const priceRows = db
+    .select({
+      serviceKey: controlSchema.servicePrices.serviceKey,
+      unitAmountPaise: controlSchema.servicePrices.unitAmountPaise,
+    })
+    .from(controlSchema.servicePrices)
+    .where(eq(controlSchema.servicePrices.active, true))
+    .all();
+  const byKey = new Map(priceRows.map((p) => [p.serviceKey, p.unitAmountPaise]));
+  const utilityPaise = byKey.get("whatsapp.messaging") ?? DEFAULT_WHATSAPP_RATES.utilityPaise;
+  const marketingPaise = byKey.get("whatsapp.broadcast") ?? DEFAULT_WHATSAPP_RATES.marketingPaise;
+  const tallyPdfBillPaise = byKey.get("tally.invoicing") ?? utilityPaise;
+
+  return {
+    ...DEFAULT_WHATSAPP_RATES,
+    utilityPaise,
+    marketingPaise,
+    authenticationPaise: utilityPaise,
+    tallyPdfBillPaise,
+    hasWorkspaceOverride: false,
+    updatedAt: null,
+  };
+}
+
+export function updateGlobalWhatsAppMessagingRates(
+  next: Partial<WhatsAppMessagingRates>
+): WhatsAppMessagingRates {
+  const current = getGlobalWhatsAppMessagingRates();
+  const merged: WhatsAppMessagingRates = {
+    utilityPaise: sanitizeRatePaise(next.utilityPaise, current.utilityPaise),
+    marketingPaise: sanitizeRatePaise(next.marketingPaise, current.marketingPaise),
+    authenticationPaise: sanitizeRatePaise(
+      next.authenticationPaise,
+      current.authenticationPaise
+    ),
+    tallyPdfBillPaise: sanitizeRatePaise(next.tallyPdfBillPaise, current.tallyPdfBillPaise),
+    serviceReplyPaise: sanitizeRatePaise(next.serviceReplyPaise, current.serviceReplyPaise),
+    metaUtilityCostPaise: sanitizeRatePaise(
+      next.metaUtilityCostPaise,
+      current.metaUtilityCostPaise
+    ),
+    metaMarketingCostPaise: sanitizeRatePaise(
+      next.metaMarketingCostPaise,
+      current.metaMarketingCostPaise
+    ),
+    metaAuthCostPaise: sanitizeRatePaise(next.metaAuthCostPaise, current.metaAuthCostPaise),
+  };
+
+  const now = Date.now();
+  const db = controlDb();
+  db.insert(controlSchema.featureFlags)
+    .values({
+      key: WHATSAPP_RATES_KEY,
+      description: JSON.stringify(merged),
+      enabledGlobal: true,
+      workspaceAllowlistJson: "[]",
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: controlSchema.featureFlags.key,
+      set: {
+        description: JSON.stringify(merged),
+        updatedAt: now,
+      },
+    })
+    .run();
+
+  ensureServiceCatalogSeeded();
+  const unitSync: Array<[string, number]> = [
+    ["whatsapp.messaging", merged.utilityPaise],
+    ["whatsapp.broadcast", merged.marketingPaise],
+    ["tally.invoicing", merged.tallyPdfBillPaise],
+  ];
+  for (const [svcKey, unitPaise] of unitSync) {
+    db.update(controlSchema.servicePrices)
+      .set({ unitAmountPaise: unitPaise })
+      .where(
+        and(
+          eq(controlSchema.servicePrices.serviceKey, svcKey),
+          eq(controlSchema.servicePrices.active, true)
+        )
+      )
+      .run();
+  }
+
+  return { ...merged, hasWorkspaceOverride: false, updatedAt: now };
+}
+
+export function getWorkspaceWhatsAppMessagingRates(workspaceId: string): WhatsAppMessagingRates {
+  const globalRates = getGlobalWhatsAppMessagingRates();
+  const row = controlDb()
+    .select()
+    .from(controlSchema.featureFlags)
+    .where(eq(controlSchema.featureFlags.key, workspaceWhatsAppRatesKey(workspaceId)))
+    .get();
+
+  if (!row) {
+    return { ...globalRates, hasWorkspaceOverride: false };
+  }
+
+  try {
+    const parsed = JSON.parse(row.description) as Partial<WhatsAppMessagingRates>;
+    return {
+      ...globalRates,
+      utilityPaise: sanitizeRatePaise(parsed.utilityPaise, globalRates.utilityPaise),
+      marketingPaise: sanitizeRatePaise(parsed.marketingPaise, globalRates.marketingPaise),
+      authenticationPaise: sanitizeRatePaise(
+        parsed.authenticationPaise,
+        globalRates.authenticationPaise
+      ),
+      tallyPdfBillPaise: sanitizeRatePaise(
+        parsed.tallyPdfBillPaise,
+        globalRates.tallyPdfBillPaise
+      ),
+      serviceReplyPaise: sanitizeRatePaise(
+        parsed.serviceReplyPaise,
+        globalRates.serviceReplyPaise
+      ),
+      hasWorkspaceOverride: true,
+      updatedAt: row.updatedAt ?? globalRates.updatedAt ?? null,
+    };
+  } catch {
+    return { ...globalRates, hasWorkspaceOverride: false };
+  }
+}
+
+export function setWorkspaceWhatsAppMessagingRates(
+  workspaceId: string,
+  rates: Partial<
+    Pick<
+      WhatsAppMessagingRates,
+      | "utilityPaise"
+      | "marketingPaise"
+      | "authenticationPaise"
+      | "tallyPdfBillPaise"
+      | "serviceReplyPaise"
+    >
+  > | null
+): WhatsAppMessagingRates {
+  const db = controlDb();
+  const flagKey = workspaceWhatsAppRatesKey(workspaceId);
+  if (!rates) {
+    db.delete(controlSchema.featureFlags)
+      .where(eq(controlSchema.featureFlags.key, flagKey))
+      .run();
+    return getWorkspaceWhatsAppMessagingRates(workspaceId);
+  }
+
+  const current = getWorkspaceWhatsAppMessagingRates(workspaceId);
+  const payload = {
+    utilityPaise: sanitizeRatePaise(rates.utilityPaise, current.utilityPaise),
+    marketingPaise: sanitizeRatePaise(rates.marketingPaise, current.marketingPaise),
+    authenticationPaise: sanitizeRatePaise(rates.authenticationPaise, current.authenticationPaise),
+    tallyPdfBillPaise: sanitizeRatePaise(rates.tallyPdfBillPaise, current.tallyPdfBillPaise),
+    serviceReplyPaise: sanitizeRatePaise(rates.serviceReplyPaise, current.serviceReplyPaise),
+  };
+
+  const now = Date.now();
+  db.insert(controlSchema.featureFlags)
+    .values({
+      key: flagKey,
+      description: JSON.stringify(payload),
+      enabledGlobal: true,
+      workspaceAllowlistJson: JSON.stringify([workspaceId]),
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: controlSchema.featureFlags.key,
+      set: {
+        description: JSON.stringify(payload),
+        updatedAt: now,
+      },
+    })
+    .run();
+
+  return getWorkspaceWhatsAppMessagingRates(workspaceId);
+}
+
+export function resolveWhatsAppTemplateUnitCostPaise(
+  workspaceId: string,
+  category: string,
+  serviceKey?: "whatsapp.messaging" | "whatsapp.broadcast" | "tally.invoicing"
+): number {
+  const rates = getWorkspaceWhatsAppMessagingRates(workspaceId);
+  const normalized = category.trim().toLowerCase();
+  if (normalized === "marketing") return rates.marketingPaise;
+  if (normalized === "authentication") return rates.authenticationPaise;
+  if (normalized === "service") return rates.serviceReplyPaise;
+  if (serviceKey === "tally.invoicing") return rates.tallyPdfBillPaise;
+  return rates.utilityPaise;
+}
+
 export function staffUpdateServiceCatalogPrices(params: {
   serviceKey: string;
   monthlyAmountPaise: number;
@@ -3346,6 +3710,7 @@ export function staffUpdateServiceCatalogPrices(params: {
 }): void {
   ensureServiceCatalogSeeded();
   const defaults = computeDefaultCycleAmountsPaise(params.monthlyAmountPaise);
+  const unitPaise = Math.max(0, Math.round(params.unitAmountPaise));
   controlDb()
     .update(controlSchema.servicePrices)
     .set({
@@ -3358,7 +3723,7 @@ export function staffUpdateServiceCatalogPrices(params: {
         params.yearlyAmountPaise !== undefined && params.yearlyAmountPaise !== null
           ? Math.max(0, Math.round(params.yearlyAmountPaise))
           : defaults.yearlyPaise,
-      unitAmountPaise: Math.max(0, Math.round(params.unitAmountPaise)),
+      unitAmountPaise: unitPaise,
     })
     .where(
       and(
@@ -3367,6 +3732,14 @@ export function staffUpdateServiceCatalogPrices(params: {
       )
     )
     .run();
+
+  if (params.serviceKey === "whatsapp.messaging") {
+    updateGlobalWhatsAppMessagingRates({ utilityPaise: unitPaise, authenticationPaise: unitPaise });
+  } else if (params.serviceKey === "whatsapp.broadcast") {
+    updateGlobalWhatsAppMessagingRates({ marketingPaise: unitPaise });
+  } else if (params.serviceKey === "tally.invoicing") {
+    updateGlobalWhatsAppMessagingRates({ tallyPdfBillPaise: unitPaise });
+  }
 }
 
 export function staffUpdateGlobalBundleCatalog(params: {
@@ -4071,24 +4444,54 @@ export function listAllPlatformInvoices(filter?: {
   limit?: number;
 }) {
   const db = controlDb();
+  const conditions = [];
+  if (filter?.status && filter.status !== "all") {
+    conditions.push(eq(controlSchema.invoices.status, filter.status));
+  }
+  if (filter?.workspaceId) {
+    conditions.push(eq(controlSchema.invoices.workspaceId, filter.workspaceId));
+  }
+
+  const limit = filter?.limit ?? 150;
+  const q = filter?.q?.trim().toLowerCase() || "";
   const allInvoices = db
     .select()
     .from(controlSchema.invoices)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(controlSchema.invoices.issuedAt))
-    .limit(filter?.limit ?? 150)
+    .limit(q ? Math.max(limit * 4, 500) : limit)
     .all();
 
-  const businesses = db.select().from(controlSchema.workspaces).all();
-  const payments = db.select().from(controlSchema.payments).all();
+  if (allInvoices.length === 0) return [];
+  const wsIds = Array.from(new Set(allInvoices.map((i) => i.workspaceId)));
+  const invIds = allInvoices.map((i) => i.id);
+
+  const businesses = db
+    .select({
+      id: controlSchema.workspaces.id,
+      name: controlSchema.workspaces.name,
+      gstin: controlSchema.workspaces.gstin,
+      stateCode: controlSchema.workspaces.stateCode,
+    })
+    .from(controlSchema.workspaces)
+    .where(inArray(controlSchema.workspaces.id, wsIds))
+    .all();
+  const payments = db
+    .select({
+      invoiceId: controlSchema.payments.invoiceId,
+      provider: controlSchema.payments.provider,
+      externalPaymentId: controlSchema.payments.externalPaymentId,
+    })
+    .from(controlSchema.payments)
+    .where(inArray(controlSchema.payments.invoiceId, invIds))
+    .all();
 
   const bizMap = new Map(businesses.map((b) => [b.id, b]));
   const payByInv = new Map(
     payments.filter((p) => Boolean(p.invoiceId)).map((p) => [p.invoiceId!, p])
   );
 
-  const q = filter?.q?.trim().toLowerCase() || "";
-
-  return allInvoices
+  const mapped = allInvoices
     .map((inv) => {
       const biz = bizMap.get(inv.workspaceId);
       const pay = payByInv.get(inv.id);
@@ -4102,18 +4505,14 @@ export function listAllPlatformInvoices(filter?: {
       };
     })
     .filter((row) => {
-      if (filter?.status && filter.status !== "all" && row.status !== filter.status) {
-        return false;
-      }
-      if (filter?.workspaceId && row.workspaceId !== filter.workspaceId) {
-        return false;
-      }
       if (q) {
         const hay = `${row.invoiceNumber} ${row.workspaceName} ${row.description} ${row.paymentReference ?? ""} ${row.workspaceGstin ?? ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
+
+  return q ? mapped.slice(0, limit) : mapped;
 }
 
 export function staffCreateCustomInvoice(params: {

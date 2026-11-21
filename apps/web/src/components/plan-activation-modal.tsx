@@ -3,7 +3,6 @@
 import React, { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import QRCode from "qrcode";
 import { GuideDrawerButton, IosSpinner, sileo, useDialogFocusTrap } from "@rsl/ui";
 import {
   instantActivateFromWalletAction,
@@ -232,16 +231,19 @@ export function PlanActivationModal({
     const rootStyle = getComputedStyle(document.documentElement);
     const qrDark = rootStyle.getPropertyValue("--midnight-black").trim();
     const qrLight = rootStyle.getPropertyValue("--snow-white").trim();
-    QRCode.toString(upiUri, {
-      type: "svg",
-      margin: 1,
-      width: 180,
-      errorCorrectionLevel: "M",
-      color: {
-        dark: qrDark,
-        light: qrLight,
-      },
-    })
+    import("qrcode")
+      .then((mod) =>
+        mod.default.toString(upiUri, {
+          type: "svg",
+          margin: 1,
+          width: 180,
+          errorCorrectionLevel: "M",
+          color: {
+            dark: qrDark,
+            light: qrLight,
+          },
+        })
+      )
       .then((svg) => {
         if (active) setQrSvg(svg);
       })

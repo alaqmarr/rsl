@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import {
   Clock,
   FileSpreadsheet,
@@ -7,8 +8,8 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { getWorkspaceAnalytics } from "@rsl/analytics";
-import { hasActiveEntitlement, listPublicPricingCatalog } from "@rsl/billing";
-import { formatInr, getEnv } from "@rsl/core";
+import { hasActiveEntitlement } from "@rsl/billing";
+import { formatInr } from "@rsl/core";
 import { listRecentActionLogs } from "@rsl/logging";
 import {
   canRoleAccessWebRoute,
@@ -29,7 +30,6 @@ import {
 import { ConfirmWhatsAppReminderButton } from "@/components/confirm-whatsapp-reminder";
 import { FlashBanner } from "@/components/flash-banner";
 import { ActionLink } from "@/components/ios-feedback";
-import { PublicLandingPage } from "@/components/public-landing-page";
 import { sendBillWhatsAppAction } from "@/lib/actions";
 import { formatCustomerAuditSummary } from "@/lib/plain-text";
 import { getOptionalWebSession } from "@/lib/session";
@@ -41,15 +41,7 @@ export default async function BusinessOverviewPage({
 }) {
   const session = await getOptionalWebSession();
   if (!session) {
-    const env = getEnv();
-    const catalog = listPublicPricingCatalog();
-    return (
-      <PublicLandingPage
-        bundles={catalog.bundles}
-        services={catalog.services}
-        docsBaseUrl={env.DOCS_URL}
-      />
-    );
+    redirect("/login");
   }
   const sp = await searchParams;
   const analytics = getWorkspaceAnalytics(session.workspace.id, "30d");
@@ -466,7 +458,7 @@ export default async function BusinessOverviewPage({
                   <caption className="sr-only">
                     Overdue Tally Prime customer bills ready for WhatsApp payment reminders
                   </caption>
-                  <thead className="border-b border-zinc-200/80 bg-zinc-50/70 text-xs font-semibold tracking-wide text-zinc-500 uppercase">
+                  <thead className="border-b border-[var(--border)] bg-[var(--surface-inset)] text-xs font-semibold tracking-wide text-[var(--ink-muted)] uppercase">
                     <tr>
                       <th scope="col" className="px-5 py-2.5">
                         Bill # &amp; Customer
@@ -479,14 +471,14 @@ export default async function BusinessOverviewPage({
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-zinc-100 bg-white">
+                  <tbody className="divide-y divide-[var(--border-subtle)] bg-[var(--surface)]">
                     {overdueBills.map((bill) => {
                       const balance = Math.max(0, bill.amountPaise - bill.paidAmountPaise);
                       return (
-                        <tr key={bill.id} className="hover:bg-zinc-50/60">
+                        <tr key={bill.id} className="hover:bg-[var(--surface-inset)]">
                           <td className="px-5 py-3">
-                            <div className="font-semibold text-slate-900">{bill.partyName}</div>
-                            <div className="text-xs text-zinc-500">
+                            <div className="font-semibold text-[var(--ink)]">{bill.partyName}</div>
+                            <div className="text-xs text-[var(--ink-muted)]">
                               #{bill.voucherNumber} • {bill.partyPhoneE164 || "No phone"}
                             </div>
                           </td>
@@ -495,7 +487,7 @@ export default async function BusinessOverviewPage({
                           </td>
                           <td className="px-5 py-3 text-right">
                             {!canSendTallyWhatsApp ? (
-                              <span className="text-[11px] text-zinc-400">Read-only</span>
+                              <span className="text-[11px] text-[var(--ink-muted)]">Read-only</span>
                             ) : canSendBillWhatsApp && bill.partyPhoneE164 ? (
                               <ConfirmWhatsAppReminderButton
                                 voucherId={bill.id}
@@ -509,13 +501,13 @@ export default async function BusinessOverviewPage({
                               <ActionLink
                                 href="/tally"
                                 spinnerSize="xs"
-                                className="text-[11px] font-semibold text-zinc-500 hover:text-slate-900 hover:underline"
+                                className="text-[11px] font-semibold text-[var(--ink-muted)] hover:text-[var(--ink)] hover:underline"
                               >
                                 Add party phone →
                               </ActionLink>
                             ) : (
                               <ActionLink
-                                href="/tally?tab=rules"
+                                href="/tally/automation"
                                 spinnerSize="xs"
                                 className="rsl-btn-secondary py-1 text-[11px]"
                               >
@@ -551,19 +543,19 @@ export default async function BusinessOverviewPage({
             noPadding
           >
             {recentLogs.length === 0 ? (
-              <div className="p-6 text-xs text-zinc-500">No actions recorded yet.</div>
+              <div className="p-6 text-xs text-[var(--ink-muted)]">No actions recorded yet.</div>
             ) : (
-              <ul className="divide-y divide-zinc-100 bg-white text-xs">
+              <ul className="divide-y divide-[var(--border-subtle)] bg-[var(--surface)] text-xs">
                 {recentLogs.map((log) => (
                   <li
                     key={log.id}
-                    className="flex items-start justify-between gap-3 px-5 py-3 hover:bg-zinc-50/60"
+                    className="flex items-start justify-between gap-3 px-5 py-3 hover:bg-[var(--surface-inset)]"
                   >
                     <div>
-                      <div className="font-medium text-slate-900">
+                      <div className="font-medium text-[var(--ink)]">
                         {formatCustomerAuditSummary(log.summary)}
                       </div>
-                      <div className="mt-0.5 text-xs text-zinc-500">
+                      <div className="mt-0.5 text-xs text-[var(--ink-muted)]">
                         {log.category} •{" "}
                         {new Date(log.ts).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
                       </div>

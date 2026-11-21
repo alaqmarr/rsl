@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { CheckCircle2 } from "lucide-react";
 import { INDIA_GST_STATES } from "@rsl/billing";
 import { getPlatformCloudflareTurnstileConfig } from "@rsl/tenancy";
-import { BrandLogo, ThemeToggleButton } from "@rsl/ui";
+import { BrandLogo } from "@rsl/ui";
 import { WebRegisterForm } from "@/components/auth-forms";
 import { FlashBanner } from "@/components/flash-banner";
 import { ActionLink } from "@/components/ios-feedback";
@@ -40,7 +40,6 @@ export default async function RegisterPage({
             >
               Already have a workspace? Sign in
             </ActionLink>
-            <ThemeToggleButton compact />
           </div>
         </div>
 

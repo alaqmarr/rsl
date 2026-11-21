@@ -2,10 +2,10 @@ import Link from "next/link";
 import { AlertTriangle, LogOut, MailCheck, Settings, UserCircle2 } from "lucide-react";
 import { getWorkspaceSetupProgress } from "@rsl/analytics";
 import {
+  countUnlockedWorkspaceServices,
   getPlatformBillingSettings,
   getWalletAvailableSpendPaise,
   getWalletBalancePaise,
-  listServicesWithWorkspaceState,
   MIN_WALLET_BALANCE_PAISE,
   WALLET_OVERDRAFT_LIMIT_PAISE,
 } from "@rsl/billing";
@@ -54,17 +54,20 @@ export default async function DashboardLayout({ children }: { children: React.Re
         ? "/billing"
         : "/settings/profile";
 
-  const walletBalancePaise = getWalletBalancePaise(session.workspace.id);
+  const isSuspended = session.workspace.billingStatus === "suspended";
+  const [walletBalancePaise, serviceCounts, setupProgress, billingSettings] = await Promise.all([
+    Promise.resolve(getWalletBalancePaise(session.workspace.id)),
+    Promise.resolve(countUnlockedWorkspaceServices(session.workspace.id)),
+    Promise.resolve(getWorkspaceSetupProgress(session.workspace.id)),
+    isSuspended ? Promise.resolve(getPlatformBillingSettings()) : Promise.resolve(null),
+  ]);
   const walletFormatted = formatInr(walletBalancePaise, { showDecimals: true });
   const walletAvailableSpendPaise = getWalletAvailableSpendPaise(walletBalancePaise);
   const isNegativeWallet = walletBalancePaise < 0;
   const isOverdraftExhausted = walletBalancePaise <= MIN_WALLET_BALANCE_PAISE;
 
-  const workspaceServices = listServicesWithWorkspaceState(session.workspace.id);
-  const unlockedToolsCount = workspaceServices.filter((s) => s.isUnlocked).length;
-  const setupProgress = getWorkspaceSetupProgress(session.workspace.id);
-  const billingSettings = getPlatformBillingSettings();
-  const isSuspended = session.workspace.billingStatus === "suspended";
+  const unlockedToolsCount = serviceCounts.unlockedCount;
+  const totalToolsCount = serviceCounts.totalCount;
 
   const footerLinks = [
     { label: "Plans & GST Invoices", href: "/billing" },
@@ -90,7 +93,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         ) : (
           <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-[var(--butter-cream)] ring-1 ring-white/20">
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--sunset-orange)]" />
-            {unlockedToolsCount}/{workspaceServices.length} Active
+            {unlockedToolsCount}/{totalToolsCount} Active
           </span>
         )}
       </div>
@@ -225,7 +228,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         )}
 
-        {isSuspended && (
+        {isSuspended && billingSettings && (
           <div className="shrink-0 border-b border-red-200 bg-red-50 px-6 py-2.5 text-xs font-medium text-red-900 lg:px-10">
             <span className="inline-flex flex-wrap items-center gap-2">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-red-600" />

@@ -11,6 +11,7 @@ import {
   ensureServiceCatalogSeeded,
   formatBankAccountUpiAddress,
   generateUpiQrSvg,
+  getGlobalWhatsAppMessagingRates,
   getPlatformBillingSettings,
   listGlobalBundleCatalog,
   SERVICE_CATALOG,
@@ -27,8 +28,10 @@ import {
   StatusPill,
 } from "@rsl/ui";
 import { ActionLink, SubmitButton } from "@/components/ios-feedback";
+import { WhatsAppRatesMarginCard } from "@/components/whatsapp-rates-margin-card";
 import {
   staffSaveBillingSettingsAction,
+  staffSaveWhatsAppRatesAction,
   staffUpdateGlobalBundleAction,
   staffUpdatePriceAction,
 } from "@/lib/actions";
@@ -67,6 +70,7 @@ export default async function AdminServicePricingPage({
     itemLabel: "Banking Name Check",
   });
   const testQrSvg = await generateUpiQrSvg(testUpiPayload.upiUri);
+  const whatsappRates = getGlobalWhatsAppMessagingRates();
   const globalBundles = listGlobalBundleCatalog();
   const prices = controlDb()
     .select()
@@ -324,6 +328,14 @@ export default async function AdminServicePricingPage({
           </div>
         </div>
       </SectionCard>
+
+      {/* WhatsApp Per-Message Messaging Rates & Profit Margin */}
+      <WhatsAppRatesMarginCard
+        initialRates={whatsappRates}
+        saveAction={staffSaveWhatsAppRatesAction}
+        returnTo="/pricing"
+        mode="global"
+      />
 
       {/* Global Bundle Catalog */}
       <SectionCard

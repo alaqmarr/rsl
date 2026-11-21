@@ -36,24 +36,28 @@ export default async function AdminHomePage({
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  const { staff } = await requireStaffSession();
+  const [{ staff }, sp] = await Promise.all([requireStaffSession(), searchParams]);
   const canManageBilling = canStaffPerform(staff.staffRole, "staff:billing.manage");
   const canViewBilling = canStaffPerform(staff.staffRole, "staff:billing.view");
   const canManageClients = canStaffPerform(staff.staffRole, "staff:clients.manage");
   const canImpersonate = canStaffPerform(staff.staffRole, "staff:impersonate");
   ensureServiceCatalogSeeded();
-  const sp = await searchParams;
-  const adminData = getPlatformAdminAnalytics();
-  const pendingPlanRequests = listPlatformPlanRequests("pending_payment");
-  const allRecentPlanRequests = listPlatformPlanRequests().slice(0, 10);
+  const [adminData, pendingPlanRequests, allRecentPlanRequestsRaw, pendingRecharges, prices] =
+    await Promise.all([
+      Promise.resolve(getPlatformAdminAnalytics()),
+      Promise.resolve(listPlatformPlanRequests("pending_payment")),
+      Promise.resolve(listPlatformPlanRequests()),
+      Promise.resolve(listPendingPlatformRechargeRequests()),
+      Promise.resolve(
+        controlDb()
+          .select()
+          .from(controlSchema.servicePrices)
+          .where(eq(controlSchema.servicePrices.active, true))
+          .all()
+      ),
+    ]);
+  const allRecentPlanRequests = allRecentPlanRequestsRaw.slice(0, 10);
   const processedPlanRequests = allRecentPlanRequests.filter((r) => r.status !== "pending_payment");
-  const pendingRecharges = listPendingPlatformRechargeRequests();
-
-  const prices = controlDb()
-    .select()
-    .from(controlSchema.servicePrices)
-    .where(eq(controlSchema.servicePrices.active, true))
-    .all();
   const priceByKey = new Map(prices.map((p) => [p.serviceKey, p]));
   const catalogByKey = new Map(SERVICE_CATALOG.map((s) => [s.key, s]));
 

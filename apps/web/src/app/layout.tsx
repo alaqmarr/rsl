@@ -1,35 +1,60 @@
 import type { Metadata } from "next";
-import { cookies } from "next/headers";
-import { Fraunces, JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
+import { Bebas_Neue, Cinzel, Cookie, Geist_Mono } from "next/font/google";
 import { SileoToastProvider } from "@rsl/ui";
 import { DpdpConsentBanner } from "@/components/dpdp-consent-banner";
 import { getWebLocale, readVerifiedWebFlashToast } from "@/lib/session";
 import "sileo/styles.css";
 import "./globals.css";
 
-const display = Fraunces({
+const display = Cinzel({
   subsets: ["latin"],
-  variable: "--font-fraunces",
+  weight: ["500", "600", "700"],
+  variable: "--font-cinzel",
   display: "swap",
 });
 
-const sans = Plus_Jakarta_Sans({
+const mono = Geist_Mono({
   subsets: ["latin"],
-  variable: "--font-jakarta",
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-geist-mono",
   display: "swap",
 });
 
-const mono = JetBrains_Mono({
+const cursive = Cookie({
   subsets: ["latin"],
-  variable: "--font-jetbrains-mono",
+  weight: "400",
+  variable: "--font-cookie",
+  display: "swap",
+});
+
+const bebas = Bebas_Neue({
+  subsets: ["latin"],
+  weight: "400",
+  variable: "--font-bebas-neue",
   display: "swap",
 });
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.APP_URL || "https://app.rapidshiftlabs.in"),
-  title: "RSL Marketing - Business Growth, Tally Sync & Customer Messages",
+  applicationName: "RapidShift Labs",
+  title: {
+    default: "RapidShift Labs - WhatsApp Business Automation & Tally Sync",
+    template: "%s | RapidShift Labs",
+  },
   description:
     "Unified customer messages, Tally Prime billing & reminders, WhatsApp broadcasts, ad analytics, and encrypted cloud backups.",
+  keywords: [
+    "WhatsApp Business Automation",
+    "Tally Prime WhatsApp integration",
+    "Overdue invoice reminder WhatsApp",
+    "Shared WhatsApp team inbox",
+    "WhatsApp Cloud API India",
+    "RapidShift Labs",
+  ],
+  authors: [{ name: "RapidShift Labs", url: "https://rapidshiftlabs.in" }],
+  creator: "RapidShift Labs",
+  publisher: "RapidShift Labs",
+  category: "Business Software",
   manifest: "/site.webmanifest",
   icons: {
     icon: [
@@ -41,6 +66,9 @@ export const metadata: Metadata = {
     apple: "/apple-touch-icon.png",
   },
   openGraph: {
+    type: "website",
+    siteName: "RapidShift Labs",
+    locale: "en_IN",
     title: "RapidShift Labs - Tally Prime Sync, WhatsApp Cloud & Growth Suite",
     description:
       "Automate Tally Prime GST invoice PDFs on WhatsApp, manage shared team inbox replies, and protect backups in 1 click.",
@@ -49,30 +77,45 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "RapidShift Labs - Tally Prime Sync, WhatsApp Cloud & Growth Suite",
+    description:
+      "Automate Tally Prime GST invoice PDFs on WhatsApp, manage shared team inbox replies, and protect backups in 1 click.",
     images: ["/og-image.png"],
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
   },
 };
 
-const THEME_INIT_SCRIPT = `(function(){try{var d=document.documentElement,s=localStorage.getItem("rsl_theme"),t=s==="dark"||s==="light"?s:d.dataset.theme==="dark"||d.dataset.theme==="light"?d.dataset.theme:window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";d.dataset.theme=t;d.classList.toggle("dark",t==="dark");}catch(e){}})();`;
+const LIGHT_MODE_SCRIPT = `(function(){try{var d=document.documentElement;d.dataset.theme="light";d.classList.remove("dark");localStorage.setItem("rsl_theme","light");}catch(e){}})();`;
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const [locale, verifiedToast, cookieStore] = await Promise.all([
+  const [locale, verifiedToast] = await Promise.all([
     getWebLocale(),
     readVerifiedWebFlashToast(),
-    cookies(),
   ]);
-  const rawTheme = cookieStore.get("rsl_theme")?.value;
-  const dataTheme = rawTheme === "dark" || rawTheme === "light" ? rawTheme : undefined;
 
   return (
     <html
       lang={locale}
-      data-theme={dataTheme}
+      data-theme="light"
       suppressHydrationWarning
-      className={`${display.variable} ${sans.variable} ${mono.variable}${dataTheme === "dark" ? " dark" : ""}`}
+      className={`${display.variable} ${mono.variable} ${cursive.variable} ${bebas.variable}`}
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Xmind:wght@400;500;600;700&display=swap"
+        />
+        <script dangerouslySetInnerHTML={{ __html: LIGHT_MODE_SCRIPT }} />
       </head>
       <body className="min-h-screen bg-[var(--canvas)] font-sans text-[var(--ink)] antialiased">
         <SileoToastProvider cookieName="rsl_toast" verifiedToast={verifiedToast} />

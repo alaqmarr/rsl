@@ -1,11 +1,16 @@
+import { eq } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { issueApiKey } from "@rsl/api-keys";
 import { registerUserWithWorkspace, resolveUserSessionFromToken } from "@rsl/auth";
 import {
   creditWallet,
+  getGlobalWhatsAppMessagingRates,
   getWalletBalancePaise,
+  resolveWhatsAppTemplateUnitCostPaise,
+  setWorkspaceWhatsAppMessagingRates,
   staffGrantFreeAllToolsAccess,
+  updateGlobalWhatsAppMessagingRates,
 } from "@rsl/billing";
 import { linkExternalConnection } from "@rsl/connections";
 import { signHmac } from "@rsl/core";
@@ -559,6 +564,121 @@ describe("Phase 31 Suite — Strict Meta-Approved WhatsApp Templates, Post-Send-
       });
       expect(draftReply.ok).toBe(true);
       expect(getWalletBalancePaise(workspaceId)).toBe(beforeDraftBal - 100);
+    }
+  });
+
+  it("charges admin-configured global WhatsApp per-message profit rates and per-client workspace overrides accurately", async () => {
+    const appSecret = "meta_secret_phase31_rates";
+    savePlatformMetaAppConfig({
+      appId: "554433221100",
+      appSecret,
+      webhookVerifyToken: "verify_rates_31",
+      graphVersion: "v21.0",
+      staffId: "stf_test_rates",
+    });
+
+    const { session: wsA, workspaceId: wsAId } = createTestWorkspace("RatesGlobal");
+    const { session: wsB, workspaceId: wsBId } = createTestWorkspace("RatesCustom");
+
+    try {
+      // 1. Update global rates from Admin side with profit markup (₹1.20 utility, ₹1.65 marketing)
+      const updated = updateGlobalWhatsAppMessagingRates({
+        utilityPaise: 120,
+        marketingPaise: 165,
+        authenticationPaise: 99,
+        tallyPdfBillPaise: 115,
+        serviceReplyPaise: 25,
+        metaUtilityCostPaise: 12,
+        metaMarketingCostPaise: 78,
+        metaAuthCostPaise: 12,
+      });
+      expect(updated.utilityPaise).toBe(120);
+      expect(updated.marketingPaise).toBe(165);
+      expect(getGlobalWhatsAppMessagingRates().tallyPdfBillPaise).toBe(115);
+
+      expect(resolveWhatsAppTemplateUnitCostPaise(wsAId, "utility")).toBe(120);
+      expect(resolveWhatsAppTemplateUnitCostPaise(wsAId, "marketing")).toBe(165);
+      expect(resolveWhatsAppTemplateUnitCostPaise(wsAId, "authentication")).toBe(99);
+      expect(resolveWhatsAppTemplateUnitCostPaise(wsAId, "utility", "tally.invoicing")).toBe(115);
+      expect(resolveWhatsAppTemplateUnitCostPaise(wsAId, "service")).toBe(25);
+
+      // 2. Override client B specifically (₹1.40 marketing, ₹0.90 utility), leaving client A untouched
+      setWorkspaceWhatsAppMessagingRates(wsBId, {
+        utilityPaise: 90,
+        marketingPaise: 140,
+      });
+      expect(resolveWhatsAppTemplateUnitCostPaise(wsBId, "utility")).toBe(90);
+      expect(resolveWhatsAppTemplateUnitCostPaise(wsBId, "marketing")).toBe(140);
+      expect(resolveWhatsAppTemplateUnitCostPaise(wsAId, "utility")).toBe(120);
+
+      // 3. Verify live template send deducts exact Admin-configured rate (120 paise for wsA, 90 paise for wsB)
+      let seq = 0;
+      vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        seq++;
+        return new Response(JSON.stringify({ messages: [{ id: `wamid.rate_check_${seq}` }] }), {
+          status: 200,
+        });
+      });
+
+      for (const [ctxSession, wsId, expectedCost, phoneId] of [
+        [wsA.ctx, wsAId, 120, "phone_rate_a"],
+        [wsB.ctx, wsBId, 90, "phone_rate_b"],
+      ] as const) {
+        await linkExternalConnection(ctxSession, {
+          provider: "whatsapp",
+          assetType: "waba_phone",
+          displayName: "Rates WABA",
+          externalAccountId: phoneId,
+          accessToken: "EAALiveRateToken_XYZ",
+          scopesGranted: ["whatsapp_business_messaging"],
+          metadata: {
+            channelKind: "whatsapp_cloud",
+            wabaId: `waba_${phoneId}`,
+            phoneNumberId: phoneId,
+          },
+        });
+
+        const tmpl = await createWhatsAppTemplate(ctxSession, {
+          name: "rate_test_utility",
+          category: "utility",
+          language: "en_IN",
+          bodyText: "Order #{{1}} update for {{2}}.",
+          submitToMeta: false,
+        });
+        expect(tmpl.ok).toBe(true);
+        if (!tmpl.ok) return;
+
+        tenantDataDb({ workspaceId: wsId })
+          .update(tenantDataSchema.whatsappTemplates)
+          .set({ approvalStatus: "APPROVED", metaTemplateId: `meta_rate_${phoneId}` })
+          .where(eq(tenantDataSchema.whatsappTemplates.id, tmpl.data.templateId))
+          .run();
+
+        const beforeSendBal = getWalletBalancePaise(wsId);
+        const sendOut = await executeWhatsAppTemplateSend({
+          workspaceId: wsId,
+          templateIdOrName: tmpl.data.templateId,
+          recipientPhone: "+919820012345",
+          recipientName: "Rate Check Buyer",
+          variables: { "1": "101", "2": "Buyer" },
+          idempotencyKey: `rate-check-${wsId}`,
+          actorId: ctxSession.actorId,
+        });
+        expect(sendOut).toMatchObject({ sent: true });
+        expect(getWalletBalancePaise(wsId)).toBe(beforeSendBal - expectedCost);
+      }
+    } finally {
+      setWorkspaceWhatsAppMessagingRates(wsBId, null);
+      updateGlobalWhatsAppMessagingRates({
+        utilityPaise: 85,
+        marketingPaise: 95,
+        authenticationPaise: 85,
+        tallyPdfBillPaise: 85,
+        serviceReplyPaise: 0,
+        metaUtilityCostPaise: 12,
+        metaMarketingCostPaise: 78,
+        metaAuthCostPaise: 12,
+      });
     }
   });
 });

@@ -9,6 +9,8 @@ export function applyConnectionPragmas(db: Database.Database, kind: "control" | 
   db.pragma("journal_size_limit = 67108864");
   db.pragma("wal_autocheckpoint = 1000");
   db.pragma("temp_store = MEMORY");
+  db.pragma(kind === "control" ? "cache_size = -32768" : "cache_size = -8192");
+  db.pragma(kind === "control" ? "mmap_size = 268435456" : "mmap_size = 67108864");
 }
 
 export interface SqlMigration {
@@ -877,6 +879,37 @@ export const CONTROL_MIGRATIONS: SqlMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_idempotency_expires ON idempotency_records(expires_at);
     `,
   },
+  {
+    version: 13,
+    name: "0013_performance_indexes",
+    sql: `
+      CREATE INDEX IF NOT EXISTS idx_invoices_ws_issued ON invoices(workspace_id, issued_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_invoices_issued ON invoices(issued_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_invoices_linked_doctype ON invoices(linked_invoice_id, doc_type) WHERE linked_invoice_id IS NOT NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_payments_ws_created ON payments(workspace_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_payments_status_created ON payments(status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_payments_invoice ON payments(invoice_id) WHERE invoice_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_payments_ext_order ON payments(external_order_id) WHERE external_order_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_payments_ws_ext_pay ON payments(workspace_id, external_payment_id) WHERE external_payment_id IS NOT NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_connections_ws_provider ON connections(workspace_id, provider, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_connections_provider_ext ON connections(provider, external_account_id);
+
+      CREATE INDEX IF NOT EXISTS idx_assets_ws_type_active ON assets(workspace_id, asset_type, active);
+      CREATE INDEX IF NOT EXISTS idx_assets_connection ON assets(connection_id);
+
+      CREATE INDEX IF NOT EXISTS idx_api_keys_ws_created ON api_keys(workspace_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_agent_devices_ws_created ON agent_devices(workspace_id, created_at DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_plan_requests_ws_created ON service_plan_requests(workspace_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_entitlements_bundle_status ON entitlements(bundle_key, status);
+      CREATE INDEX IF NOT EXISTS idx_entitlements_status_expires ON entitlements(status, expires_at);
+      CREATE INDEX IF NOT EXISTS idx_sessions_active_ws ON sessions(active_workspace_id);
+      CREATE INDEX IF NOT EXISTS idx_email_deliveries_ws_ts ON email_deliveries(workspace_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_ledger_ws_ts_amt ON ledger_entries(workspace_id, created_at, amount_paise);
+    `,
+  },
 ];
 
 export const INGRESS_MIGRATIONS: SqlMigration[] = [
@@ -982,6 +1015,15 @@ export const PLATFORM_LOGS_MIGRATIONS: SqlMigration[] = [
         created_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_platform_docs_search_ts ON docs_search_logs(created_at);
+    `,
+  },
+  {
+    version: 3,
+    name: "0003_performance_indexes",
+    sql: `
+      CREATE INDEX IF NOT EXISTS idx_impersonation_ws_started ON impersonation_logs(workspace_id, started_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_impersonation_staff_ws_ended ON impersonation_logs(staff_id, workspace_id, ended_at);
+      CREATE INDEX IF NOT EXISTS idx_staff_action_tenant_ts ON staff_action_logs(target_tenant_id, ts DESC);
     `,
   },
 ];
@@ -1584,6 +1626,36 @@ export const TENANT_DATA_MIGRATIONS: SqlMigration[] = [
       );
       CREATE INDEX IF NOT EXISTS idx_vouchers_date ON tally_vouchers(voucher_date);
       CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+    `,
+  },
+  {
+    version: 9,
+    name: "0009_performance_indexes",
+    sql: `
+      DROP INDEX IF EXISTS idx_messages_created;
+
+      CREATE INDEX IF NOT EXISTS idx_contacts_ig ON contacts(instagram_handle) WHERE instagram_handle IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_contacts_fb ON contacts(facebook_scoped_id) WHERE facebook_scoped_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email) WHERE email IS NOT NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_conversations_contact_channel ON conversations(contact_id, channel);
+      CREATE INDEX IF NOT EXISTS idx_conversations_last_activity ON conversations(last_activity_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_conversations_assigned_activity ON conversations(assigned_user_id, last_activity_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_conversations_voucher_guid ON conversations(linked_voucher_guid) WHERE linked_voucher_guid IS NOT NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_vouchers_company_date ON tally_vouchers(company_id, voucher_date, created_at);
+      CREATE INDEX IF NOT EXISTS idx_vouchers_company_master ON tally_vouchers(company_id, master_id) WHERE master_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_vouchers_company_party ON tally_vouchers(company_id, party_name);
+      CREATE INDEX IF NOT EXISTS idx_vouchers_number ON tally_vouchers(voucher_number);
+      CREATE INDEX IF NOT EXISTS idx_vouchers_created ON tally_vouchers(created_at);
+
+      CREATE INDEX IF NOT EXISTS idx_parties_company_name ON tally_parties(company_id, name);
+      CREATE INDEX IF NOT EXISTS idx_parties_closing_bal ON tally_parties(closing_balance_paise DESC);
+      CREATE INDEX IF NOT EXISTS idx_tally_voucher_pdfs_updated ON tally_voucher_pdfs(updated_at);
+
+      CREATE INDEX IF NOT EXISTS idx_outbox_status_queue_next ON outbox(status, queue_name, next_run_at);
+      CREATE INDEX IF NOT EXISTS idx_outbox_updated ON outbox(updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_scheduled_posts_status_for ON scheduled_posts(status, scheduled_for);
     `,
   },
 ];

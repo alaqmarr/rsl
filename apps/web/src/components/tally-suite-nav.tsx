@@ -1,5 +1,5 @@
 import React from "react";
-import { Building2, FileSpreadsheet, Package, Users } from "lucide-react";
+import { Building2, FileSpreadsheet, Package, Sparkles, UploadCloud, Users } from "lucide-react";
 import { GuideDrawerButton } from "@rsl/ui";
 import { ActionLink } from "@/components/ios-feedback";
 import { buildTallySuiteGuideContent } from "@/lib/tally-guide-drawer";
@@ -11,8 +11,9 @@ export interface TallySuiteCompanyOption {
 }
 
 export interface TallySuiteNavProps {
-  activeSection: "vouchers" | "parties" | "inventory";
+  activeSection: "vouchers" | "automation" | "import" | "parties" | "inventory";
   vouchersCount?: number;
+  rulesCount?: number;
   partiesCount?: number;
   stockItemsCount?: number;
   companies?: TallySuiteCompanyOption[];
@@ -22,6 +23,7 @@ export interface TallySuiteNavProps {
 export function TallySuiteNav({
   activeSection,
   vouchersCount,
+  rulesCount,
   partiesCount,
   stockItemsCount,
   companies = [],
@@ -37,27 +39,45 @@ export function TallySuiteNav({
       ? "/tally/parties"
       : activeSection === "inventory"
         ? "/inventory"
-        : "/tally";
+        : activeSection === "automation"
+          ? "/tally/automation"
+          : activeSection === "import"
+            ? "/tally/import"
+            : "/tally";
 
   const items = [
     {
       key: "vouchers" as const,
+      label: "Bills & Receipts",
       href: `/tally${companyQuery}`,
-      label: "Vouchers, Receipts & Sync",
       count: vouchersCount,
       icon: FileSpreadsheet,
     },
     {
+      key: "automation" as const,
+      label: "Auto-Send & Reminders",
+      href: `/tally/automation${companyQuery}`,
+      count: rulesCount,
+      icon: Sparkles,
+    },
+    {
+      key: "import" as const,
+      label: "XML / Manual Import",
+      href: `/tally/import${companyQuery}`,
+      count: undefined,
+      icon: UploadCloud,
+    },
+    {
       key: "parties" as const,
+      label: "Parties & Ledgers",
       href: `/tally/parties${companyQuery}`,
-      label: "Client & Supplier Ledgers",
       count: partiesCount,
       icon: Users,
     },
     {
       key: "inventory" as const,
+      label: "Stock & Inventory",
       href: `/inventory${companyQuery}`,
-      label: "Stock & Godown Inventory",
       count: stockItemsCount,
       icon: Package,
     },
@@ -101,6 +121,9 @@ export function TallySuiteNav({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--ink-muted)]">
+          <ActionLink href="/connections/tally" spinnerSize="xs" className="rsl-btn-secondary py-1 text-xs">
+            PC Sync &amp; .tdl
+          </ActionLink>
           <GuideDrawerButton
             drawerId="tally-suite-guide"
             label="Need help?"
@@ -114,7 +137,7 @@ export function TallySuiteNav({
         <div className="flex w-full flex-wrap items-center justify-between gap-2 border-t border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3.5 py-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--ink-secondary)]">
-              <Building2 className="h-3.5 w-3.5 text-emerald-700" />
+              <Building2 className="h-3.5 w-3.5 text-[var(--brand)]" />
               <span>Company:</span>
             </span>
             <ActionLink
@@ -144,10 +167,10 @@ export function TallySuiteNav({
                   <span
                     className={`h-1.5 w-1.5 rounded-full ${
                       isSelected
-                        ? "bg-[var(--sunset-orange)]"
+                        ? "bg-[var(--brand-accent)]"
                         : c.lastSyncedAt
-                          ? "bg-emerald-500"
-                          : "bg-zinc-400"
+                          ? "bg-[var(--success)]"
+                          : "bg-[var(--ink-muted)]"
                     }`}
                   />
                   <span>{c.name}</span>

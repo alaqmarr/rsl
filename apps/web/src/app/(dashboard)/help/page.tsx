@@ -86,7 +86,7 @@ export default async function PersonalizedHelpPage({
       statusLabel:
         walletPaise > 0 ? "Funded" : walletPaise > -20_000 ? "Overdraft Ready" : "Limit Reached",
       tone: walletPaise > 0 ? "emerald" : walletPaise > -20_000 ? "amber" : "stone",
-      href: "/billing?tab=wallet",
+      href: "/billing/wallet",
       cta: walletPaise > 0 ? "View Passbook" : "Recharge Wallet",
     },
     {
@@ -133,7 +133,7 @@ export default async function PersonalizedHelpPage({
           : tallySummary.connectionOverview.overallState === "handshake_ready"
             ? "emerald"
             : "amber",
-      href: "/tally?tab=connect",
+      href: "/connections/tally",
       cta:
         tallySummary.connectionOverview.overallState === "live_connected"
           ? "Open Tally Connection"
@@ -150,7 +150,7 @@ export default async function PersonalizedHelpPage({
         actions={
           <Form action="/help" className="flex items-center gap-2">
             <div className="relative">
-              <Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+              <Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ink-muted)]" />
               <input
                 name="q"
                 defaultValue={q}
@@ -175,14 +175,14 @@ export default async function PersonalizedHelpPage({
           {readinessChecks.map((item) => (
             <div
               key={item.title}
-              className="flex flex-col justify-between gap-3 rounded-xl border border-zinc-200/85 bg-zinc-50/65 p-3.5 text-xs"
+              className="flex flex-col justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-inset)] p-3.5 text-xs"
             >
               <div>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold text-slate-900">{item.title}</span>
+                  <span className="font-semibold text-[var(--ink)]">{item.title}</span>
                   <StatusPill label={item.statusLabel} tone={item.tone} showDot={false} />
                 </div>
-                <p className="mt-1.5 leading-relaxed text-zinc-600">{item.detail}</p>
+                <p className="mt-1.5 leading-relaxed text-[var(--ink-secondary)]">{item.detail}</p>
               </div>
               <div>
                 <ActionLink
@@ -200,7 +200,7 @@ export default async function PersonalizedHelpPage({
       {q && (
         <SectionCard title={`Search Results for "${q}" (${hits.length})`}>
           {hits.length === 0 ? (
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-[var(--ink-muted)]">
               No matching guides found. Try searching a simpler word like &ldquo;Tally&rdquo;, &ldquo;WhatsApp&rdquo;, or &ldquo;Wallet&rdquo;.
             </p>
           ) : (
@@ -212,14 +212,14 @@ export default async function PersonalizedHelpPage({
                 return (
                   <li
                     key={`${h.href}-${i}`}
-                    className="rounded-xl border border-zinc-200/80 bg-zinc-50/70 px-4 py-3 transition hover:bg-white"
+                    className="rounded-xl border border-[var(--border)] bg-[var(--surface-inset)] px-4 py-3 transition hover:bg-[var(--surface)]"
                   >
                     <ActionLink href={targetHref} variant="card" className="block">
                       <div className="flex items-center gap-2">
                         <StatusPill label={h.kind} tone="sky" showDot={false} />
-                        <strong className="text-sm text-slate-900">{h.title}</strong>
+                        <strong className="text-sm text-[var(--ink)]">{h.title}</strong>
                       </div>
-                      <p className="mt-1 text-zinc-600">{h.summary}</p>
+                      <p className="mt-1 text-[var(--ink-secondary)]">{h.summary}</p>
                     </ActionLink>
                   </li>
                 );
@@ -231,7 +231,7 @@ export default async function PersonalizedHelpPage({
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[310px_1fr] lg:items-start">
         <SectionCard title="All Help Guides" noPadding>
-          <ul className="divide-y divide-zinc-100 bg-white text-xs">
+          <ul className="divide-y divide-[var(--border-subtle)] bg-[var(--surface)] text-xs">
             {articles.map((art) => {
               const planActive = art.service
                 ? hasActiveEntitlement(session.workspace.id, art.service)
@@ -244,7 +244,7 @@ export default async function PersonalizedHelpPage({
                   className={
                     isSelected
                       ? "border-l-2 border-l-[var(--sunset-orange)] bg-emerald-50/70"
-                      : "border-l-2 border-l-transparent transition hover:bg-zinc-50/80"
+                      : "border-l-2 border-l-transparent transition hover:bg-[var(--surface-inset)]"
                   }
                 >
                   <ActionLink
@@ -254,12 +254,12 @@ export default async function PersonalizedHelpPage({
                   >
                     <div
                       className={`pr-6 font-semibold leading-snug ${
-                        isSelected ? "text-emerald-800" : "text-slate-900"
+                        isSelected ? "text-emerald-800" : "text-[var(--ink)]"
                       }`}
                     >
                       {art.title}
                     </div>
-                    <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-zinc-500">
+                    <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-[var(--ink-muted)]">
                       <span>{art.section}</span>
                       {art.service && (
                         <StatusPill
@@ -301,10 +301,10 @@ export default async function PersonalizedHelpPage({
 
             <form
               action={submitHelpFeedbackAction}
-              className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200/80 pt-5 text-xs"
+              className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] pt-5 text-xs"
             >
               <input type="hidden" name="slug" value={activeArticle.slug} />
-              <span className="font-semibold text-slate-900">Was this guide helpful?</span>
+              <span className="font-semibold text-[var(--ink)]">Was this guide helpful?</span>
               <div className="flex flex-wrap items-center gap-2">
                 <input
                   name="comment"

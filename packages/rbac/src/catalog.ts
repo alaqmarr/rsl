@@ -465,6 +465,21 @@ export const WEB_ROUTE_ACCESS_RULES: Array<{
     anyOf: ["ads:view", "posts:view", "pixel:view"],
     label: "Ads & Social Posts",
   },
+  {
+    prefix: "/meta/facebook/pixel",
+    anyOf: ["pixel:view"],
+    label: "Meta Pixel & Conversions",
+  },
+  {
+    prefix: "/meta",
+    anyOf: ["ads:view", "posts:view", "pixel:view"],
+    label: "Meta Ads & Publishing",
+  },
+  {
+    prefix: "/google",
+    anyOf: ["ads:view", "posts:view", "pixel:view", "reviews:view"],
+    label: "Google Ads & Search Console",
+  },
   { prefix: "/reviews", anyOf: ["reviews:view"], label: "Google Reviews" },
   { prefix: "/settings", exact: true, anyOf: [], label: "Settings Index" },
   { prefix: "/settings/profile", anyOf: [], label: "My Profile" },

@@ -58,7 +58,7 @@ export function ClientConnectionsStatusTab({
   canTestIntegrations: boolean;
   snapshot: StaffClientIntegrationSnapshot;
 }) {
-  const returnTo = `/clients/${workspaceId}?tab=connections`;
+  const returnTo = `/clients/${workspaceId}/connections`;
   const healthyConns = snapshot.connections.filter((c) => c.status === "healthy").length;
 
   return (

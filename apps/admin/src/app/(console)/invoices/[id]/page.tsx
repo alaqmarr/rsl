@@ -60,7 +60,7 @@ export default async function AdminInvoiceDetailPage({
               </ActionLink>
               <span className="text-zinc-300">/</span>
               <ActionLink
-                href={`/clients/${invoice.workspaceId}?tab=finance`}
+                href={`/clients/${invoice.workspaceId}/finance`}
                 spinnerSize="xs"
                 className="font-semibold text-emerald-700 hover:underline"
               >

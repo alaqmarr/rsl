@@ -738,15 +738,21 @@ export function getWorkspacePartiesLedgerSummary(
       : null;
 
   // Self-heal: if vouchers exist for parties not yet materialized in `tally_parties`, reconcile once
-  const existingVouchers = db
-    .select()
-    .from(tenantDataSchema.tallyVouchers)
-    .all();
-  const existingPartiesCount = db
-    .select({ id: tenantDataSchema.tallyParties.id })
-    .from(tenantDataSchema.tallyParties)
-    .all().length;
-  if (existingVouchers.length > 0 && existingPartiesCount === 0) {
+  const hasAnyVoucher = Boolean(
+    db
+      .select({ id: tenantDataSchema.tallyVouchers.id })
+      .from(tenantDataSchema.tallyVouchers)
+      .limit(1)
+      .get()
+  );
+  const hasAnyParty = Boolean(
+    db
+      .select({ id: tenantDataSchema.tallyParties.id })
+      .from(tenantDataSchema.tallyParties)
+      .limit(1)
+      .get()
+  );
+  if (hasAnyVoucher && !hasAnyParty) {
     for (const c of companies) {
       reconcileCompanyBillSettlementsAndPartyBalances({
         db,
@@ -757,22 +763,26 @@ export function getWorkspacePartiesLedgerSummary(
     }
   }
 
-  const rawParties = db
-    .select()
-    .from(tenantDataSchema.tallyParties)
-    .orderBy(desc(tenantDataSchema.tallyParties.closingBalancePaise))
-    .all();
   const parties = activeCompanyFilter
-    ? rawParties.filter((p) => p.companyId === activeCompanyFilter)
-    : rawParties;
+    ? db
+        .select()
+        .from(tenantDataSchema.tallyParties)
+        .where(eq(tenantDataSchema.tallyParties.companyId, activeCompanyFilter))
+        .orderBy(desc(tenantDataSchema.tallyParties.closingBalancePaise))
+        .all()
+    : db
+        .select()
+        .from(tenantDataSchema.tallyParties)
+        .orderBy(desc(tenantDataSchema.tallyParties.closingBalancePaise))
+        .all();
 
-  const rawAllVouchers = db
-    .select()
-    .from(tenantDataSchema.tallyVouchers)
-    .all();
   const allVouchers = activeCompanyFilter
-    ? rawAllVouchers.filter((v) => v.companyId === activeCompanyFilter)
-    : rawAllVouchers;
+    ? db
+        .select()
+        .from(tenantDataSchema.tallyVouchers)
+        .where(eq(tenantDataSchema.tallyVouchers.companyId, activeCompanyFilter))
+        .all()
+    : db.select().from(tenantDataSchema.tallyVouchers).all();
 
   const bucketDefs: Array<{ key: AgeingBucketKey; label: string; min: number; max: number }> = [
     { key: "0_15", label: "0–15 Days", min: 0, max: 15 },

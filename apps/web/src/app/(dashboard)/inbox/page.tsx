@@ -95,6 +95,13 @@ export default async function CustomerInboxPage({
   const isOverdraftExhausted = walletBalancePaise <= MIN_WALLET_BALANCE_PAISE;
 
   const statusFilter = sp.status || "all";
+  const channelFilter =
+    sp.channel === "whatsapp" ||
+    sp.channel === "facebook" ||
+    sp.channel === "instagram" ||
+    sp.channel === "google_review"
+      ? sp.channel
+      : "all";
   const assignedFilter = sp.assigned === "mine" || sp.assigned === "unassigned" ? sp.assigned : "all";
   const resolvedAssignedUserId =
     assignedFilter === "mine"
@@ -103,29 +110,43 @@ export default async function CustomerInboxPage({
         ? "unassigned"
         : undefined;
   const searchQuery = sp.q?.trim() || "";
+  const inboxChannelLabel =
+    channelFilter === "whatsapp"
+      ? "WhatsApp Team Inbox"
+      : channelFilter === "facebook"
+        ? "Facebook Messenger Inbox"
+        : channelFilter === "instagram"
+          ? "Instagram DMs Inbox"
+          : "Customer Messages";
 
   const INBOX_PAGE_SIZE = 50;
   const totalThreadsCount = countConversationsWithContacts(
     session.workspace.id,
     statusFilter,
-    resolvedAssignedUserId
+    resolvedAssignedUserId,
+    channelFilter
   );
   const totalThreadPages = Math.max(1, Math.ceil(totalThreadsCount / INBOX_PAGE_SIZE));
   const rawInboxPage = Math.max(1, Number.parseInt(sp.page || "1", 10) || 1);
   const currentInboxPage = Math.min(rawInboxPage, totalThreadPages);
 
-  const contacts = listContacts(session.workspace.id, { limit: 150, offset: 0 });
-  const conversations = listConversationsWithContacts(
-    session.workspace.id,
-    statusFilter,
-    resolvedAssignedUserId,
-    { page: currentInboxPage, pageSize: INBOX_PAGE_SIZE }
-  );
-  const cannedReplies = listCannedReplies(session.workspace.id);
-  const workspaceLabels = listWorkspaceLabels(session.workspace.id);
-  const team = listWorkspaceTeam(session.workspace.id);
+  const [contacts, conversations, cannedReplies, workspaceLabels, team, ftsHits] =
+    await Promise.all([
+      Promise.resolve(listContacts(session.workspace.id, { limit: 150, offset: 0 })),
+      Promise.resolve(
+        listConversationsWithContacts(
+          session.workspace.id,
+          statusFilter,
+          resolvedAssignedUserId,
+          { page: currentInboxPage, pageSize: INBOX_PAGE_SIZE, channel: channelFilter }
+        )
+      ),
+      Promise.resolve(listCannedReplies(session.workspace.id)),
+      Promise.resolve(listWorkspaceLabels(session.workspace.id)),
+      Promise.resolve(listWorkspaceTeam(session.workspace.id)),
+      Promise.resolve(searchQuery ? searchInboxFts(session.workspace.id, searchQuery) : []),
+    ]);
   const memberNameById = new Map(team.members.map((m) => [m.userId, m.name]));
-  const ftsHits = searchQuery ? searchInboxFts(session.workspace.id, searchQuery) : [];
 
   const activeConvId = sp.conv || conversations[0]?.conversation.id || "";
   const activeThread = activeConvId
@@ -133,12 +154,40 @@ export default async function CustomerInboxPage({
     : null;
   const hasMobileThreadOpen = Boolean(sp.conv && activeThread);
 
+  const buildInboxHref = (overrides: {
+    status?: string;
+    assigned?: string;
+    channel?: string;
+    page?: number;
+    conv?: string;
+  }) => {
+    const params = new URLSearchParams();
+    const nextChannel = overrides.channel ?? channelFilter;
+    const nextStatus = overrides.status ?? statusFilter;
+    const nextAssigned = overrides.assigned ?? assignedFilter;
+    if (nextChannel !== "all") params.set("channel", nextChannel);
+    if (nextStatus !== "all") params.set("status", nextStatus);
+    if (nextAssigned !== "all") params.set("assigned", nextAssigned);
+    if (overrides.page && overrides.page > 1) params.set("page", String(overrides.page));
+    if (overrides.conv) params.set("conv", overrides.conv);
+    const qs = params.toString();
+    return qs ? `/inbox?${qs}` : "/inbox";
+  };
+
   return (
     <div className="w-full space-y-6">
       <PageHeader
-        eyebrow="Daily Operations"
-        title="Customer Messages"
-        subtitle="Reply to WhatsApp, Instagram, Facebook, and Google inquiries with automatic 24-hour reply window checks and private team notes."
+        eyebrow={
+          channelFilter === "whatsapp"
+            ? "Meta • WhatsApp Team Inbox"
+            : channelFilter === "facebook"
+              ? "Meta • Facebook Messenger"
+              : channelFilter === "instagram"
+                ? "Meta • Instagram Direct"
+                : "Shared Team Inbox"
+        }
+        title={inboxChannelLabel}
+        subtitle="Five team members work from one shared inbox to reply to WhatsApp, Instagram, and Facebook customer messages with 24-hour window checks."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {contacts.length > 0 && canExportContacts && (
@@ -146,7 +195,22 @@ export default async function CustomerInboxPage({
                 Export Contacts CSV ({contacts.length})
               </a>
             )}
+            <Link
+              href={
+                channelFilter === "facebook"
+                  ? "/connections/facebook"
+                  : channelFilter === "instagram"
+                    ? "/connections/instagram"
+                    : "/connections/whatsapp"
+              }
+              className="rsl-btn-secondary"
+            >
+              Channel Connection
+            </Link>
             <form method="get" action="/inbox" className="flex items-center gap-2">
+              {channelFilter !== "all" && (
+                <input type="hidden" name="channel" value={channelFilter} />
+              )}
               <input
                 name="q"
                 defaultValue={searchQuery}
@@ -161,6 +225,29 @@ export default async function CustomerInboxPage({
           </div>
         }
       />
+
+      <div className="rsl-tab-bar">
+        {(
+          [
+            { key: "whatsapp", label: "WhatsApp" },
+            { key: "facebook", label: "Facebook Messenger" },
+            { key: "instagram", label: "Instagram DMs" },
+            { key: "all", label: "All Channels" },
+          ] as const
+        ).map((tab) => {
+          const active = channelFilter === tab.key;
+          return (
+            <ActionLink
+              key={tab.key}
+              href={buildInboxHref({ channel: tab.key, page: 1 })}
+              spinnerSize="xs"
+              className={`rsl-tab-pill ${active ? "rsl-tab-pill-active" : ""}`}
+            >
+              {tab.label}
+            </ActionLink>
+          );
+        })}
+      </div>
 
       <FlashBanner notice={sp.notice} error={sp.error} />
 
@@ -182,7 +269,7 @@ export default async function CustomerInboxPage({
               : `${formatInr(walletAvailableSpendPaise, { showDecimals: true })} overdraft credit remaining down to -₹200.00 so customer template replies stay uninterrupted.`}
           </div>
           {canViewBilling && (
-            <Link href="/billing?tab=wallet" className="rsl-btn-secondary bg-white py-1 text-xs">
+            <Link href="/billing/wallet" className="rsl-btn-secondary bg-[var(--surface)] py-1 text-xs">
               Recharge Wallet
             </Link>
           )}
@@ -202,7 +289,7 @@ export default async function CustomerInboxPage({
           }
         >
           {ftsHits.length === 0 ? (
-            <p className="text-[13px] text-zinc-500">No matching message threads found.</p>
+            <p className="text-[13px] text-[var(--ink-muted)]">No matching message threads found.</p>
           ) : (
             <ul className="space-y-2 text-[13px]">
               {ftsHits.map((hit, idx) => (
@@ -212,7 +299,7 @@ export default async function CustomerInboxPage({
                     className="inline-flex items-center gap-1 font-semibold text-emerald-600 hover:underline"
                   >
                     Open Conversation
-                  </ActionLink>{" "} - <span className="text-zinc-600">{hit.snippet}</span>
+                  </ActionLink>{" "} - <span className="text-[var(--ink-secondary)]">{hit.snippet}</span>
                 </li>
               ))}
             </ul>
@@ -287,12 +374,12 @@ export default async function CustomerInboxPage({
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                  <label className="inline-flex items-center gap-2 text-[12.5px] text-zinc-600">
+                  <label className="inline-flex items-center gap-2 text-[12.5px] text-[var(--ink-secondary)]">
                     <input
                       type="checkbox"
                       name="recordWhatsAppConsent"
                       defaultChecked
-                      className="h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
+                      className="h-4 w-4 rounded border-[var(--border)] text-emerald-600 focus:ring-emerald-500"
                     />
                     <span>Customer agreed to receive WhatsApp updates</span>
                   </label>
@@ -308,7 +395,7 @@ export default async function CustomerInboxPage({
               subtitle="Log an incoming customer inquiry or start a new outbound thread"
             >
               {contacts.length === 0 ? (
-                <p className="text-[13px] leading-relaxed text-zinc-500">
+                <p className="text-[13px] leading-relaxed text-[var(--ink-muted)]">
                   Add your first customer contact on the left (or import a Contacts CSV below) to start
                   a conversation.
                 </p>
@@ -334,7 +421,7 @@ export default async function CustomerInboxPage({
                       <select
                         id="inbox-start-channel"
                         name="channel"
-                        defaultValue="whatsapp"
+                        defaultValue={channelFilter !== "all" ? channelFilter : "whatsapp"}
                         className="rsl-input"
                       >
                         <option value="whatsapp">WhatsApp</option>
@@ -413,12 +500,12 @@ export default async function CustomerInboxPage({
                   className="rsl-input font-mono text-xs"
                 />
               </div>
-              <label className="inline-flex items-center gap-2 pb-2 text-xs text-zinc-600">
+              <label className="inline-flex items-center gap-2 pb-2 text-xs text-[var(--ink-secondary)]">
                 <input
                   type="checkbox"
                   name="recordWhatsAppConsent"
                   defaultChecked
-                  className="h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
+                  className="h-4 w-4 rounded border-[var(--border)] text-emerald-600 focus:ring-emerald-500"
                 />
                 <span>Opted-in for WhatsApp</span>
               </label>
@@ -436,15 +523,15 @@ export default async function CustomerInboxPage({
         <SectionCard
           title={`Threads (${totalThreadsCount})`}
           action={
-            <div className="inline-flex rounded-lg border border-zinc-200 bg-white p-0.5 text-[11.5px]">
+            <div className="inline-flex rounded-lg border border-[var(--border)] bg-[var(--surface)] p-0.5 text-[11.5px]">
               {["all", "open", "resolved"].map((st) => (
                 <ActionLink
                   key={st}
-                  href={`/inbox?status=${st}&assigned=${assignedFilter}`}
+                  href={buildInboxHref({ status: st, page: 1 })}
                   className={`inline-flex items-center gap-1 rounded-md px-2 py-1 font-medium capitalize transition ${
                     statusFilter === st
                       ? "bg-slate-900 text-white"
-                      : "text-zinc-600 hover:bg-zinc-50 hover:text-slate-900"
+                      : "text-[var(--ink-secondary)] hover:bg-[var(--surface-inset)] hover:text-[var(--ink)]"
                   }`}
                 >
                   {st}
@@ -454,7 +541,7 @@ export default async function CustomerInboxPage({
           }
           noPadding
         >
-          <div className="flex flex-wrap items-center gap-1 border-b border-zinc-100 bg-zinc-50/70 px-4 py-2 text-[11px]">
+          <div className="flex flex-wrap items-center gap-1 border-b border-zinc-100 bg-[var(--surface-inset)] px-4 py-2 text-[11px]">
             {(
               [
                 { key: "all", label: "All Staff" },
@@ -464,12 +551,12 @@ export default async function CustomerInboxPage({
             ).map((f) => (
               <ActionLink
                 key={f.key}
-                href={`/inbox?status=${statusFilter}&assigned=${f.key}`}
+                href={buildInboxHref({ assigned: f.key, page: 1 })}
                 spinnerSize="xs"
                 className={`rounded-md px-2 py-0.5 font-semibold transition ${
                   assignedFilter === f.key
                     ? "bg-emerald-600 text-white"
-                    : "text-zinc-600 hover:bg-white hover:text-slate-900"
+                    : "text-[var(--ink-secondary)] hover:bg-[var(--surface)] hover:text-[var(--ink)]"
                 }`}
               >
                 {f.label}
@@ -477,9 +564,9 @@ export default async function CustomerInboxPage({
             ))}
           </div>
           {conversations.length === 0 ? (
-            <div className="p-5 text-[13px] text-zinc-500">No threads in this view yet.</div>
+            <div className="p-5 text-[13px] text-[var(--ink-muted)]">No threads in this view yet.</div>
           ) : (
-            <ul className="max-h-72 divide-y divide-zinc-100 overflow-y-auto text-[13px] lg:max-h-[34rem]">
+            <ul className="max-h-72 divide-y divide-[var(--border-subtle)] overflow-y-auto text-[13px] lg:max-h-[34rem]">
               {conversations.map(({ conversation, contact }) => {
                 const isSelected = conversation.id === activeConvId;
                 const assigneeName = conversation.assignedUserId
@@ -489,17 +576,17 @@ export default async function CustomerInboxPage({
                   <li
                     key={conversation.id}
                     className={
-                      isSelected ? "bg-emerald-50/65" : "transition hover:bg-zinc-50/80"
+                      isSelected ? "bg-emerald-50/65" : "transition hover:bg-[var(--surface-inset)]"
                     }
                   >
                     <ActionLink
-                      href={`/inbox?status=${statusFilter}&assigned=${assignedFilter}&page=${currentInboxPage}&conv=${encodeURIComponent(conversation.id)}`}
+                      href={buildInboxHref({ page: currentInboxPage, conv: conversation.id })}
                       variant="card"
                       className="flex items-center justify-between gap-2 px-5 py-3.5"
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="truncate font-semibold text-slate-900">
+                          <span className="truncate font-semibold text-[var(--ink)]">
                             {contact.name}
                           </span>
                           <StatusPill
@@ -508,7 +595,7 @@ export default async function CustomerInboxPage({
                             showDot={false}
                           />
                         </div>
-                        <p className="mt-1 truncate text-xs text-zinc-500">
+                        <p className="mt-1 truncate text-xs text-[var(--ink-muted)]">
                           {conversation.lastMessagePreview || "Open thread"}
                         </p>
                         {assigneeName && (
@@ -524,14 +611,14 @@ export default async function CustomerInboxPage({
             </ul>
           )}
           {totalThreadPages > 1 && (
-            <div className="flex items-center justify-between border-t border-zinc-100 bg-zinc-50/70 px-4 py-2 text-xs text-zinc-600">
+            <div className="flex items-center justify-between border-t border-zinc-100 bg-[var(--surface-inset)] px-4 py-2 text-xs text-[var(--ink-secondary)]">
               <span className="tabular-nums">
                 Page {currentInboxPage} / {totalThreadPages}
               </span>
               <div className="flex items-center gap-1.5">
                 {currentInboxPage > 1 && (
                   <ActionLink
-                    href={`/inbox?status=${statusFilter}&assigned=${assignedFilter}&page=${currentInboxPage - 1}`}
+                    href={buildInboxHref({ page: currentInboxPage - 1 })}
                     spinnerSize="xs"
                     className="rsl-btn-secondary px-2.5 py-0.5 text-xs"
                   >
@@ -557,7 +644,7 @@ export default async function CustomerInboxPage({
           {hasMobileThreadOpen && (
             <ActionLink
               href={`/inbox?status=${statusFilter}&assigned=${assignedFilter}`}
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-900 shadow-2xs lg:hidden"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2 text-xs font-semibold text-[var(--ink)] shadow-2xs lg:hidden"
             >
               ← All Threads ({conversations.length})
             </ActionLink>
@@ -609,7 +696,7 @@ export default async function CustomerInboxPage({
             />
           ) : (
             <div className="space-y-4">
-              <div className="max-h-96 space-y-3 overflow-y-auto rounded-xl border border-zinc-200/85 bg-zinc-50/75 p-4">
+              <div className="max-h-96 space-y-3 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface-inset)] p-4">
                 {activeThread.messages.map((m) => (
                   <div
                     key={m.id}
@@ -622,7 +709,7 @@ export default async function CustomerInboxPage({
                     <p className="leading-relaxed">{m.body}</p>
                     <div
                       className={`mt-1 text-[11px] ${
-                        m.direction === "outbound" ? "rsl-chat-outbound-meta" : "text-zinc-500"
+                        m.direction === "outbound" ? "rsl-chat-outbound-meta" : "text-[var(--ink-muted)]"
                       }`}
                     >
                       {m.senderType} • {m.deliveryStatus}
@@ -639,7 +726,7 @@ export default async function CustomerInboxPage({
                   cannedReplies={cannedReplies}
                 />
               ) : (
-                <div className="rounded-xl border border-zinc-200/85 bg-zinc-50/75 px-4 py-3 text-xs text-zinc-600">
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-inset)] px-4 py-3 text-xs text-[var(--ink-secondary)]">
                   Read-only role - your current role can inspect customer message threads, while Support Executives, Managers, Admins, and Owners can send replies.
                 </div>
               )}
@@ -652,17 +739,17 @@ export default async function CustomerInboxPage({
         <SectionCard title="Customer, Notes & Quick Replies" subtitle="Visible only to your staff">
           <div className="space-y-4 text-[13px]">
             {!activeThread ? (
-              <p className="text-[13px] text-zinc-500">
+              <p className="text-[13px] text-[var(--ink-muted)]">
                 Select a thread to view customer details and private team notes.
               </p>
             ) : (
               <>
-                <div className="space-y-1 rounded-xl border border-zinc-200/85 bg-zinc-50/75 p-3.5">
-                  <div className="font-semibold text-slate-900">{activeThread.contact?.name}</div>
-                  <div className="font-mono text-xs text-zinc-600">
+                <div className="space-y-1 rounded-xl border border-[var(--border)] bg-[var(--surface-inset)] p-3.5">
+                  <div className="font-semibold text-[var(--ink)]">{activeThread.contact?.name}</div>
+                  <div className="font-mono text-xs text-[var(--ink-secondary)]">
                     Phone: {activeThread.contact?.phoneE164 || "-"}
                   </div>
-                  <div className="text-xs text-zinc-600">
+                  <div className="text-xs text-[var(--ink-secondary)]">
                     Email: {activeThread.contact?.email || "-"}
                   </div>
                 </div>
@@ -671,10 +758,10 @@ export default async function CustomerInboxPage({
                 {canAssign ? (
                   <form
                     action={assignConversationAction}
-                    className="space-y-2 rounded-xl border border-zinc-200/85 bg-white p-3"
+                    className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3"
                   >
                     <input type="hidden" name="conversationId" value={activeThread.conversation.id} />
-                    <label htmlFor="inbox-assigned-user" className="text-xs font-semibold text-slate-900">
+                    <label htmlFor="inbox-assigned-user" className="text-xs font-semibold text-[var(--ink)]">
                       Assigned Team Member
                     </label>
                     <div className="flex items-center gap-2">
@@ -701,9 +788,9 @@ export default async function CustomerInboxPage({
                     </div>
                   </form>
                 ) : (
-                  <div className="flex items-center justify-between rounded-xl border border-zinc-200/85 bg-white p-3 text-xs">
-                    <span className="font-semibold text-slate-900">Assigned Team Member</span>
-                    <span className="font-medium text-zinc-600">
+                  <div className="flex items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs">
+                    <span className="font-semibold text-[var(--ink)]">Assigned Team Member</span>
+                    <span className="font-medium text-[var(--ink-secondary)]">
                       {activeThread.conversation.assignedUserId
                         ? memberNameById.get(activeThread.conversation.assignedUserId) ?? "Assigned"
                         : "Unassigned"}
@@ -712,8 +799,8 @@ export default async function CustomerInboxPage({
                 )}
 
                 {/* Conversation Labels */}
-                <div className="space-y-2 rounded-xl border border-zinc-200/85 bg-white p-3">
-                  <div className="text-xs font-semibold text-slate-900">
+                <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
+                  <div className="text-xs font-semibold text-[var(--ink)]">
                     Labels ({activeThread.labels.length})
                   </div>
                   {activeThread.labels.length > 0 && (
@@ -777,7 +864,7 @@ export default async function CustomerInboxPage({
                 </div>
 
                 <div className="space-y-2">
-                  <div className="text-xs font-semibold text-slate-900">
+                  <div className="text-xs font-semibold text-[var(--ink)]">
                     Internal Team Notes ({activeThread.notes.length})
                   </div>
                   {activeThread.notes.map((n) => (
@@ -785,7 +872,7 @@ export default async function CustomerInboxPage({
                       key={n.id}
                       className="rounded-xl border border-amber-200/90 bg-amber-50/75 p-3 text-[13px]"
                     >
-                      <p className="text-slate-900">{n.body}</p>
+                      <p className="text-[var(--ink)]">{n.body}</p>
                       <div className="mt-1 text-[11px] font-medium text-amber-800">
                         By {n.authorName}
                       </div>
@@ -815,8 +902,8 @@ export default async function CustomerInboxPage({
               </>
             )}
 
-            <div className="space-y-2.5 border-t border-zinc-200/80 pt-4">
-              <div className="text-xs font-semibold text-slate-900">
+            <div className="space-y-2.5 border-t border-[var(--border)] pt-4">
+              <div className="text-xs font-semibold text-[var(--ink)]">
                 Saved Quick Replies ({cannedReplies.length})
               </div>
               {cannedReplies.length > 0 && (
@@ -824,14 +911,14 @@ export default async function CustomerInboxPage({
                   {cannedReplies.map((cr) => (
                     <li
                       key={cr.id}
-                      className="flex items-start justify-between gap-2 rounded-lg border border-zinc-200/80 bg-zinc-50/70 p-2.5"
+                      className="flex items-start justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-inset)] p-2.5"
                     >
                       <div className="min-w-0">
-                        <div className="font-semibold text-slate-900">
+                        <div className="font-semibold text-[var(--ink)]">
                           <span className="font-mono text-emerald-700">/{cr.shortcut}</span> -{" "}
                           {cr.title}
                         </div>
-                        <p className="mt-0.5 line-clamp-2 text-[11.5px] text-zinc-600">{cr.body}</p>
+                        <p className="mt-0.5 line-clamp-2 text-[11.5px] text-[var(--ink-secondary)]">{cr.body}</p>
                       </div>
                       {canReply && (
                         <form action={deleteCannedReplyAction} className="shrink-0">

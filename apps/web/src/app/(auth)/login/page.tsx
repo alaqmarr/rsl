@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { CheckCircle2 } from "lucide-react";
 import { confirmEmailVerificationCode } from "@rsl/notifications";
 import { getPlatformCloudflareTurnstileConfig } from "@rsl/tenancy";
-import { BrandLogo, ThemeToggleButton } from "@rsl/ui";
+import { BrandLogo } from "@rsl/ui";
 import { WebLoginForm } from "@/components/auth-forms";
 import { FlashBanner } from "@/components/flash-banner";
 import { ActionLink } from "@/components/ios-feedback";
@@ -94,7 +94,6 @@ export default async function LoginPage({
             <Link href="/" className="text-xs font-semibold text-emerald-800 hover:underline">
               ← Product Overview
             </Link>
-            <ThemeToggleButton compact />
           </div>
         </div>
 

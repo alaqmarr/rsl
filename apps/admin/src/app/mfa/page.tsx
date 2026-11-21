@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
-import { BrandLogo, ThemeToggleButton } from "@rsl/ui";
+import { BrandLogo } from "@rsl/ui";
 import {
   AdminMfaChallengeForm,
   AdminStepUpForm,
@@ -37,7 +37,6 @@ export default async function AdminMfaPage({
                 <ShieldCheck className="h-3.5 w-3.5 text-indigo-700" />
                 <span>{pending.mfaEnrolled ? "TOTP Enrolled" : "MFA Enrollment"}</span>
               </span>
-              <ThemeToggleButton compact />
             </div>
           </div>
 

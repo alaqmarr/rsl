@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq, inArray, lt } from "drizzle-orm";
 import { z } from "zod";
 import { newEntityId, RslError } from "@rsl/core";
 import { controlSchema, tenantDataSchema } from "@rsl/database";
@@ -581,30 +581,37 @@ export function runWorkspaceDataRetentionSweep(
   let purgedVouchersCount = 0;
   let purgedPdfsCount = 0;
 
-  for (const v of expiredVouchers) {
-    const pdfDel = db
-      .delete(tenantDataSchema.tallyVoucherPdfs)
-      .where(eq(tenantDataSchema.tallyVoucherPdfs.voucherId, v.id))
-      .run();
-    purgedPdfsCount += pdfDel.changes;
+  if (expiredVouchers.length > 0) {
+    const batchTx = db.$client.transaction(() => {
+      const CHUNK = 400;
+      for (let i = 0; i < expiredVouchers.length; i += CHUNK) {
+        const ids = expiredVouchers.slice(i, i + CHUNK).map((v) => v.id);
+        const pdfDel = db
+          .delete(tenantDataSchema.tallyVoucherPdfs)
+          .where(inArray(tenantDataSchema.tallyVoucherPdfs.voucherId, ids))
+          .run();
+        purgedPdfsCount += pdfDel.changes;
 
-    db.delete(tenantDataSchema.tallyVoucherItems)
-      .where(eq(tenantDataSchema.tallyVoucherItems.voucherId, v.id))
-      .run();
+        db.delete(tenantDataSchema.tallyVoucherItems)
+          .where(inArray(tenantDataSchema.tallyVoucherItems.voucherId, ids))
+          .run();
 
-    db.delete(tenantDataSchema.tallyBillSettlements)
-      .where(eq(tenantDataSchema.tallyBillSettlements.billVoucherId, v.id))
-      .run();
+        db.delete(tenantDataSchema.tallyBillSettlements)
+          .where(inArray(tenantDataSchema.tallyBillSettlements.billVoucherId, ids))
+          .run();
 
-    db.delete(tenantDataSchema.tallyBillSettlements)
-      .where(eq(tenantDataSchema.tallyBillSettlements.settlementVoucherId, v.id))
-      .run();
+        db.delete(tenantDataSchema.tallyBillSettlements)
+          .where(inArray(tenantDataSchema.tallyBillSettlements.settlementVoucherId, ids))
+          .run();
 
-    const vDel = db
-      .delete(tenantDataSchema.tallyVouchers)
-      .where(eq(tenantDataSchema.tallyVouchers.id, v.id))
-      .run();
-    purgedVouchersCount += vDel.changes;
+        const vDel = db
+          .delete(tenantDataSchema.tallyVouchers)
+          .where(inArray(tenantDataSchema.tallyVouchers.id, ids))
+          .run();
+        purgedVouchersCount += vDel.changes;
+      }
+    });
+    batchTx.immediate();
   }
 
   // Also purge any orphan staged PDFs older than cutoff

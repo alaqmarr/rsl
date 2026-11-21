@@ -524,10 +524,10 @@ export function MetricCard({
         <div className="mt-2.5 flex items-baseline justify-between gap-2">
           <div
             title={value}
-            className={`rsl-display-metric min-w-0 font-semibold tracking-[-0.03em] text-[var(--ink)] tabular-nums ${
+            className={`rsl-display-metric min-w-0 font-normal tracking-[0.06em] text-[var(--ink)] ${
               isLongText
-                ? "truncate text-[17px] leading-snug sm:text-[18px]"
-                : "text-[23px] leading-none xl:text-[26px]"
+                ? "truncate text-[20px] leading-snug sm:text-[22px]"
+                : "text-[27px] leading-none xl:text-[31px]"
             }`}
           >
             {value}
@@ -955,7 +955,7 @@ export function StarBreakdownCard({
   return (
     <div className="grid grid-cols-1 gap-5 sm:grid-cols-[148px_1fr] sm:items-center">
       <div className="rounded-2xl border border-zinc-200/80 bg-zinc-50/70 p-4 text-center">
-        <div className="rsl-display-metric text-3xl font-semibold text-slate-900">
+        <div className="rsl-display-metric text-4xl font-normal tracking-[0.06em] text-slate-900">
           {totalReviews > 0 ? averageRating.toFixed(1) : "0.0"}
         </div>
         <div className="mt-1 flex items-center justify-center gap-0.5 text-sm leading-none">

@@ -76,7 +76,7 @@ export function ClientProfileSslTeamTab({
   sslCerts: ClientSslCertInfo[];
   teamMembers: ClientTeamMemberInfo[];
 }) {
-  const returnToProfile = `/clients/${workspace.id}?tab=profile`;
+  const returnToProfile = `/clients/${workspace.id}/profile`;
   const manualEnabled = Boolean(workspace.allowManualCredentials);
 
   return (

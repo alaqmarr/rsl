@@ -5,6 +5,14 @@ import { Languages, ShieldAlert, Sparkles } from "lucide-react";
 import { IosSpinner, sileo } from "@rsl/ui";
 import { TALLY_TEMPLATE_VARIABLE_FIELDS } from "@rsl/whatsapp/client-constants";
 import { SubmitButton } from "@/components/ios-feedback";
+
+function formatInrPaiseClient(paise: number): string {
+  const neg = paise < 0 ? "-" : "";
+  return `${neg}₹${(Math.abs(paise) / 100).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
 import {
   lintWhatsAppTemplateJsonAction,
   translateWhatsAppTemplateJsonAction,
@@ -13,9 +21,11 @@ import {
 export function WhatsAppTemplateBuilder({
   action,
   wabaConnected,
+  rates = { utilityPaise: 85, marketingPaise: 95, authenticationPaise: 85 },
 }: {
   action: (formData: FormData) => void;
   wabaConnected: boolean;
+  rates?: { utilityPaise: number; marketingPaise: number; authenticationPaise: number };
 }) {
   const [name, setName] = useState("tally_sales_invoice");
   const [category, setCategory] = useState<"utility" | "marketing" | "authentication">("utility");
@@ -169,9 +179,15 @@ export function WhatsAppTemplateBuilder({
               onChange={(e) => setCategory(e.target.value as typeof category)}
               className="rsl-input min-h-10"
             >
-              <option value="utility">Billing / Order Update (₹0.85)</option>
-              <option value="marketing">Promotional / Offer (₹0.95)</option>
-              <option value="authentication">One-Time Passcode (OTP)</option>
+              <option value="utility">
+                Billing / Order Update ({formatInrPaiseClient(rates.utilityPaise)})
+              </option>
+              <option value="marketing">
+                Promotional / Offer ({formatInrPaiseClient(rates.marketingPaise)})
+              </option>
+              <option value="authentication">
+                One-Time Passcode ({formatInrPaiseClient(rates.authenticationPaise)})
+              </option>
             </select>
           </div>
           <div>

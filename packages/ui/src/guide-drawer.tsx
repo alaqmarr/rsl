@@ -9,8 +9,6 @@ import {
   Copy,
   ExternalLink,
   HelpCircle,
-  Moon,
-  Sun,
   X,
 } from "lucide-react";
 import { CopyCodeBlock, useDialogFocusTrap } from "./interactive";
@@ -504,96 +502,29 @@ export function openGuideDrawerById(drawerId: string, tabId?: string): void {
   );
 }
 
-function applyDomTheme(next: "light" | "dark"): void {
+function applyLightDomTheme(): void {
   if (typeof document === "undefined") return;
-  document.documentElement.dataset.theme = next;
-  document.documentElement.classList.toggle("dark", next === "dark");
+  document.documentElement.dataset.theme = "light";
+  document.documentElement.classList.remove("dark");
 }
 
-function persistThemePreference(next: "light" | "dark"): void {
-  if (typeof document === "undefined") return;
-  applyDomTheme(next);
-  document.cookie = `rsl_theme=${next}; Path=/; Max-Age=31536000; SameSite=Lax`;
-  try {
-    window.localStorage.setItem("rsl_theme", next);
-  } catch {
-    // Ignore private browsing storage blocks
-  }
-  window.dispatchEvent(new CustomEvent("rsl-theme-change", { detail: next }));
-}
-
-export function ThemeToggleButton({
-  compact = false,
-  showLabel = false,
-  className = "",
-}: {
+/**
+ * Light-mode only build: enforces `data-theme="light"` and renders no toggle button.
+ */
+export function ThemeToggleButton(_props: {
   compact?: boolean;
   showLabel?: boolean;
   className?: string;
 }) {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-
   useEffect(() => {
-    const syncFromEnv = () => {
-      try {
-        const attr = document.documentElement.dataset.theme;
-        const stored = window.localStorage.getItem("rsl_theme");
-        if (stored === "dark" || stored === "light") {
-          applyDomTheme(stored);
-          document.cookie = `rsl_theme=${stored}; Path=/; Max-Age=31536000; SameSite=Lax`;
-          setTheme(stored);
-          return;
-        }
-        if (attr === "dark" || attr === "light") {
-          applyDomTheme(attr);
-          setTheme(attr);
-          return;
-        }
-        const prefersDark = Boolean(
-          window.matchMedia?.("(prefers-color-scheme: dark)").matches
-        );
-        const resolved: "light" | "dark" = prefersDark ? "dark" : "light";
-        applyDomTheme(resolved);
-        setTheme(resolved);
-      } catch {
-        // Ignore storage restrictions
-      }
-    };
-
-    syncFromEnv();
-
-    const onThemeEvent = (event: Event) => {
-      const next = (event as CustomEvent<"light" | "dark">).detail;
-      if (next === "dark" || next === "light") {
-        applyDomTheme(next);
-        setTheme(next);
-      }
-    };
-    window.addEventListener("rsl-theme-change", onThemeEvent);
-    return () => window.removeEventListener("rsl-theme-change", onThemeEvent);
+    applyLightDomTheme();
+    try {
+      document.cookie = "rsl_theme=light; Path=/; Max-Age=31536000; SameSite=Lax";
+      window.localStorage.setItem("rsl_theme", "light");
+    } catch {
+      // Ignore private browsing storage blocks
+    }
   }, []);
 
-  const toggle = () => {
-    const next: "light" | "dark" = theme === "dark" ? "light" : "dark";
-    setTheme(next);
-    persistThemePreference(next);
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={toggle}
-      title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
-      aria-label={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
-      aria-pressed={theme === "dark"}
-      className={`rsl-btn-secondary !min-h-8 !px-2.5 !py-1 text-xs ${className}`}
-    >
-      {theme === "dark" ? (
-        <Sun className="h-3.5 w-3.5 text-[var(--sunset-orange)]" />
-      ) : (
-        <Moon className="h-3.5 w-3.5 text-[var(--ink-strong)]" />
-      )}
-      {showLabel && !compact && <span>{theme === "dark" ? "Light" : "Dark"}</span>}
-    </button>
-  );
+  return null;
 }

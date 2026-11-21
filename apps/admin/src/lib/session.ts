@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { ADMIN_SESSION_COOKIE, resolveStaffSessionFromToken } from "@rsl/auth";
@@ -31,19 +32,19 @@ async function resolveSharedCookieDomain(): Promise<string | undefined> {
   return undefined;
 }
 
-export async function getOptionalStaffSession() {
+export const getOptionalStaffSession = cache(async () => {
   const jar = await cookies();
   const raw = jar.get(ADMIN_SESSION_COOKIE)?.value;
   return resolveStaffSessionFromToken(raw);
-}
+});
 
-export async function getPendingMfaStaffSession() {
+export const getPendingMfaStaffSession = cache(async () => {
   const jar = await cookies();
   const raw = jar.get(ADMIN_SESSION_COOKIE)?.value;
   return resolveStaffSessionFromToken(raw, { allowPendingMfa: true });
-}
+});
 
-export async function requireStaffSession() {
+export const requireStaffSession = cache(async () => {
   if (await isSetupSubdomainHost()) {
     redirect("/setup");
   }
@@ -57,7 +58,7 @@ export async function requireStaffSession() {
     redirect("/mfa");
   }
   redirect("/login");
-}
+});
 
 export async function setStaffCookie(rawToken: string) {
   const jar = await cookies();

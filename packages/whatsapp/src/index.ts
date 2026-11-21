@@ -6,6 +6,7 @@ import {
   consumeUsage,
   getWalletAvailableSpendPaise,
   getWalletBalancePaise,
+  resolveWhatsAppTemplateUnitCostPaise,
   WALLET_OVERDRAFT_LIMIT_PAISE,
 } from "@rsl/billing";
 import { decryptEnvelope, fetchWithRetry, formatInr, newEntityId, newId, RslError } from "@rsl/core";
@@ -1176,7 +1177,11 @@ export async function executeWhatsAppTemplateSend(params: {
   const rendered = renderWhatsAppTemplate(parsedTemplate, effectiveVariables);
 
   // 3. Verify wallet balance including ₹200 overdraft allowance (-₹200.00 minimum) BEFORE reserving SendGuard
-  const unitCostPaise = parsedTemplate.category === "marketing" ? 95 : 85;
+  const unitCostPaise = resolveWhatsAppTemplateUnitCostPaise(
+    params.workspaceId,
+    parsedTemplate.category,
+    params.serviceKey
+  );
   const currentBal = getWalletBalancePaise(params.workspaceId);
   if (!canDebitWalletUsage(currentBal, unitCostPaise)) {
     return {
@@ -1707,7 +1712,9 @@ export async function executeWhatsAppBroadcastChunkJob(envelope: JobEnvelope): P
     .get();
   if (!bcast || bcast.status === "paused" || bcast.status === "completed") return;
 
-  const unitCostPaise = payload.unitCostPaise ?? 85;
+  const unitCostPaise =
+    payload.unitCostPaise ??
+    resolveWhatsAppTemplateUnitCostPaise(envelope.tenantId, "marketing", "whatsapp.broadcast");
   let chunkSent = 0;
   let chunkImmediateDelivered = 0;
   let chunkFailed = 0;
@@ -1882,7 +1889,11 @@ export const launchWhatsAppBroadcast = defineAction({
       );
     }
 
-    const unitCostPaise = template.category === "marketing" ? 95 : 85;
+    const unitCostPaise = resolveWhatsAppTemplateUnitCostPaise(
+      ctx.workspaceId,
+      template.category,
+      "whatsapp.broadcast"
+    );
     const totalCostPaise = eligibleRecipients.length * unitCostPaise;
 
     const currentBalance = getWalletBalancePaise(ctx.workspaceId);

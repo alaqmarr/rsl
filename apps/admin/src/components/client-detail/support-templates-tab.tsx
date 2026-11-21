@@ -19,7 +19,7 @@ export function ClientSupportTemplatesTab({
   canManageTemplates: boolean;
   canSendEmail: boolean;
 }) {
-  const returnToSupport = `/clients/${workspaceId}?tab=support`;
+  const returnToSupport = `/clients/${workspaceId}/support`;
 
   return (
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">

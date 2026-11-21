@@ -21,6 +21,7 @@ import { CloudflareOneClickConnectCard } from "@/components/cloudflare-one-click
 import { ConnectionsHub } from "@/components/connections-hub";
 import { FlashBanner } from "@/components/flash-banner";
 import { SettingsNav } from "@/components/settings-nav";
+import { INDIVIDUAL_CONNECTION_ROUTES } from "@/lib/connection-channels";
 import { requireWebSession } from "@/lib/session";
 
 const VALID_CHANNEL_KINDS = new Set<ConnectionChannelKind>([
@@ -122,7 +123,30 @@ export default async function ConnectedAccountsPage({
 
       <FlashBanner notice={sp.notice} error={sp.error} />
 
-      <CloudflareOneClickConnectCard initialStatus={cloudflareStatus} canManage={canManage} />
+      <div className="rsl-frost-card rounded-2xl p-4">
+        <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+          <div className="text-xs font-bold tracking-wider text-[var(--ink-muted)] uppercase">
+            Individual Service Connection Pages
+          </div>
+          <span className="text-[11px] text-[var(--ink-muted)]">
+            Open any dedicated page for isolated setup &amp; status
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {INDIVIDUAL_CONNECTION_ROUTES.map((route) => (
+            <Link
+              key={route.slug}
+              href={`/connections/${route.slug}`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--ink-secondary)] transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
+            >
+              <span className="font-mono text-[10px] font-bold text-[var(--ink-muted)] uppercase">
+                {route.familyLabel === "Systems & Storage" ? "SYS" : route.familyLabel}
+              </span>
+              <span>{route.title}</span>
+            </Link>
+          ))}
+        </div>
+      </div>
 
       <ConnectionsHub
         initialKind={initialKind}
@@ -163,6 +187,12 @@ export default async function ConnectedAccountsPage({
               .join(", ") || undefined,
           gstin: wsDetails?.gstin || undefined,
         }}
+      />
+
+      <CloudflareOneClickConnectCard
+        initialStatus={cloudflareStatus}
+        canManage={canManage}
+        compact
       />
     </div>
   );

@@ -59,7 +59,7 @@ export default async function DetailedAnalyticsPage({
         subtitle="Cashflow collections, team reply speed, customer conversion funnel, and return per ₹1 spent - computed live from your business records."
         actions={
           <div className="flex flex-wrap items-center gap-2.5">
-            <div className="inline-flex flex-wrap rounded-xl border border-zinc-200/90 bg-white p-1 shadow-2xs">
+            <div className="inline-flex flex-wrap rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 shadow-2xs">
               {RANGES.map((r) => (
                 <ActionLink
                   key={r.key}
@@ -67,7 +67,7 @@ export default async function DetailedAnalyticsPage({
                   className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
                     range === r.key
                       ? "bg-slate-900 text-white shadow-2xs"
-                      : "text-zinc-600 hover:bg-zinc-50 hover:text-slate-900"
+                      : "text-[var(--ink-secondary)] hover:bg-[var(--surface-inset)] hover:text-[var(--ink)]"
                   }`}
                 >
                   <span>{r.label}</span>
@@ -125,14 +125,14 @@ export default async function DetailedAnalyticsPage({
       {/* Operational Health Row (Collapsible Progressive Disclosure) */}
       <details
         open={range === "7d"}
-        className="group rounded-2xl border border-zinc-200/90 bg-white shadow-2xs"
+        className="group rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xs"
       >
         <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 px-5 py-3.5 select-none">
           <div className="flex flex-wrap items-center gap-2.5 text-xs">
-            <span className="font-bold text-slate-900">
+            <span className="font-bold text-[var(--ink)]">
               Operational &amp; Wallet Runway Metrics
             </span>
-            <span className="text-zinc-500">
+            <span className="text-[var(--ink-muted)]">
               Reply Rate <strong>{report.kpis.replyRatePct}%</strong> • Avg Reply{" "}
               <strong>{report.kpis.avgReplyMinutes}m</strong> • Reach{" "}
               <strong>{report.kpis.contactsTotalCount.toLocaleString("en-IN")}</strong>
@@ -141,7 +141,7 @@ export default async function DetailedAnalyticsPage({
           <span className="text-xs font-semibold text-emerald-700 group-open:hidden">
             Expand Operational KPIs
           </span>
-          <span className="hidden text-xs font-semibold text-zinc-500 group-open:inline">
+          <span className="hidden text-xs font-semibold text-[var(--ink-muted)] group-open:inline">
             Hide Operational KPIs
           </span>
         </summary>
@@ -251,7 +251,7 @@ export default async function DetailedAnalyticsPage({
       >
         <div className="overflow-x-auto">
           <table className="w-full text-left text-[13px]">
-            <thead className="border-b border-zinc-200/80 bg-zinc-50/75 text-[11px] tracking-wider text-zinc-500 uppercase">
+            <thead className="border-b border-[var(--border)] bg-[var(--surface-inset)] text-[11px] tracking-wider text-[var(--ink-muted)] uppercase">
               <tr>
                 <th className="px-5 py-3 font-semibold sm:px-6">Channel</th>
                 <th className="px-4 py-3 font-semibold">Activity</th>
@@ -261,27 +261,27 @@ export default async function DetailedAnalyticsPage({
                 <th className="px-5 py-3 font-semibold sm:px-6">Current Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-100">
+            <tbody className="divide-y divide-[var(--border-subtle)]">
               {report.channelBreakdown.map((row) => (
                 <tr key={row.channel}>
-                  <td className="px-5 py-3.5 font-semibold text-slate-900 sm:px-6">{row.channel}</td>
-                  <td className="px-4 py-3.5 text-zinc-600 tabular-nums">{row.activityLabel}</td>
-                  <td className="px-4 py-3.5 text-slate-800 tabular-nums">
+                  <td className="px-5 py-3.5 font-semibold text-[var(--ink)] sm:px-6">{row.channel}</td>
+                  <td className="px-4 py-3.5 text-[var(--ink-secondary)] tabular-nums">{row.activityLabel}</td>
+                  <td className="px-4 py-3.5 text-[var(--ink)] tabular-nums">
                     {formatInr(row.spendPaise, {
                       showDecimals: row.spendPaise > 0 && row.spendPaise < 10000,
                     })}
                   </td>
-                  <td className="px-4 py-3.5 font-semibold text-slate-900 tabular-nums">
+                  <td className="px-4 py-3.5 font-semibold text-[var(--ink)] tabular-nums">
                     {formatInr(row.valuePaise)}
                   </td>
                   <td className="px-4 py-3.5 tabular-nums">
                     {row.returnRatio !== null ? (
                       <StatusPill label={`₹${row.returnRatio.toFixed(2)} / ₹1`} tone="emerald" />
                     ) : (
-                      <span className="text-zinc-400">-</span>
+                      <span className="text-[var(--ink-muted)]">-</span>
                     )}
                   </td>
-                  <td className="px-5 py-3.5 text-zinc-600 sm:px-6">{row.statusNote}</td>
+                  <td className="px-5 py-3.5 text-[var(--ink-secondary)] sm:px-6">{row.statusNote}</td>
                 </tr>
               ))}
             </tbody>
@@ -324,23 +324,23 @@ export default async function DetailedAnalyticsPage({
           subtitle="Delivery and sync success across connected channels"
         >
           {report.providerHealth.length === 0 ? (
-            <p className="text-[13px] leading-relaxed text-zinc-500">
+            <p className="text-[13px] leading-relaxed text-[var(--ink-muted)]">
               No external channel sync calls recorded in this date window yet.
             </p>
           ) : (
-            <div className="divide-y divide-zinc-100 text-[13px]">
+            <div className="divide-y divide-[var(--border-subtle)] text-[13px]">
               {report.providerHealth.map((p) => (
                 <div key={p.provider} className="flex items-center justify-between py-2.5">
                   <div>
-                    <div className="font-semibold text-slate-900 uppercase">{p.provider}</div>
-                    <div className="text-xs text-zinc-500 tabular-nums">{p.totalCalls} syncs</div>
+                    <div className="font-semibold text-[var(--ink)] uppercase">{p.provider}</div>
+                    <div className="text-xs text-[var(--ink-muted)] tabular-nums">{p.totalCalls} syncs</div>
                   </div>
                   <div className="text-right tabular-nums">
                     <StatusPill
                       label={`${p.successRatePct}% OK`}
                       tone={p.successRatePct >= 98 ? "emerald" : "amber"}
                     />
-                    <div className="mt-1 text-xs text-zinc-500">{p.avgLatencyMs} ms avg</div>
+                    <div className="mt-1 text-xs text-[var(--ink-muted)]">{p.avgLatencyMs} ms avg</div>
                   </div>
                 </div>
               ))}

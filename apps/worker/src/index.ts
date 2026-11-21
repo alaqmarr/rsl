@@ -76,6 +76,23 @@ function yieldEventLoop(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
+async function runBoundedConcurrency<T>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>
+): Promise<void> {
+  if (items.length === 0) return;
+  let index = 0;
+  const lanes = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (index < items.length) {
+      const current = items[index++]!;
+      await worker(current);
+      await yieldEventLoop();
+    }
+  });
+  await Promise.all(lanes);
+}
+
 function parseSelectedLanes(): Set<WorkerLane> {
   const arg = process.argv.find((a) => a.startsWith("--lane="));
   const raw = (arg ? arg.split("=")[1] ?? "" : process.env.WORKER_LANE || "all").trim();
@@ -120,25 +137,26 @@ async function createAndUploadOffsiteWorkspaceBackup(params: {
   const bundleBytes = Buffer.from(res.data.bundleBufferBase64, "base64");
   const fileName = `${res.data.backupId}.rslbackup`;
 
-  await putWorkspaceObject({
-    workspaceId: params.workspaceId,
-    category: "backup_archive",
-    fileName,
-    mimeType: "application/json",
-    bytes: bundleBytes,
-    actorId: params.actorId,
-  }).catch((err) => {
-    logger.warn({ workspaceId: params.workspaceId, err: String(err) }, "Backup R2 archive upload failed");
-  });
-
-  await uploadFileToWorkspaceGoogleDrive({
-    workspaceId: params.workspaceId,
-    fileName,
-    mimeType: "application/json",
-    bytes: bundleBytes,
-  }).catch((err) => {
-    logger.warn({ workspaceId: params.workspaceId, err: String(err) }, "Backup Google Drive upload failed");
-  });
+  await Promise.allSettled([
+    putWorkspaceObject({
+      workspaceId: params.workspaceId,
+      category: "backup_archive",
+      fileName,
+      mimeType: "application/json",
+      bytes: bundleBytes,
+      actorId: params.actorId,
+    }).catch((err) => {
+      logger.warn({ workspaceId: params.workspaceId, err: String(err) }, "Backup R2 archive upload failed");
+    }),
+    uploadFileToWorkspaceGoogleDrive({
+      workspaceId: params.workspaceId,
+      fileName,
+      mimeType: "application/json",
+      bytes: bundleBytes,
+    }).catch((err) => {
+      logger.warn({ workspaceId: params.workspaceId, err: String(err) }, "Backup Google Drive upload failed");
+    }),
+  ]);
 }
 
 const REQUIRED_BOOT_JOB_TYPES = [
@@ -370,25 +388,24 @@ function registerStandardJobHandlers() {
 }
 
 async function sweepActiveTenantOutboxes(lanes: Set<WorkerLane>) {
-  if (lanes.has("realtime")) {
-    try {
-      await sweepPendingWebhookInbox(50);
-    } catch (error) {
-      Sentry.captureException(error, { tags: { job: "ingress.webhook.sweep" } });
-      logger.error({ err: String(error) }, "Inbound webhook inbox sweep error");
-    }
-  }
-
   const dueTenantIds = listDueOutboxTenantIds(Date.now(), 100);
-  for (const tenantId of dueTenantIds) {
+  const webhookPromise = lanes.has("realtime")
+    ? sweepPendingWebhookInbox(50).catch((error) => {
+        Sentry.captureException(error, { tags: { job: "ingress.webhook.sweep" } });
+        logger.error({ err: String(error) }, "Inbound webhook inbox sweep error");
+      })
+    : Promise.resolve();
+
+  const outboxPromise = runBoundedConcurrency(dueTenantIds, 6, async (tenantId) => {
     try {
       await processDueSqliteOutboxForTenant(tenantId, { lanes });
     } catch (error) {
       Sentry.captureException(error, { tags: { tenantId } });
       logger.error({ tenantId, err: String(error) }, "Tenant outbox sweep error");
     }
-    await yieldEventLoop();
-  }
+  });
+
+  await Promise.all([webhookPromise, outboxPromise]);
 }
 
 async function sweepDueSocialPostsAcrossTenants() {
@@ -478,7 +495,7 @@ async function runScheduledMaintenance() {
     .where(eq(controlSchema.tenantRegistry.status, "active"))
     .all();
 
-  for (const tenant of activeTenants) {
+  const runTenantMaintenance = runBoundedConcurrency(activeTenants, 4, async (tenant) => {
     try {
       await optimizeTenantDatabase(
         {
@@ -501,20 +518,17 @@ async function runScheduledMaintenance() {
     } catch (error) {
       Sentry.captureException(error, { tags: { tenantId: tenant.tenantId } });
     }
-    await yieldEventLoop();
-  }
+  });
 
-  try {
-    await sweepAutomaticBillingReminders();
-  } catch (error) {
-    Sentry.captureException(error, { tags: { job: "billing.reminders.sweep" } });
-  }
-
-  try {
-    await sweepDueSslProvisioningJobs();
-  } catch (error) {
-    Sentry.captureException(error, { tags: { job: "ssl.provision.sweep" } });
-  }
+  await Promise.all([
+    runTenantMaintenance,
+    sweepAutomaticBillingReminders().catch((error) => {
+      Sentry.captureException(error, { tags: { job: "billing.reminders.sweep" } });
+    }),
+    sweepDueSslProvisioningJobs().catch((error) => {
+      Sentry.captureException(error, { tags: { job: "ssl.provision.sweep" } });
+    }),
+  ]);
 }
 
 async function runDailyHashAnchoring() {
@@ -653,7 +667,7 @@ async function startWorker() {
   const jobs: Cron[] = [];
 
   jobs.push(
-    new Cron("*/3 * * * * *", { protect: true }, async () => {
+    new Cron(isRedisConfigured() ? "*/20 * * * * *" : "*/3 * * * * *", { protect: true }, async () => {
       await sweepActiveTenantOutboxes(lanes);
     })
   );

@@ -25,7 +25,6 @@ import {
   BrandLogo,
   GuideDrawer,
   IosSpinner,
-  ThemeToggleButton,
   useDialogFocusTrap,
 } from "@rsl/ui";
 import {
@@ -366,8 +365,6 @@ export function AdminTopBar({
                 </span>
               </Link>
             )}
-
-            <ThemeToggleButton compact />
 
             <button
               type="button"

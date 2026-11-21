@@ -160,11 +160,11 @@ export async function submitAdSpendRechargeRequestActionImpl(formData: FormData)
       walletBalanceFormatted: "Pending Verification",
     }).catch(() => undefined);
   } catch (err) {
-    return goWithError("/billing?tab=wallet", friendlyMessage(err));
+    return goWithError("/billing/wallet", friendlyMessage(err));
   }
 
   return goWithNotice(
-    "/billing?tab=wallet",
+    "/billing/wallet",
     `Ad Spend Vault deposit request for ${formatInr(paise)} submitted (Ref: ${utrOrReference}). Funds unlock for Meta & Google Ads once verified.`
   );
 }
@@ -189,11 +189,11 @@ export async function createOnlineRazorpayOrderActionImpl(formData: FormData) {
       purpose,
     });
   } catch (err) {
-    return goWithError("/billing?tab=wallet", friendlyMessage(err));
+    return goWithError("/billing/wallet", friendlyMessage(err));
   }
 
   return goWithNotice(
-    `/billing?tab=wallet&orderId=${encodeURIComponent(orderOut.orderId)}`,
+    `/billing/wallet?orderId=${encodeURIComponent(orderOut.orderId)}`,
     "Online payment order created. Complete payment to credit your account."
   );
 }

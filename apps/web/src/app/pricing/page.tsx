@@ -3,7 +3,7 @@ import Link from "next/link";
 import { ArrowRight, Check, ShieldCheck, Wallet } from "lucide-react";
 import { listPublicPricingCatalog, WALLET_OVERDRAFT_LIMIT_PAISE } from "@rsl/billing";
 import { formatInr } from "@rsl/core";
-import { BrandLogo, PlatformFooter, ThemeToggleButton } from "@rsl/ui";
+import { BrandLogo, PlatformFooter } from "@rsl/ui";
 import { getOptionalWebSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +38,6 @@ export default async function PublicPricingPage() {
             <BrandLogo variant="long" size="sm" subtitle="Growth & Tally Suite" />
           </Link>
           <nav aria-label="Public navigation" className="flex items-center gap-3 text-xs font-semibold">
-            <ThemeToggleButton compact />
             <Link
               href="/"
               className="rounded-lg px-2.5 py-1.5 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"

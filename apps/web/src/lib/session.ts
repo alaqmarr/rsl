@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import {
@@ -11,19 +12,23 @@ export type WebLocale = "en" | "hi";
 export const WEB_LOCALE_COOKIE = "rsl_locale";
 export const WEB_FLASH_TOAST_COOKIE = "rsl_toast";
 
-export async function getOptionalWebSession(): Promise<AuthenticatedSession | null> {
-  const jar = await cookies();
-  const raw = jar.get(WEB_SESSION_COOKIE)?.value;
-  return resolveUserSessionFromToken(raw);
-}
-
-export async function requireWebSession(): Promise<AuthenticatedSession> {
-  const session = await getOptionalWebSession();
-  if (!session) {
-    redirect("/login");
+export const getOptionalWebSession = cache(
+  async (): Promise<AuthenticatedSession | null> => {
+    const jar = await cookies();
+    const raw = jar.get(WEB_SESSION_COOKIE)?.value;
+    return resolveUserSessionFromToken(raw);
   }
-  return session;
-}
+);
+
+export const requireWebSession = cache(
+  async (): Promise<AuthenticatedSession> => {
+    const session = await getOptionalWebSession();
+    if (!session) {
+      redirect("/login");
+    }
+    return session;
+  }
+);
 
 export async function setWebSessionCookie(rawToken: string, maxAgeSec = 7 * 24 * 60 * 60) {
   const jar = await cookies();
@@ -65,7 +70,7 @@ export async function readVerifiedWebFlashToast() {
   return { id: verified.id, type: verified.type, message: verified.message };
 }
 
-export async function getWebLocale(): Promise<WebLocale> {
+export const getWebLocale = cache(async (): Promise<WebLocale> => {
   const jar = await cookies();
   return jar.get(WEB_LOCALE_COOKIE)?.value === "hi" ? "hi" : "en";
-}
+});

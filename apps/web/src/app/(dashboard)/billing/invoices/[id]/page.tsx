@@ -37,7 +37,7 @@ export default async function CustomerInvoiceDetailPage({
         <PageHeader
           eyebrow={
             <ActionLink
-              href="/billing?tab=invoices"
+              href="/billing/invoices"
               spinnerSize="xs"
               className="text-xs font-semibold text-zinc-500 hover:text-slate-900"
             >

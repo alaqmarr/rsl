@@ -181,6 +181,45 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
     ],
   },
   {
+    routePrefix: "/tally/automation",
+    title: "Tally Auto-Send Rules & Overdue Payment Reminders",
+    summary:
+      "Trigger automatic WhatsApp PDF dispatches whenever bills save in Tally Prime, schedule pre-due or overdue reminders, and run CA/Vendor workflows.",
+    estimatedTime: "4 min setup",
+    guideSlug: "tally-sync-and-import",
+    prerequisites: [
+      "Tally Prime Sync and Automated WhatsApp Invoicing unlocked in Billing.",
+      "At least one Meta-approved WhatsApp template loaded on /whatsapp.",
+    ],
+    steps: [
+      {
+        title: "Create a Bill-Save Automation Rule",
+        detail: "Choose whether Sales Invoices, Receipts, or Credit Notes trigger an automatic WhatsApp send.",
+      },
+      {
+        title: "Add Overdue Reminder Schedules",
+        detail: "Configure pre-due or post-due day offsets to automatically chase pending receivables.",
+      },
+    ],
+    commonMistakes: [],
+  },
+  {
+    routePrefix: "/tally/import",
+    title: "Import Tally XML / CSV & Record Manual Vouchers",
+    summary:
+      "Upload exported Tally Day Books or enter Sales, Receipt, and Purchase bills with optional live inventory updates.",
+    estimatedTime: "3 min",
+    guideSlug: "tally-sync-and-import",
+    prerequisites: ["Manager, Admin, or Owner permission on Tally Integration."],
+    steps: [
+      {
+        title: "Export XML/CSV or Enter Bill Details",
+        detail: "Upload Tally Day Book XML/CSV or fill Party, Bill #, Amount, and optional Stock Line.",
+      },
+    ],
+    commonMistakes: [],
+  },
+  {
     routePrefix: "/tally",
     title: "Connecting Tally Prime (.tdl v2.9 + Port 9000), Products, Multi-Company & Paid Sync",
     summary:
@@ -270,6 +309,40 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
     ],
   },
   {
+    routePrefix: "/whatsapp/broadcasts",
+    title: "Bulk WhatsApp Broadcast Campaigns",
+    summary:
+      "Send Meta-approved template announcements to opted-in contacts with automatic suppression checks and wallet metering.",
+    estimatedTime: "3 min",
+    guideSlug: "whatsapp-and-broadcasts",
+    prerequisites: [
+      "Approved WhatsApp template in /whatsapp and opted-in contacts.",
+    ],
+    steps: [
+      {
+        title: "Select an Approved Template & Send",
+        detail: "Preview the estimated INR wallet charge and launch to all opted-in recipients.",
+      },
+    ],
+    commonMistakes: [],
+  },
+  {
+    routePrefix: "/whatsapp/contacts",
+    title: "WhatsApp Opt-Outs & Do-Not-Message Compliance",
+    summary:
+      "Manage phone numbers blocked from automated Tally PDF dispatches and promotional broadcasts.",
+    estimatedTime: "2 min",
+    guideSlug: "whatsapp-and-broadcasts",
+    prerequisites: [],
+    steps: [
+      {
+        title: "Add or Re-Enable Suppressed Numbers",
+        detail: "Any customer replying STOP is added automatically; re-enable only after fresh opt-in.",
+      },
+    ],
+    commonMistakes: [],
+  },
+  {
     routePrefix: "/whatsapp",
     title: "Building Approved WhatsApp Templates & Launching Safe Broadcasts",
     summary:
@@ -315,6 +388,70 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
     ],
   },
   {
+    routePrefix: "/meta/facebook",
+    title: "Facebook Ads, Page Posts & Meta Pixel CAPI",
+    summary:
+      "Launch Click-to-WhatsApp Facebook Ads, schedule Page offers, and track server-side Meta Conversions API events.",
+    estimatedTime: "4 min",
+    guideSlug: "ads-social-posts-and-website-conversions",
+    prerequisites: ["Connect Facebook Page or Meta Ads Account in Connections."],
+    steps: [
+      {
+        title: "Switch Between Ads, Posts, and Pixel",
+        detail: "Use the top service bar to manage Facebook campaigns, Page publishing, and CAPI events cleanly.",
+      },
+    ],
+    commonMistakes: [],
+  },
+  {
+    routePrefix: "/meta/instagram",
+    title: "Instagram Posts, Reels & Ad Campaigns",
+    summary:
+      "Schedule Feed photos and MP4 Reels, run Click-to-DM Instagram Ads, and answer customer DMs.",
+    estimatedTime: "4 min",
+    guideSlug: "ads-social-posts-and-website-conversions",
+    prerequisites: ["Connect Instagram Business in /connections/instagram."],
+    steps: [
+      {
+        title: "Schedule Feed or Reel Media",
+        detail: "Upload images or MP4 Reels, set publish time, or launch right away.",
+      },
+    ],
+    commonMistakes: [],
+  },
+  {
+    routePrefix: "/google/ads",
+    title: "Google Search & Performance Max Ads",
+    summary:
+      "Capture high-intent Google Search and Maps inquiries with INR daily budgets and offline ROAS snapshots.",
+    estimatedTime: "4 min",
+    guideSlug: "ads-social-posts-and-website-conversions",
+    prerequisites: ["Connect Google Ads in /connections/google-ads or fund Ad Spend Vault."],
+    steps: [
+      {
+        title: "Create Search or Performance Max Campaigns",
+        detail: "Enter target cities, Search keywords, landing URL, and daily INR cap.",
+      },
+    ],
+    commonMistakes: [],
+  },
+  {
+    routePrefix: "/google/search",
+    title: "Google Search Console Organic Queries & SEO",
+    summary:
+      "Monitor 28-day Google organic clicks, impressions, CTR, and average search rank.",
+    estimatedTime: "2 min",
+    guideSlug: "ads-social-posts-and-website-conversions",
+    prerequisites: ["Connect Google Search Console in /connections/google-search-console."],
+    steps: [
+      {
+        title: "Turn Top Organic Keywords Into Ads",
+        detail: "Click any ranking keyword to pre-fill the AI Ad Copywriter.",
+      },
+    ],
+    commonMistakes: [],
+  },
+  {
     routePrefix: "/campaigns",
     title: "Managing Meta Ad Campaigns, Scheduled Social Posts & Website Pixel Sales",
     summary:
@@ -351,6 +488,22 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
       "Scheduling an Instagram post without a publicly reachable HTTPS JPEG/PNG/MP4 media URL.",
       "Omitting a unique Order ID on Website Sales Events (needed for browser + server pixel deduplication).",
     ],
+  },
+  {
+    routePrefix: "/reviews/automation",
+    title: "Google Review Star Breakdown, Auto-Reply & Manual Entry",
+    summary:
+      "Review star-rating trends, unlock AI smart reply drafts, and record offline customer feedback.",
+    estimatedTime: "2 min",
+    guideSlug: "google-reviews-and-smart-replies",
+    prerequisites: [],
+    steps: [
+      {
+        title: "Review Distribution & Record Offline Feedback",
+        detail: "Track 1-to-5 star percentages or add verified walk-in customer reviews.",
+      },
+    ],
+    commonMistakes: [],
   },
   {
     routePrefix: "/reviews",
@@ -423,6 +576,22 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
     ],
   },
   {
+    routePrefix: "/settings/api-keys",
+    title: "Platform REST API Keys & Live Sandbox",
+    summary:
+      "Issue scoped Live and Sandbox Bearer keys for ERP, Shopify, and checkout pixel events.",
+    estimatedTime: "3 min",
+    guideSlug: "developer-api",
+    prerequisites: ["Developer API plan unlocked."],
+    steps: [
+      {
+        title: "Issue & Test a Scoped Bearer Key",
+        detail: "Select minimal scopes, copy your key once shown, and test directly in the API Sandbox.",
+      },
+    ],
+    commonMistakes: [],
+  },
+  {
     routePrefix: "/settings/tokens",
     title: "Managing All Channel Tokens, Tally Webhook Secrets & REST API Keys",
     summary:
@@ -489,6 +658,22 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
     commonMistakes: [
       "Getting RSL-API-1002 (Insufficient Scope) because the API key was created with 'read' scope only while calling a POST 'write' endpoint.",
     ],
+  },
+  {
+    routePrefix: "/billing/wallet",
+    title: "Prepaid Wallet, UPI Transfers & Ad Spend Vault",
+    summary:
+      "Recharge messaging credits via UPI / NEFT UTR or instant Razorpay and manage 0-overdraft Ad Spend Vault funds.",
+    estimatedTime: "2 min",
+    guideSlug: "plans-wallet-and-gst",
+    prerequisites: [],
+    steps: [
+      {
+        title: "Pay via UPI or Online Checkout",
+        detail: "Submit your 12-digit UTR or complete Razorpay checkout to credit balance immediately.",
+      },
+    ],
+    commonMistakes: [],
   },
   {
     routePrefix: "/billing/invoices",
@@ -646,6 +831,22 @@ export const WEB_PAGE_GUIDES: WebPageGuide[] = [
     commonMistakes: [
       "Staying logged in on a cybercafe or shared warehouse PC - use 'Revoke All Other Sessions' from your phone or main laptop anytime.",
     ],
+  },
+  {
+    routePrefix: "/backups/exports",
+    title: "Portable Data Exports, Contacts CSV Import & File Quota",
+    summary:
+      "Download Portable JSON, Contacts CSV, or Tally XML, bulk import contacts, and clean up stored objects.",
+    estimatedTime: "3 min",
+    guideSlug: "storage-r2-and-backups",
+    prerequisites: [],
+    steps: [
+      {
+        title: "Download Open Exports Anytime",
+        detail: "Export your complete business dataset in Excel-ready CSV, Tally XML, or JSON.",
+      },
+    ],
+    commonMistakes: [],
   },
   {
     routePrefix: "/backups",

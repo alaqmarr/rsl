@@ -2905,62 +2905,89 @@ export function getWorkspaceInventorySummary(
       ? companyIdFilter
       : null;
 
-  const allGodowns = db
-    .select()
-    .from(tenantDataSchema.tallyGodowns)
-    .orderBy(tenantDataSchema.tallyGodowns.name)
-    .all();
   const godowns = activeCompanyFilter
-    ? allGodowns.filter((g) => g.companyId === activeCompanyFilter)
-    : allGodowns;
+    ? db
+        .select()
+        .from(tenantDataSchema.tallyGodowns)
+        .where(eq(tenantDataSchema.tallyGodowns.companyId, activeCompanyFilter))
+        .orderBy(tenantDataSchema.tallyGodowns.name)
+        .all()
+    : db
+        .select()
+        .from(tenantDataSchema.tallyGodowns)
+        .orderBy(tenantDataSchema.tallyGodowns.name)
+        .all();
 
-  const allItems = db
-    .select()
-    .from(tenantDataSchema.tallyStockItems)
-    .orderBy(desc(tenantDataSchema.tallyStockItems.closingValuePaise))
-    .all();
   const rawItems = activeCompanyFilter
-    ? allItems.filter((i) => i.companyId === activeCompanyFilter)
-    : allItems;
+    ? db
+        .select()
+        .from(tenantDataSchema.tallyStockItems)
+        .where(eq(tenantDataSchema.tallyStockItems.companyId, activeCompanyFilter))
+        .orderBy(desc(tenantDataSchema.tallyStockItems.closingValuePaise))
+        .all()
+    : db
+        .select()
+        .from(tenantDataSchema.tallyStockItems)
+        .orderBy(desc(tenantDataSchema.tallyStockItems.closingValuePaise))
+        .all();
 
-  const allBalances = db
-    .select()
-    .from(tenantDataSchema.tallyStockBalances)
-    .orderBy(tenantDataSchema.tallyStockBalances.godownName)
-    .all();
   const rawBalances = activeCompanyFilter
-    ? allBalances.filter((b) => b.companyId === activeCompanyFilter)
-    : allBalances;
+    ? db
+        .select()
+        .from(tenantDataSchema.tallyStockBalances)
+        .where(eq(tenantDataSchema.tallyStockBalances.companyId, activeCompanyFilter))
+        .orderBy(tenantDataSchema.tallyStockBalances.godownName)
+        .all()
+    : db
+        .select()
+        .from(tenantDataSchema.tallyStockBalances)
+        .orderBy(tenantDataSchema.tallyStockBalances.godownName)
+        .all();
 
-  const rawVouchers = db
-    .select({
-      id: tenantDataSchema.tallyVouchers.id,
-      voucherNumber: tenantDataSchema.tallyVouchers.voucherNumber,
-      paymentStatus: tenantDataSchema.tallyVouchers.paymentStatus,
-    })
-    .from(tenantDataSchema.tallyVouchers)
-    .all();
+  const rawMovements = activeCompanyFilter
+    ? db
+        .select()
+        .from(tenantDataSchema.tallyVoucherItems)
+        .where(eq(tenantDataSchema.tallyVoucherItems.companyId, activeCompanyFilter))
+        .orderBy(desc(tenantDataSchema.tallyVoucherItems.voucherDate))
+        .limit(250)
+        .all()
+    : db
+        .select()
+        .from(tenantDataSchema.tallyVoucherItems)
+        .orderBy(desc(tenantDataSchema.tallyVoucherItems.voucherDate))
+        .limit(250)
+        .all();
+
+  const movementVoucherIds = Array.from(new Set(rawMovements.map((m) => m.voucherId)));
+  const rawVouchers =
+    movementVoucherIds.length > 0
+      ? db
+          .select({
+            id: tenantDataSchema.tallyVouchers.id,
+            voucherNumber: tenantDataSchema.tallyVouchers.voucherNumber,
+            paymentStatus: tenantDataSchema.tallyVouchers.paymentStatus,
+          })
+          .from(tenantDataSchema.tallyVouchers)
+          .where(inArray(tenantDataSchema.tallyVouchers.id, movementVoucherIds))
+          .all()
+      : [];
   const voucherNoMap = new Map(rawVouchers.map((v) => [v.id, v]));
 
-  const allMovements = db
-    .select()
-    .from(tenantDataSchema.tallyVoucherItems)
-    .orderBy(desc(tenantDataSchema.tallyVoucherItems.voucherDate))
-    .limit(250)
-    .all();
-  const rawMovements = activeCompanyFilter
-    ? allMovements.filter((m) => m.companyId === activeCompanyFilter)
-    : allMovements;
-
-  const allParties = db
-    .select()
-    .from(tenantDataSchema.tallyParties)
-    .orderBy(desc(tenantDataSchema.tallyParties.closingBalancePaise))
-    .limit(100)
-    .all();
   const parties = activeCompanyFilter
-    ? allParties.filter((p) => p.companyId === activeCompanyFilter)
-    : allParties;
+    ? db
+        .select()
+        .from(tenantDataSchema.tallyParties)
+        .where(eq(tenantDataSchema.tallyParties.companyId, activeCompanyFilter))
+        .orderBy(desc(tenantDataSchema.tallyParties.closingBalancePaise))
+        .limit(100)
+        .all()
+    : db
+        .select()
+        .from(tenantDataSchema.tallyParties)
+        .orderBy(desc(tenantDataSchema.tallyParties.closingBalancePaise))
+        .limit(100)
+        .all();
 
   const balancesByItem = new Map<string, typeof rawBalances>();
   for (const b of rawBalances) {
@@ -2990,8 +3017,9 @@ export function getWorkspaceInventorySummary(
     { godownName: string; skuCount: number; totalQty: number; totalValuePaise: number }
   >();
 
+  const itemById = new Map(rawItems.map((i) => [i.id, i]));
   const enrichedBalances = rawBalances.map((b) => {
-    const parentItem = rawItems.find((i) => i.id === b.itemId);
+    const parentItem = itemById.get(b.itemId);
     const daysToExpiry =
       b.expiryDate !== null ? Math.ceil((b.expiryDate - now) / dayMs) : null;
     const expiryStatus: "expired" | "expiring_30d" | "ok" | "no_expiry" =
@@ -3192,7 +3220,10 @@ export function getWorkspaceInventorySummary(
 /**
  * Lookup map of voucherId -> line items summary for the `/tally` Bills Register table!
  */
-export function listVoucherLineItemsMap(workspaceId: string): Map<
+export function listVoucherLineItemsMap(
+  workspaceId: string,
+  voucherIds?: string[]
+): Map<
   string,
   Array<{
     itemName: string;
@@ -3204,21 +3235,6 @@ export function listVoucherLineItemsMap(workspaceId: string): Map<
     batchName: string;
   }>
 > {
-  const db = tenantDataDb({ workspaceId });
-  const rows = db
-    .select({
-      voucherId: tenantDataSchema.tallyVoucherItems.voucherId,
-      itemName: tenantDataSchema.tallyVoucherItems.itemName,
-      billedQty: tenantDataSchema.tallyVoucherItems.billedQty,
-      uom: tenantDataSchema.tallyVoucherItems.uom,
-      ratePaise: tenantDataSchema.tallyVoucherItems.ratePaise,
-      amountPaise: tenantDataSchema.tallyVoucherItems.amountPaise,
-      godownName: tenantDataSchema.tallyVoucherItems.godownName,
-      batchName: tenantDataSchema.tallyVoucherItems.batchName,
-    })
-    .from(tenantDataSchema.tallyVoucherItems)
-    .all();
-
   const map = new Map<
     string,
     Array<{
@@ -3231,6 +3247,27 @@ export function listVoucherLineItemsMap(workspaceId: string): Map<
       batchName: string;
     }>
   >();
+  if (voucherIds && voucherIds.length === 0) {
+    return map;
+  }
+
+  const db = tenantDataDb({ workspaceId });
+  const baseQuery = db
+    .select({
+      voucherId: tenantDataSchema.tallyVoucherItems.voucherId,
+      itemName: tenantDataSchema.tallyVoucherItems.itemName,
+      billedQty: tenantDataSchema.tallyVoucherItems.billedQty,
+      uom: tenantDataSchema.tallyVoucherItems.uom,
+      ratePaise: tenantDataSchema.tallyVoucherItems.ratePaise,
+      amountPaise: tenantDataSchema.tallyVoucherItems.amountPaise,
+      godownName: tenantDataSchema.tallyVoucherItems.godownName,
+      batchName: tenantDataSchema.tallyVoucherItems.batchName,
+    })
+    .from(tenantDataSchema.tallyVoucherItems);
+
+  const rows = voucherIds
+    ? baseQuery.where(inArray(tenantDataSchema.tallyVoucherItems.voucherId, voucherIds)).all()
+    : baseQuery.all();
 
   for (const r of rows) {
     const list = map.get(r.voucherId) ?? [];

@@ -14,9 +14,8 @@ export default async function AdminClientsDirectoryPage({
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  const { staff } = await requireStaffSession();
+  const [{ staff }, sp] = await Promise.all([requireStaffSession(), searchParams]);
   const canManageClients = canStaffPerform(staff.staffRole, "staff:clients.manage");
-  const sp = await searchParams;
   const adminData = getPlatformAdminAnalytics();
   const q = sp.q?.trim().toLowerCase() || "";
   const statusFilter = sp.status || "all";

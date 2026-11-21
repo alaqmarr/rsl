@@ -34,7 +34,7 @@ export default async function AdminInvoicesAndLedgerPage({
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  const { staff } = await requireStaffSession();
+  const [{ staff }, sp] = await Promise.all([requireStaffSession(), searchParams]);
   if (!canStaffAccessAdminRoute(staff.staffRole, "/invoices")) {
     return (
       <AccessRestrictedState
@@ -46,17 +46,24 @@ export default async function AdminInvoicesAndLedgerPage({
     );
   }
   const canManageBilling = canStaffPerform(staff.staffRole, "staff:billing.manage");
-  const sp = await searchParams;
   const statusFilter = sp.status || "all";
   const query = sp.q?.trim() || "";
 
-  const allInvoices = listAllPlatformInvoices({ limit: 500 });
-  const filteredInvoices = listAllPlatformInvoices({
-    status: statusFilter,
-    q: query,
-    limit: 250,
-  });
-  const adminData = getPlatformAdminAnalytics();
+  const isFiltered = statusFilter !== "all" || Boolean(query);
+  const [allInvoices, filteredInvoicesRaw, adminData] = await Promise.all([
+    Promise.resolve(listAllPlatformInvoices({ limit: 500 })),
+    isFiltered
+      ? Promise.resolve(
+          listAllPlatformInvoices({
+            status: statusFilter,
+            q: query,
+            limit: 250,
+          })
+        )
+      : Promise.resolve(null),
+    Promise.resolve(getPlatformAdminAnalytics()),
+  ]);
+  const filteredInvoices = filteredInvoicesRaw ?? allInvoices.slice(0, 250);
 
   const paidInvoices = allInvoices.filter((i) => i.status === "paid");
   const issuedUnpaidInvoices = allInvoices.filter((i) => i.status === "issued");

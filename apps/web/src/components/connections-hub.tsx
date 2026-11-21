@@ -11,6 +11,7 @@ import {
   StatusPill,
 } from "@rsl/ui";
 import type { ConnectionChannelKind, ConnectionMetadata } from "@rsl/connections";
+import { getConnectionPageHrefByKind } from "@/lib/connection-channels";
 import { CopyTextButton } from "@/components/client-utils";
 import { ConnectToGoogleDriveButton, GoogleGLogo } from "@/components/google-drive-connect-button";
 import {
@@ -86,6 +87,10 @@ export interface TallyDeviceSummary {
 
 export interface ConnectionsHubProps {
   initialKind?: ConnectionChannelKind;
+  focusedKind?: ConnectionChannelKind;
+  oauthReturnTo?: string;
+  hideOverviewStrip?: boolean;
+  hideTallyCard?: boolean;
   connections: SerializedConnectionItem[];
   allowManualCredentials?: boolean;
   whatsappWebhookUrl?: string;
@@ -301,6 +306,10 @@ function getStatusPillProps(status: string): {
 
 export function ConnectionsHub({
   initialKind,
+  focusedKind,
+  oauthReturnTo,
+  hideOverviewStrip = false,
+  hideTallyCard = false,
   connections,
   allowManualCredentials = false,
   whatsappWebhookUrl = "",
@@ -318,10 +327,21 @@ export function ConnectionsHub({
 
   // Support-only manual credential state (active ONLY when allowManualCredentials === true)
   const [manualKind, setManualKind] = useState<ConnectionChannelKind>(
-    initialKind || "whatsapp_cloud"
+    focusedKind || initialKind || "whatsapp_cloud"
   );
   const [rotatingConnId, setRotatingConnId] = useState<string | null>(null);
   const [verifyToken, setVerifyToken] = useState(initialVerifyToken);
+
+  const visibleMetaChannels = useMemo(
+    () => (focusedKind ? META_CHANNELS.filter((m) => m.kind === focusedKind) : META_CHANNELS),
+    [focusedKind]
+  );
+  const visibleGoogleChannels = useMemo(
+    () => (focusedKind ? GOOGLE_CHANNELS.filter((g) => g.kind === focusedKind) : GOOGLE_CHANNELS),
+    [focusedKind]
+  );
+  const resolvedReturnTo =
+    oauthReturnTo || (focusedKind ? getConnectionPageHrefByKind(focusedKind) : "/connections");
 
   const byKind = useMemo(() => {
     const map = new Map<ConnectionChannelKind, SerializedConnectionItem>();
@@ -558,6 +578,7 @@ export function ConnectionsHub({
   return (
     <div className="w-full space-y-6">
       {/* Clean Overview Strip */}
+      {!hideOverviewStrip && !focusedKind && (
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="flex items-center justify-between rounded-2xl border border-zinc-200/90 bg-white px-4 py-3.5 shadow-2xs">
           <div>
@@ -602,13 +623,19 @@ export function ConnectionsHub({
           </span>
         </div>
       </div>
+      )}
 
       {/* SECTION 1: META BUSINESS SUITE */}
+      {visibleMetaChannels.length > 0 && (
       <SectionCard
-        title="Meta Business Suite"
-        subtitle="Sign in with Facebook once to connect WhatsApp Business, Instagram, your Facebook Page, and Meta Ads automatically - no tokens or IDs required."
+        title={focusedKind ? `${visibleMetaChannels[0]!.title} Connection` : "Meta Business Suite"}
+        subtitle={
+          focusedKind
+            ? "Connect this Meta business asset in one click via Facebook Login - zero manual tokens required."
+            : "Sign in with Facebook once to connect WhatsApp Business, Instagram, your Facebook Page, and Meta Ads automatically - no tokens or IDs required."
+        }
         action={
-          canManage ? (
+          canManage && !focusedKind ? (
             <ConnectWithFacebookButton
               purpose="meta_all"
               label={
@@ -618,12 +645,13 @@ export function ConnectionsHub({
               }
               configured={metaConfigured}
               size="sm"
+              returnTo={resolvedReturnTo}
             />
           ) : undefined
         }
       >
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {META_CHANNELS.map((spec) => {
+        <div className={`grid grid-cols-1 gap-4 ${focusedKind ? "" : "lg:grid-cols-2"}`}>
+          {visibleMetaChannels.map((spec) => {
             const conn = byKind.get(spec.kind);
             const meta = conn?.metadata;
             const pill = conn ? getStatusPillProps(conn.status) : null;
@@ -669,6 +697,16 @@ export function ConnectionsHub({
                       <StatusPill label="Not Connected" tone="stone" />
                     )}
                   </div>
+                  {!focusedKind && (
+                    <div className="flex justify-end">
+                      <Link
+                        href={getConnectionPageHrefByKind(spec.kind)}
+                        className="text-[11px] font-semibold text-[var(--ink-muted)] hover:text-[var(--ink)] hover:underline"
+                      >
+                        Dedicated Setup Page →
+                      </Link>
+                    </div>
+                  )}
 
                   {!conn ? (
                     <p className="text-xs leading-relaxed text-zinc-600">{spec.tagline}</p>
@@ -862,6 +900,7 @@ export function ConnectionsHub({
                         label={spec.connectLabel}
                         configured={metaConfigured}
                         size="sm"
+                        returnTo={resolvedReturnTo}
                       />
                     ) : (
                       <span className="text-xs text-zinc-500">
@@ -912,6 +951,7 @@ export function ConnectionsHub({
                             configured={metaConfigured}
                             variant="outline"
                             size="sm"
+                            returnTo={resolvedReturnTo}
                           />
                           <button
                             type="button"
@@ -931,16 +971,22 @@ export function ConnectionsHub({
           })}
         </div>
       </SectionCard>
+      )}
 
       {/* SECTION 2: GOOGLE BUSINESS & WORKSPACE SUITE */}
+      {visibleGoogleChannels.length > 0 && (
       <SectionCard
-        title="Google Business & Workspace Suite"
-        subtitle="Sign in with your Google account in one click to sync Google Maps reviews, launch Google Ads, automate Drive backups, and share live Tally sheets with your CA."
+        title={focusedKind ? `${visibleGoogleChannels[0]!.title} Connection` : "Google Business & Workspace Suite"}
+        subtitle={
+          focusedKind
+            ? "Sign in with your Google account in one click - zero manual API keys or developer tokens required."
+            : "Sign in with your Google account in one click to sync Google Maps reviews, launch Google Ads, automate Drive backups, and share live Tally sheets with your CA."
+        }
         action={
-          canManage ? (
+          canManage && !focusedKind ? (
             <ConnectToGoogleDriveButton
               purpose="google_all"
-              returnTo="/connections"
+              returnTo={resolvedReturnTo}
               label={
                 googleConnectedCount === GOOGLE_CHANNELS.length
                   ? "Reconnect All with Google"
@@ -952,8 +998,8 @@ export function ConnectionsHub({
           ) : undefined
         }
       >
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {GOOGLE_CHANNELS.map((spec) => {
+        <div className={`grid grid-cols-1 gap-4 ${focusedKind ? "" : "md:grid-cols-2 xl:grid-cols-3"}`}>
+          {visibleGoogleChannels.map((spec) => {
             const conn = byKind.get(spec.kind);
             const meta = conn?.metadata;
             const pill = conn ? getStatusPillProps(conn.status) : null;
@@ -999,6 +1045,16 @@ export function ConnectionsHub({
                       <StatusPill label="Not Connected" tone="stone" />
                     )}
                   </div>
+                  {!focusedKind && (
+                    <div className="flex justify-end">
+                      <Link
+                        href={getConnectionPageHrefByKind(spec.kind)}
+                        className="text-[11px] font-semibold text-[var(--ink-muted)] hover:text-[var(--ink)] hover:underline"
+                      >
+                        Dedicated Setup Page →
+                      </Link>
+                    </div>
+                  )}
 
                   {!conn ? (
                     <p className="text-xs leading-relaxed text-zinc-600">{spec.tagline}</p>
@@ -1151,7 +1207,7 @@ export function ConnectionsHub({
                     canManage ? (
                       <ConnectToGoogleDriveButton
                         purpose={spec.kind}
-                        returnTo="/connections"
+                        returnTo={resolvedReturnTo}
                         label={spec.connectLabel}
                         variant="white"
                         size="sm"
@@ -1195,7 +1251,7 @@ export function ConnectionsHub({
                           </button>
                           <ConnectToGoogleDriveButton
                             purpose={spec.kind}
-                            returnTo="/connections"
+                            returnTo={resolvedReturnTo}
                             label="Switch"
                             variant="white"
                             size="sm"
@@ -1219,8 +1275,10 @@ export function ConnectionsHub({
           })}
         </div>
       </SectionCard>
+      )}
 
       {/* SECTION 3: TALLY PRIME DESKTOP SYNC */}
+      {!hideTallyCard && !focusedKind && (
       <SectionCard
         title="Tally Prime Desktop Sync"
         subtitle="Connect your office Windows PC running Tally Prime to sync GST bills, receipts, stock items, and party ledgers automatically."
@@ -1272,12 +1330,18 @@ export function ConnectionsHub({
             )}
           </div>
           {canAccessTally && (
-            <Link href="/tally?tab=connect" className="rsl-btn-secondary shrink-0 text-xs">
-              {tallyDevices.length > 0 ? "Manage Tally Sync →" : "Connect Tally Prime →"}
-            </Link>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <Link href="/connections/tally" className="rsl-btn-secondary text-xs">
+                Tally Connection Page →
+              </Link>
+              <Link href="/tally" className="rsl-btn-primary text-xs">
+                {tallyDevices.length > 0 ? "Open Tally Bills" : "Connect Tally Prime"}
+              </Link>
+            </div>
           )}
         </div>
       </SectionCard>
+      )}
 
       {/* SECTION 4: STRICTLY BACKEND-ENABLED MANUAL CREDENTIALS OVERRIDE */}
       {allowManualCredentials && canManage && (

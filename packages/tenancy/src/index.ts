@@ -65,6 +65,7 @@ let controlAppliedVersion = 0;
 let ingressSingleton: IngressDb | null = null;
 let ingressAppliedVersion = 0;
 let platformLogsSingleton: PlatformLogsDb | null = null;
+let platformLogsAppliedVersion = 0;
 
 export function controlDb(): ControlDb {
   const latestControlVersion = CONTROL_MIGRATIONS[CONTROL_MIGRATIONS.length - 1]?.version ?? 0;
@@ -107,7 +108,16 @@ export function ingressDb(): IngressDb {
 }
 
 export function platformLogsDb(): PlatformLogsDb {
-  if (platformLogsSingleton) return platformLogsSingleton;
+  const latestVersion = PLATFORM_LOGS_MIGRATIONS[PLATFORM_LOGS_MIGRATIONS.length - 1]?.version ?? 0;
+  if (platformLogsSingleton) {
+    if (platformLogsAppliedVersion < latestVersion) {
+      platformLogsAppliedVersion = runSqlMigrations(
+        platformLogsSingleton.$client,
+        PLATFORM_LOGS_MIGRATIONS
+      );
+    }
+    return platformLogsSingleton;
+  }
   const env = getEnv();
   const platformDir = path.join(env.DATA_DIR, "platform");
   ensureSecureDir(platformDir);
@@ -115,7 +125,7 @@ export function platformLogsDb(): PlatformLogsDb {
   const dbPath = path.join(platformDir, "platform-logs.db");
   const raw = createSqliteClient(dbPath);
   applyConnectionPragmas(raw, "standard");
-  runSqlMigrations(raw, PLATFORM_LOGS_MIGRATIONS);
+  platformLogsAppliedVersion = runSqlMigrations(raw, PLATFORM_LOGS_MIGRATIONS);
   platformLogsSingleton = wrapPlatformLogsDb(raw);
   return platformLogsSingleton;
 }
@@ -125,41 +135,76 @@ interface CachedHandle<T extends { $client: TenantDataDb["$client"] }> {
   close: () => void;
 }
 
+const pendingCloseData = new Map<string, { handle: CachedHandle<TenantDataDb>; cancel: () => void }>();
+const pendingCloseLogs = new Map<string, { handle: CachedHandle<TenantLogsDb>; cancel: () => void }>();
+
+function flushPendingClose<T extends { $client: TenantDataDb["$client"] }>(
+  pendingMap: Map<string, { handle: CachedHandle<T>; cancel: () => void }>,
+  key: string
+): void {
+  const entry = pendingMap.get(key);
+  if (!entry) return;
+  entry.cancel();
+  pendingMap.delete(key);
+  entry.handle.close();
+}
+
 function disposeHandleSafely<T extends { $client: TenantDataDb["$client"] }>(
+  key: string,
   value: CachedHandle<T>,
-  reason: LRUCache.DisposeReason
+  reason: LRUCache.DisposeReason,
+  pendingMap: Map<string, { handle: CachedHandle<T>; cancel: () => void }>
 ): void {
   // Explicit deletes (restore, backup close, shutdown, crypto-shred) must release OS locks synchronously
   if (reason === "delete" || reason === "set") {
+    const existingPending = pendingMap.get(key);
+    if (existingPending) {
+      existingPending.cancel();
+      pendingMap.delete(key);
+    }
     value.close();
     return;
   }
 
+  let timer: ReturnType<typeof setTimeout> | ReturnType<typeof setImmediate> | null = null;
+  let cancelled = false;
+  const cancel = () => {
+    cancelled = true;
+    if (timer) {
+      clearTimeout(timer as ReturnType<typeof setTimeout>);
+      timer = null;
+    }
+  };
+  pendingMap.set(key, { handle: value, cancel });
+
   // Evict / TTL expire: defer past current synchronous call stack and wait out active transactions
   const attemptClose = (retriesLeft: number) => {
+    if (cancelled) return;
     try {
       const raw = value.db.$client;
       if (raw.open && raw.inTransaction && retriesLeft > 0) {
-        const timer = setTimeout(() => attemptClose(retriesLeft - 1), 200);
+        timer = setTimeout(() => attemptClose(retriesLeft - 1), 200);
         timer.unref?.();
         return;
       }
     } catch {
       // Fall through to close
     }
+    if (cancelled) return;
+    pendingMap.delete(key);
     value.close();
   };
 
-  const immediate = setImmediate(() => attemptClose(10));
-  immediate.unref?.();
+  timer = setImmediate(() => attemptClose(10));
+  timer.unref?.();
 }
 
 const dataHandleCache = new LRUCache<string, CachedHandle<TenantDataDb>>({
   max: getEnv().TENANT_DB_MAX_OPEN,
   ttl: getEnv().TENANT_DB_IDLE_CLOSE_MS,
   updateAgeOnGet: true,
-  dispose: (value, _key, reason) => {
-    disposeHandleSafely(value, reason);
+  dispose: (value, key, reason) => {
+    disposeHandleSafely(key, value, reason, pendingCloseData);
   },
 });
 
@@ -167,8 +212,8 @@ const logsHandleCache = new LRUCache<string, CachedHandle<TenantLogsDb>>({
   max: getEnv().TENANT_DB_MAX_OPEN,
   ttl: getEnv().TENANT_DB_IDLE_CLOSE_MS,
   updateAgeOnGet: true,
-  dispose: (value, _key, reason) => {
-    disposeHandleSafely(value, reason);
+  dispose: (value, key, reason) => {
+    disposeHandleSafely(key, value, reason, pendingCloseLogs);
   },
 });
 
@@ -249,9 +294,23 @@ export function tenantDataDb(ctx: Pick<TenantContext, "workspaceId">, options?: 
     return existing.db;
   }
 
+  const pending = pendingCloseData.get(tenantId);
+  if (pending) {
+    pending.cancel();
+    pendingCloseData.delete(tenantId);
+    if (pending.handle.db.$client.open) {
+      dataHandleCache.set(tenantId, pending.handle);
+      return pending.handle.db;
+    }
+  }
+
+  const latestDataVersion = TENANT_DATA_MIGRATIONS[TENANT_DATA_MIGRATIONS.length - 1]?.version ?? 0;
   const raw = createSqliteClient(reg.dataDbPath);
   applyConnectionPragmas(raw, "standard");
-  const version = runSqlMigrations(raw, TENANT_DATA_MIGRATIONS);
+  const version =
+    reg.dataSchemaVersion < latestDataVersion
+      ? runSqlMigrations(raw, TENANT_DATA_MIGRATIONS)
+      : reg.dataSchemaVersion;
 
   const wrapped = wrapTenantDataDb(raw);
   dataHandleCache.set(tenantId, {
@@ -259,11 +318,10 @@ export function tenantDataDb(ctx: Pick<TenantContext, "workspaceId">, options?: 
     close: () => {
       try {
         if (raw.open) {
-          raw.pragma("optimize");
           raw.close();
         }
       } catch {
-        // Ignore optimize errors on close
+        // Ignore close errors
       }
     },
   });
@@ -292,9 +350,23 @@ export function tenantLogsDb(ctx: Pick<TenantContext, "workspaceId">): TenantLog
     return existing.db;
   }
 
+  const pending = pendingCloseLogs.get(tenantId);
+  if (pending) {
+    pending.cancel();
+    pendingCloseLogs.delete(tenantId);
+    if (pending.handle.db.$client.open) {
+      logsHandleCache.set(tenantId, pending.handle);
+      return pending.handle.db;
+    }
+  }
+
+  const latestLogsVersion = TENANT_LOGS_MIGRATIONS[TENANT_LOGS_MIGRATIONS.length - 1]?.version ?? 0;
   const raw = createSqliteClient(reg.logsDbPath);
   applyConnectionPragmas(raw, "standard");
-  const version = runSqlMigrations(raw, TENANT_LOGS_MIGRATIONS);
+  const version =
+    reg.logsSchemaVersion < latestLogsVersion
+      ? runSqlMigrations(raw, TENANT_LOGS_MIGRATIONS)
+      : reg.logsSchemaVersion;
 
   const wrapped = wrapTenantLogsDb(raw);
   logsHandleCache.set(tenantId, {
@@ -302,11 +374,10 @@ export function tenantLogsDb(ctx: Pick<TenantContext, "workspaceId">): TenantLog
     close: () => {
       try {
         if (raw.open) {
-          raw.pragma("optimize");
           raw.close();
         }
       } catch {
-        // Ignore optimize errors on close
+        // Ignore close errors
       }
     },
   });
@@ -330,9 +401,17 @@ export function closeTenantHandles(tenantId: string): void {
   tenantRegistryCache.delete(validId);
   dataHandleCache.delete(validId);
   logsHandleCache.delete(validId);
+  flushPendingClose(pendingCloseData, validId);
+  flushPendingClose(pendingCloseLogs, validId);
 }
 
 export function closeAllHandlesForShutdown(): void {
+  for (const key of Array.from(pendingCloseData.keys())) {
+    flushPendingClose(pendingCloseData, key);
+  }
+  for (const key of Array.from(pendingCloseLogs.keys())) {
+    flushPendingClose(pendingCloseLogs, key);
+  }
   for (const handle of dataHandleCache.values()) {
     try {
       if (handle.db.$client.open) {
@@ -394,6 +473,92 @@ export function closeAllHandlesForShutdown(): void {
 }
 
 export { pLimit };
+
+/**
+ * Deletes the existing platform & per-tenant SQLite databases under DATA_DIR
+ * and initializes fresh migrated master databases (`control.db`, `ingress.db`,
+ * `platform-logs.db`) plus a clean `tenants/` directory.
+ */
+export function resetPlatformArchitectureDatabases(params: {
+  confirm: "RESET_ALL_DATABASES";
+  dataDirOverride?: string;
+  includeStorage?: boolean;
+}): {
+  dataDir: string;
+  removedDirectories: string[];
+  platformDir: string;
+  tenantsDir: string;
+  controlDbPath: string;
+  ingressDbPath: string;
+  platformLogsDbPath: string;
+} {
+  if (params.confirm !== "RESET_ALL_DATABASES") {
+    throw new RslError(
+      "RSL-VAL-1001",
+      "Confirmation phrase 'RESET_ALL_DATABASES' is required to wipe and recreate platform databases."
+    );
+  }
+
+  if (!params.dataDirOverride) {
+    closeAllHandlesForShutdown();
+  }
+
+  const dataDir = path.resolve(params.dataDirOverride || getEnv().DATA_DIR);
+  const platformDir = path.join(dataDir, "platform");
+  const tenantsDir = path.join(dataDir, "tenants");
+  const targetDirs = [platformDir, tenantsDir];
+  if (params.includeStorage) {
+    targetDirs.push(path.join(dataDir, "storage"), path.join(dataDir, "backups"));
+  }
+
+  const removedDirectories: string[] = [];
+  for (const dir of targetDirs) {
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      removedDirectories.push(dir);
+    }
+  }
+
+  ensureSecureDir(dataDir);
+  ensureSecureDir(platformDir);
+  ensureSecureDir(tenantsDir);
+
+  const controlDbPath = path.join(platformDir, "control.db");
+  const ingressDbPath = path.join(platformDir, "ingress.db");
+  const platformLogsDbPath = path.join(platformDir, "platform-logs.db");
+
+  if (params.dataDirOverride) {
+    const cRaw = createSqliteClient(controlDbPath);
+    applyConnectionPragmas(cRaw, "control");
+    runSqlMigrations(cRaw, CONTROL_MIGRATIONS);
+    cRaw.close();
+
+    const iRaw = createSqliteClient(ingressDbPath);
+    applyConnectionPragmas(iRaw, "standard");
+    runSqlMigrations(iRaw, INGRESS_MIGRATIONS);
+    iRaw.close();
+
+    const pRaw = createSqliteClient(platformLogsDbPath);
+    applyConnectionPragmas(pRaw, "standard");
+    runSqlMigrations(pRaw, PLATFORM_LOGS_MIGRATIONS);
+    pRaw.close();
+  } else {
+    controlDb();
+    ingressDb();
+    platformLogsDb();
+    closeAllHandlesForShutdown();
+  }
+
+  return {
+    dataDir,
+    removedDirectories,
+    platformDir,
+    tenantsDir,
+    controlDbPath,
+    ingressDbPath,
+    platformLogsDbPath,
+  };
+}
 
 /**
  * Provisions isolated physical SQLite databases for a newly created business workspace.

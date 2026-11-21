@@ -144,10 +144,7 @@ export function WebLoginForm({ turnstileSiteKey }: { turnstileSiteKey?: string |
   }, [state]);
 
   return (
-    <form
-      action={formAction}
-      className="rsl-frost-surface space-y-4 rounded-2xl p-7"
-    >
+    <form action={formAction} className="space-y-4">
       {state.error && (
         <div
           role="alert"
@@ -225,7 +222,7 @@ export function WebLoginForm({ turnstileSiteKey }: { turnstileSiteKey?: string |
           </p>
         </div>
       ) : (
-        <div className="flex justify-end">
+        <div className="flex justify-start">
           <button
             type="button"
             onClick={() => setShowTotpField(true)}
@@ -253,13 +250,10 @@ export function WebLoginForm({ turnstileSiteKey }: { turnstileSiteKey?: string |
         )}
       </button>
 
-      <div className="relative py-1">
-        <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-zinc-200" />
-        </div>
-        <div className="relative flex justify-center text-[11px]">
-          <span className="bg-white px-2.5 font-medium text-zinc-400">or 1-tap biometric</span>
-        </div>
+      <div className="flex items-center gap-3 py-1">
+        <div className="h-px flex-1 bg-zinc-200/80" />
+        <span className="text-[11px] font-medium text-zinc-400">or 1-tap biometric</span>
+        <div className="h-px flex-1 bg-zinc-200/80" />
       </div>
 
       <button

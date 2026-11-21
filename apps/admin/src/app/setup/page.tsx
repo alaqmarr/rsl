@@ -8,7 +8,7 @@ import {
   ingressDb,
   platformLogsDb,
 } from "@rsl/tenancy";
-import { BrandLogo, FlashBanner, ThemeToggleButton } from "@rsl/ui";
+import { BrandLogo, FlashBanner } from "@rsl/ui";
 import { AdminSetupForm } from "@/components/admin-auth-forms";
 import { getOptionalStaffSession } from "@/lib/session";
 
@@ -116,11 +116,10 @@ export default async function PlatformSetupPage({
               ) : (
                 <>
                   <Lock className="h-3.5 w-3.5 text-emerald-600" />
-                  <span>Bootstrap Completed & Locked</span>
+                  <span>Bootstrap Completed &amp; Locked</span>
                 </>
               )}
             </span>
-            <ThemeToggleButton compact />
           </div>
         </div>
 
@@ -160,11 +159,11 @@ export default async function PlatformSetupPage({
                   Extensible server onboarding modules for RapidShift Labs deployments.
                 </p>
 
-                <div className="mt-4 space-y-3">
+                <div className="mt-4 divide-y divide-zinc-200/80 border-t border-zinc-200/80">
                   {readinessModules.map((mod) => (
                     <div
                       key={mod.step}
-                      className="rounded-xl border border-zinc-200/80 bg-zinc-50/70 p-3"
+                      className="py-3 first:pt-3 last:pb-0"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-bold text-slate-900">

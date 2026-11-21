@@ -128,30 +128,6 @@ export function SileoToastProvider({
 }) {
   const seenIdsRef = useRef<Set<string>>(new Set());
   const verifyingCookieRef = useRef<string>("");
-  const [toastTheme, setToastTheme] = useState<"light" | "dark">("light");
-
-  useEffect(() => {
-    const syncTheme = () => {
-      if (typeof document === "undefined") return;
-      const attr = document.documentElement.dataset.theme;
-      if (attr === "dark" || attr === "light") {
-        setToastTheme(attr);
-        return;
-      }
-      if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
-        setToastTheme("dark");
-      } else {
-        setToastTheme("light");
-      }
-    };
-    syncTheme();
-    const onThemeChange = (e: Event) => {
-      const next = (e as CustomEvent<"light" | "dark">).detail;
-      if (next === "dark" || next === "light") setToastTheme(next);
-    };
-    window.addEventListener("rsl-theme-change", onThemeChange);
-    return () => window.removeEventListener("rsl-theme-change", onThemeChange);
-  }, []);
 
   useEffect(() => {
     if (verifiedToast?.id && !seenIdsRef.current.has(verifiedToast.id)) {
@@ -228,7 +204,7 @@ export function SileoToastProvider({
   return (
     <Toaster
       position="top-right"
-      theme={toastTheme}
+      theme="light"
       options={RSL_SILEO_TOAST_OPTIONS}
       offset={{ top: 16, right: 16 }}
     />

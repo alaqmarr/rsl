@@ -351,7 +351,7 @@ describe("Phase 37 - Confidentiality Vault, Custom Retention, 6-Digit OTP Reveal
     expect(themeCss).toContain(".rsl-nav-group-rail");
     expect(themeCss).toContain(".rsl-nav-section-btn");
     expect(themeCss).toContain(".rsl-account-dock");
-    expect(themeCss).toContain(".font-mono:not(code):not(pre):not(kbd)");
+    expect(themeCss).toContain(".font-mono");
     expect(themeCss).toContain("tabular-nums lining-nums");
     expect(themeCss).toContain("--sileo-fill:");
     expect(themeCss).toContain("--sileo-state-success:");
@@ -371,15 +371,25 @@ describe("Phase 37 - Confidentiality Vault, Custom Retention, 6-Digit OTP Reveal
       path.join(REPO_ROOT, "apps/web/src/components/workspace-chrome.tsx"),
       "utf8"
     );
-    expect(webChrome).toContain("Overview & Intelligence");
-    expect(webChrome).toContain("Tally Prime & Accounting");
-    expect(webChrome).toContain("Marketing & Campaigns");
-    expect(webChrome).toContain("Customer Support Desk");
-    expect(webChrome).toContain("Channels, API & Vault");
-    expect(webChrome).toContain("Administration & Billing");
-    expect(webChrome).toContain("Audit, Health & Guides");
+    expect(webChrome).toContain("Meta Services");
+    expect(webChrome).toContain("WhatsApp");
+    expect(webChrome).toContain("Team Inbox");
+    expect(webChrome).toContain("Tally Integration");
+    expect(webChrome).toContain("Facebook");
+    expect(webChrome).toContain("Instagram");
+    expect(webChrome).toContain("Google Services");
+    expect(webChrome).toContain("Connections & Systems");
+    expect(webChrome).toContain("/connections/whatsapp");
+    expect(webChrome).toContain("/connections/instagram");
     expect(webChrome).toContain("rsl-nav-group-rail");
+    expect(webChrome).toContain("rsl-sidebar-subtoggle");
     expect(webChrome).toContain("DOCK_ONLY_WORKSPACE_ITEMS");
+
+    expect(
+      fs.existsSync(
+        path.join(REPO_ROOT, "apps/web/src/app/(dashboard)/connections/[channel]/page.tsx")
+      )
+    ).toBe(true);
 
     const webDashboardLayout = fs.readFileSync(
       path.join(REPO_ROOT, "apps/web/src/app/(dashboard)/layout.tsx"),

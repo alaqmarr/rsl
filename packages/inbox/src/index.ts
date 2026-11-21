@@ -1,7 +1,13 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 import { dispatchWorkspaceWebhookEvent } from "@rsl/api-keys";
-import { canDebitWalletUsage, consumeUsage, getWalletBalancePaise } from "@rsl/billing";
+import {
+  canDebitWalletUsage,
+  consumeUsage,
+  getWalletBalancePaise,
+  getWorkspaceWhatsAppMessagingRates,
+  resolveWhatsAppTemplateUnitCostPaise,
+} from "@rsl/billing";
 import { resolveWorkspaceChannelCredentials } from "@rsl/connections";
 import { newEntityId, newId, RslError } from "@rsl/core";
 import { controlSchema, tenantDataSchema, tenantLogsSchema } from "@rsl/database";
@@ -400,19 +406,30 @@ export function listConversationsWithContacts(
   workspaceId: string,
   statusFilter?: string,
   assignedUserIdFilter?: string,
-  pagination?: { page?: number; pageSize?: number }
+  pagination?: { page?: number; pageSize?: number; channel?: string }
 ) {
   const db = tenantDataDb({ workspaceId });
   const pageSize = Math.max(1, Math.min(200, pagination?.pageSize ?? 50));
   const page = Math.max(1, pagination?.page ?? 1);
   const offset = (page - 1) * pageSize;
+  const channelFilter = pagination?.channel?.trim();
 
   const conditions = [];
   if (statusFilter && statusFilter !== "all") {
     conditions.push(eq(tenantDataSchema.conversations.status, statusFilter));
   }
-  if (assignedUserIdFilter && assignedUserIdFilter !== "unassigned") {
+  if (assignedUserIdFilter === "unassigned") {
+    conditions.push(
+      or(
+        isNull(tenantDataSchema.conversations.assignedUserId),
+        eq(tenantDataSchema.conversations.assignedUserId, "")
+      )
+    );
+  } else if (assignedUserIdFilter) {
     conditions.push(eq(tenantDataSchema.conversations.assignedUserId, assignedUserIdFilter));
+  }
+  if (channelFilter && channelFilter !== "all") {
+    conditions.push(eq(tenantDataSchema.conversations.channel, channelFilter));
   }
 
   const query = db
@@ -426,24 +443,18 @@ export function listConversationsWithContacts(
       eq(tenantDataSchema.conversations.contactId, tenantDataSchema.contacts.id)
     );
 
-  const rows = (conditions.length > 0 ? query.where(and(...conditions)) : query)
+  return (conditions.length > 0 ? query.where(and(...conditions)) : query)
     .orderBy(desc(tenantDataSchema.conversations.lastActivityAt))
-    .limit(assignedUserIdFilter === "unassigned" ? 200 : pageSize)
-    .offset(assignedUserIdFilter === "unassigned" ? 0 : offset)
+    .limit(pageSize)
+    .offset(offset)
     .all();
-
-  if (assignedUserIdFilter === "unassigned") {
-    return rows
-      .filter((r) => !r.conversation.assignedUserId)
-      .slice(offset, offset + pageSize);
-  }
-  return rows;
 }
 
 export function countConversationsWithContacts(
   workspaceId: string,
   statusFilter?: string,
-  assignedUserIdFilter?: string
+  assignedUserIdFilter?: string,
+  channelFilter?: string
 ): number {
   const raw = tenantDataDb({ workspaceId }).$client;
   const clauses: string[] = [];
@@ -457,6 +468,10 @@ export function countConversationsWithContacts(
   } else if (assignedUserIdFilter) {
     clauses.push("assigned_user_id = ?");
     params.push(assignedUserIdFilter);
+  }
+  if (channelFilter && channelFilter !== "all") {
+    clauses.push("channel = ?");
+    params.push(channelFilter);
   }
   const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
   const row = raw
@@ -763,10 +778,14 @@ export const replyToConversation = defineAction({
     }
 
     const templateCostPaise =
-      conv.channel === "whatsapp" && matchedTemplate
-        ? matchedTemplate.category === "marketing"
-          ? 95
-          : 85
+      conv.channel === "whatsapp"
+        ? matchedTemplate
+          ? resolveWhatsAppTemplateUnitCostPaise(
+              ctx.workspaceId,
+              matchedTemplate.category,
+              "whatsapp.messaging"
+            )
+          : getWorkspaceWhatsAppMessagingRates(ctx.workspaceId).serviceReplyPaise
         : 0;
     if (templateCostPaise > 0 && !canDebitWalletUsage(getWalletBalancePaise(ctx.workspaceId), templateCostPaise)) {
       throw new RslError("RSL-BILL-1003");

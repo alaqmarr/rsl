@@ -16,28 +16,34 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 1,
     },
     {
-      url: `${appUrl}/legal`,
+      url: `${appUrl}/pricing`,
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.95,
+    },
+    {
+      url: `${appUrl}/register`,
       lastModified: now,
       changeFrequency: "monthly",
       priority: 0.9,
+    },
+    {
+      url: `${appUrl}/legal`,
+      lastModified: now,
+      changeFrequency: "monthly",
+      priority: 0.85,
     },
     ...legalDocs.map((doc) => ({
       url: `${appUrl}${doc.path}`,
       lastModified: now,
       changeFrequency: "monthly" as const,
-      priority: 0.8,
+      priority: 0.75,
     })),
-    {
-      url: `${appUrl}/register`,
-      lastModified: now,
-      changeFrequency: "monthly",
-      priority: 0.8,
-    },
     {
       url: `${appUrl}/login`,
       lastModified: now,
       changeFrequency: "monthly",
-      priority: 0.7,
+      priority: 0.5,
     },
   ];
 }

@@ -4,7 +4,7 @@ import { ShieldCheck } from "lucide-react";
 import { countPlatformStaff } from "@rsl/auth";
 import { resolveEndpointsFromHeaders } from "@rsl/core";
 import { getPlatformCloudflareTurnstileConfig } from "@rsl/tenancy";
-import { BrandLogo, FlashBanner, ThemeToggleButton } from "@rsl/ui";
+import { BrandLogo, FlashBanner } from "@rsl/ui";
 import { AdminLoginForm } from "@/components/admin-auth-forms";
 import { getOptionalStaffSession, isSetupSubdomainHost } from "@/lib/session";
 
@@ -42,7 +42,6 @@ export default async function AdminLoginPage({
                 <ShieldCheck className="h-3 w-3 text-indigo-600" />
                 <span>Staff Only</span>
               </span>
-              <ThemeToggleButton compact />
             </div>
           </div>
 

@@ -122,6 +122,7 @@ export interface ApiTokensHubProps {
     accountNumber: string;
     ifscCode: string;
   };
+  section?: "all" | "webhooks" | "api-keys";
 }
 
 const CHANNEL_KIND_LABELS: Record<ConnectionChannelKind, string> = {
@@ -168,7 +169,10 @@ export function ApiTokensHub({
   initialRevealedKey,
   lockedApiPlan,
   billingSettings,
+  section = "all",
 }: ApiTokensHubProps) {
+  const showWebhooksSection = section === "all" || section === "webhooks";
+  const showApiKeysSection = section === "all" || section === "api-keys";
   const router = useRouter();
 
   const [tallyToken, setTallyToken] = useState(initialTallyToken);
@@ -558,7 +562,9 @@ export function ApiTokensHub({
       </div>
 
       {/* SECTION 1: External Channel Access Tokens */}
-      <SectionCard
+      {showWebhooksSection && (
+        <>
+          <SectionCard
         title={`1. Connected Channel Sessions (${channels.length})`}
         subtitle="Encrypted 1-Click OAuth sessions for WhatsApp Business, Instagram, Facebook Pages, Meta Ads, and Google"
         action={
@@ -861,9 +867,11 @@ export function ApiTokensHub({
           </SectionCard>
         )}
       </div>
+        </>
+      )}
 
       {/* SECTION 3: Platform Developer REST API Keys & Outbound Signed Webhooks */}
-      {!hasApiEntitlement ? (
+      {showApiKeysSection && !hasApiEntitlement ? (
         <SectionCard
           title="4. Platform Developer REST API Keys (rsl_live_...) & Outbound Webhooks"
           subtitle="Issue scoped Bearer API keys for custom ERP, e-commerce, or CRM software and receive signed X-RSL-Signature webhooks"
@@ -909,9 +917,9 @@ export function ApiTokensHub({
             )}
           </div>
         </SectionCard>
-      ) : (
+      ) : hasApiEntitlement ? (
         <>
-          {revealedRawKey && (
+          {showApiKeysSection && revealedRawKey && (
             <div className="rounded-2xl border border-amber-300 bg-amber-50/90 p-4 text-[13px] text-amber-950 shadow-2xs">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="font-bold">
@@ -938,6 +946,7 @@ export function ApiTokensHub({
             </div>
           )}
 
+          {showApiKeysSection && (
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
             <SectionCard
               title="4. Issue Platform REST API Key"
@@ -1034,7 +1043,9 @@ export function ApiTokensHub({
               <ApiSandbox initialKey={revealedRawKey} />
             </SectionCard>
           </div>
+          )}
 
+          {showApiKeysSection && (
           <SectionCard
             title={`Active & Historical REST API Keys (${apiKeys.length})`}
             subtitle="Rotate compromised keys in 1 click or revoke immediately"
@@ -1144,7 +1155,10 @@ export function ApiTokensHub({
               </div>
             )}
           </SectionCard>
+          )}
 
+          {showWebhooksSection && (
+          <>
           <SectionCard
             title={`5. Outbound Signed Webhook Secrets (${outboundWebhooks.length})`}
             subtitle="Push real-time events to your server signed with HMAC-SHA256 (X-RSL-Signature)"
@@ -1368,8 +1382,10 @@ export function ApiTokensHub({
               </div>
             )}
           </SectionCard>
+          </>
+          )}
         </>
-      )}
+      ) : null}
     </div>
   );
 }
